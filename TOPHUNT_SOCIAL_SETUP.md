@@ -54,6 +54,8 @@ curl -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: a
 
 A `wrangler deploy` of the live repo will also try to re-add its crons and fail with the same limit error.
 
+Production domains (attached by the owner on 2026-10-29, moved off the live resources): `api.tophunt.in` → Worker `tophunt-social-api`, `tophunt.in` → Pages `tophunt-social`, `admin.tophunt.in` → Pages `tophunt-social-admin`, `media.tophunt.in` → R2 `tophunt-social-media`. Config, CSP and CORS now use these hosts; `tophunt-social.pages.dev` 301s to `tophunt.in`. `MEDIA_TRANSFORMATIONS` stays `"false"` until the `cf-resized` check in `wrangler.toml` passes on a real image in the new bucket.
+
 Secrets set on the Worker: `SETTINGS_ENCRYPTION_KEY`, `ADMIN_PROXY_SECRET` (both freshly generated, not shared with the live app), `R2_BUCKET`, `R2_ACCOUNT_ID`.
 
 Rate-limit namespace IDs were moved to `7401`/`7403` (prod) and `7402`/`7404` (staging) because `7301`-`7304` came from the live repo and namespace IDs are shared account-wide.
