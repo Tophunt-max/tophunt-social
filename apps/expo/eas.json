@@ -1,0 +1,38 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://localhost:8787",
+        "EXPO_PUBLIC_SHARE_ORIGIN": "http://localhost:8081",
+        "EXPO_PUBLIC_ENV": "development"
+      }
+    },
+    "preview": {
+      "channel": "preview",
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://tophunt-api-staging.weadown-in.workers.dev",
+        "EXPO_PUBLIC_SHARE_ORIGIN": "https://tophuntdpcontest-89t.pages.dev",
+        "EXPO_PUBLIC_ENV": "staging"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.tophunt.in",
+        "EXPO_PUBLIC_SHARE_ORIGIN": "https://tophunt.in",
+        "EXPO_PUBLIC_ENV": "production"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

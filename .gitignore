@@ -1,0 +1,74 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# ---------------------------------------------------------------------------
+# Secrets
+#
+# `.dev.vars` is how Wrangler loads local secrets, and it holds the Firebase
+# service account, R2 keys, Razorpay secrets and the settings encryption key.
+# It was only ignored by apps/worker/.gitignore, so a copy created anywhere else
+# in the monorepo was committable.
+# ---------------------------------------------------------------------------
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.local
+.env*.local
+
+# Google / Firebase service-account keys. A Firebase Admin key was committed
+# once (apps/admin/scripts/serviceAccountKey.json) and must never be again.
+serviceAccountKey*.json
+*service-account*.json
+*serviceAccount*.json
+*-adminsdk-*.json
+
+# Firebase / Google Cloud CLI debug logs. They can contain runtime config
+# values; a committed firebase-debug.log leaked AWS S3 keys.
+firebase-debug*.log
+firestore-debug*.log
+database-debug*.log
+ui-debug*.log
+pubsub-debug*.log
+*-debug.log
+
+# Wrangler build/state output
+.wrangler/
+
+# typescript
+*.tsbuildinfo
+
+app-example
+
+# generated native folders
+/ios
+/android

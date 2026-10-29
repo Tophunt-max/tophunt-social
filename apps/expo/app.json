@@ -1,0 +1,144 @@
+{
+  "expo": {
+    "name": "TopHunt",
+    "slug": "instagramdp-c67de8",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "tophunt",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "in.tophunt.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "TopHunt uses the camera so you can take a photo or video for a contest entry, a story, or your profile picture.",
+        "NSPhotoLibraryUsageDescription": "TopHunt needs access to your photos so you can choose an existing photo or video for a contest entry, a story, or your profile picture.",
+        "NSPhotoLibraryAddUsageDescription": "TopHunt saves a photo or video to your library when you download it.",
+        "NSMicrophoneUsageDescription": "TopHunt uses the microphone to record audio with your contest and story videos.",
+        "NSLocationWhenInUseUsageDescription": "TopHunt uses your location only to show contests and entries near you. You can decline and still use the app."
+      },
+      "associatedDomains": [
+        "applinks:tophunt.in"
+      ]
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#3B0A6E",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "in.tophunt.app",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.INTERNET",
+        "android.permission.VIBRATE"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "tophunt.in"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/3591f0e2-84b0-4099-87ed-af6e4a5894b3"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 420,
+          "resizeMode": "contain",
+          "backgroundColor": "#F9F9FB",
+          "dark": {
+            "backgroundColor": "#0F0F13"
+          }
+        }
+      ],
+      "expo-font",
+      "expo-audio",
+      "expo-video",
+      "expo-web-browser",
+      "expo-apple-authentication",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/android-icon-monochrome.png",
+          "color": "#FF4D67"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TopHunt needs access to your photos so you can choose an existing photo or video for a contest entry, a story, or your profile picture.",
+          "cameraPermission": "TopHunt uses the camera so you can take a photo or video for a contest entry, a story, or your profile picture."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "TopHunt uses the camera so you can take a photo or video for a contest entry, a story, or your profile picture.",
+          "microphonePermission": "TopHunt uses the microphone to record audio with your contest and story videos.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "TopHunt uses your location only to show contests and entries near you. You can decline and still use the app."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "3591f0e2-84b0-4099-87ed-af6e4a5894b3"
+      }
+    },
+    "owner": "bubun321uus-organization"
+  }
+}

@@ -1,0 +1,152 @@
+name: CI
+
+# Production gate. All three apps block merges on any type, test or build
+# regression. The worker type-checks fully; the Expo app type-checks our own code
+# (a few third-party packages ship React-19-incompatible source that we can't
+# fix, so scripts/typecheck.mjs ignores node_modules errors only).
+#
+# Each job also BUILDS. Typecheck and tests cannot catch bundler-only failures —
+# a bad import path, a missing asset, or a Babel plugin-ordering problem all pass
+# tsc and vitest while breaking the actual build.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to the same PR makes the previous run irrelevant.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    name: Worker (typecheck + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/worker
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The migration immutability check diffs against the base branch, which
+          # needs more than a shallow clone.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/worker/package-lock.json
+      - run: npm ci
+      # Migrations are applied automatically at runtime and recorded by filename,
+      # so editing one that production has already run changes nothing in
+      # production and everything on a fresh database. This blocks that, plus
+      # duplicate numbering and the SQL shapes the runtime splitter mangles.
+      - name: Check migrations are append-only and splitter-safe
+        run: node scripts/check-migrations.mjs --base origin/${{ github.base_ref || 'main' }}
+      - run: npm run typecheck
+      - run: npm test
+      # Catches bundling/config errors (wrangler.toml, migration text rules)
+      # without touching the deployed Worker.
+      - run: npx wrangler deploy --dry-run --outdir=/tmp/worker-build
+      # Export a migrated local D1 and restore it into an empty one (local only,
+      # no Cloudflare account): a schema change that breaks the restore path in
+      # docs/RUNBOOK.md §5 fails here, not during an incident.
+      - name: Backup/restore drill (local D1)
+        run: bash scripts/restore-drill.sh
+
+  expo:
+    name: Expo (lint + typecheck + tests + web build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/expo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/expo/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      # Gates on OUR app code being type-clean; ignores unfixable third-party
+      # node_modules type errors (see scripts/typecheck.mjs).
+      - run: npm run typecheck
+      # Keeps every arrow/chevron routed through src/components/ui/ArrowIcon so
+      # the app cannot drift back to a mix of Ionicons and raw SVG imports.
+      - run: npm run check:icons
+      - run: npm test
+      # A duplicate `const` in app/story/view/[userId].tsx once reached main
+      # because nothing in CI bundled. This step is that missing gate.
+      # `npm run build`, not a bare `expo export`. The export alone produces a
+      # deployable site, so a bare export passes while skipping
+      # scripts/verify-web-build.mjs — which is what asserts the SEO edge Worker
+      # is in the output and that the two copies of the CSP agree. CI ran the bare
+      # export, so it never checked either, and the SEO layer was missing from
+      # production without a single failing job.
+      - run: npm run build
+
+  admin-panel:
+    name: Admin panel (typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/admin-panel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/admin-panel/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # This repo handles payment, SMS and Firebase credentials, and admins can
+      # now paste credentials into the admin panel. A committed key is the one
+      # mistake that cannot be undone by a revert, so it is worth a gate.
+      #
+      # Known false positives are pinned by exact regex in .gitleaks.toml rather
+      # than by excluding files or rules — a permanently-red secret scan teaches
+      # everyone to ignore it, which is worse than not having one.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The action's PR comment needs `pull-requests: write`. The findings are
+          # already in the job summary and the SARIF artifact, so read-only
+          # permissions plus no comment is the smaller blast radius.
+          GITLEAKS_ENABLE_COMMENTS: false
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every app rather than stopping at the first one with a finding.
+      fail-fast: false
+      matrix:
+        app: [worker, expo, admin-panel]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Advisory, not blocking: a transitive high-severity advisory with no fix
+      # available should not stop an unrelated bug fix from shipping. It DOES make
+      # the finding visible on every PR instead of never.
+      - name: npm audit (${{ matrix.app }})
+        continue-on-error: true
+        working-directory: apps/${{ matrix.app }}
+        run: npm audit --audit-level=high

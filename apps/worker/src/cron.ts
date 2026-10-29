@@ -1,0 +1,988 @@
+/**
+ * Scheduled tasks — port of apps/functions/src/contests/cron.ts and
+ * scheduled/index.ts. Wired to Cron Triggers in wrangler.toml:
+ *   every 10 minutes -> resolveContests + expired story cleanup
+ *   monthly (1st)    -> monthlyHallOfFame
+ *
+ * Firestore triggers had no equivalent here; the notification side effects that
+ * used to fire from onDocument triggers are emitted explicitly via createNotification.
+ */
+import { and, eq, lte, gt, desc, sql, asc, isNull, isNotNull, inArray, ne, or } from "drizzle-orm";
+import type { Env } from "./types";
+import { getDb, schema } from "./db";
+import { invalidateContestCaches } from "./lib/edgeCache";
+import { createNotification, createNotificationsBulk } from "./lib/notify";
+import { sendUserEmail } from "./lib/email";
+import { contestWinEmail, contestRefundEmail, prizeClaimEmail } from "./lib/emailTemplates";
+import { drainBroadcastJobs, enqueueBroadcast } from "./lib/broadcast";
+import { finalizeVotes } from "./lib/voteCounter";
+import { settleRefund, settleWinner } from "./lib/contestSettlement";
+import { getProgression } from "./lib/progression";
+import { xpAwardStatements } from "./lib/xpService";
+import { flagSameDeviceMatch, syncProgressionSafe } from "./lib/achievements";
+import { matchPot, matchPrizeCeiling, perPlayerEntryFee } from "./lib/money";
+import { normalizePrizeType, resolveMatchPrize, type PrizeFields } from "./lib/prizes";
+import { deleteMediaByUrl } from "./lib/mediaDelete";
+import { vsImageKeyFromPublicUrl } from "./lib/r2";
+import { sweepVsComposites } from "./lib/matchStories";
+import { reconcileVsPublications } from "./lib/vsPublication";
+import { reconcileReferrals } from "./lib/referralProgram";
+import { newId, now } from "./lib/ids";
+import { getSettings as getGamification } from "./lib/gamification";
+import { runSeoAudit } from "./lib/seoAudit";
+import { getSeoAudit, invalidateSetting } from "./lib/settings";
+import { publish } from "./lib/publish";
+
+export type Match = typeof schema.contestMatches.$inferSelect;
+
+async function publishMatchStatus(
+  env: Env,
+  matchId: string,
+  status: "completed" | "cancelled",
+  votesA: number,
+  votesB: number,
+  winnerUid: string | null = null,
+): Promise<void> {
+  await publish(env, `match:${matchId}`, {
+    type: "match_status",
+    status,
+    votesA,
+    votesB,
+    totalVotes: votesA + votesB,
+    // Lets a live feed card flip to its winner/result view without a refetch.
+    winnerUid,
+  });
+}
+
+export async function resolveMatch(env: Env, match: Match): Promise<void> {
+  const db = getDb(env);
+  const userA = match.userA as any;
+  const userB = match.userB as any;
+  if (!userA || !userB) return;
+
+  // The prize is whatever was SNAPSHOTTED on the match when it was created.
+  // Re-reading the live contest template here is what let an admin edit change
+  // the payout of a match that was already in flight.
+  //
+  // `matchPot` is a hard ceiling regardless of source: a prize can never exceed
+  // the coins the two players actually funded, so settlement cannot mint coins
+  // even if a legacy template row still holds an over-funded reward.
+  const pot = matchPot(match.entryFee);
+  // A promo subsidy reserved at creation (lib/promoBudget.ts) raises the
+  // ceiling by exactly what was set aside for this match, never more.
+  let rewardAmount = match.prizeCoins == null ? null : Math.min(Number(match.prizeCoins), matchPrizeCeiling(match.entryFee, match.subsidyCoins));
+  let minVotes = match.minVotesRequired == null
+    ? null
+    : Math.max(0, Number(match.minVotesRequired));
+  // The PRODUCT half of the same snapshot. `prizeType` being null is what marks a
+  // row written before migration 0042, and it is the only reason to fall back to
+  // the template — identical to how `prizeCoins` degrades above.
+  let template: PrizeFields | null = null;
+  const needsPrizeTemplate = match.prizeType == null;
+  if (match.contestId && (rewardAmount == null || minVotes == null || needsPrizeTemplate)) {
+    const contest = await db
+      .select({
+        reward: schema.contests.rewardCoins,
+        minVotes: schema.contests.minVotes,
+        prizeType: schema.contests.prizeType,
+        prizeProductTitle: schema.contests.prizeProductTitle,
+        prizeProductImageUrl: schema.contests.prizeProductImageUrl,
+        prizeProductValue: schema.contests.prizeProductValue,
+      })
+      .from(schema.contests)
+      .where(eq(schema.contests.id, match.contestId))
+      .get();
+    template = contest ?? null;
+    if (needsPrizeTemplate && contest) {
+      // Persist the snapshot so this match settles deterministically from now on,
+      // and so an admin editing the template afterwards cannot change what is owed.
+      // Gated on the resolved TYPE, matching `startMatch`. A contest switched back
+      // to coins can still carry stale product columns, and copying them onto a
+      // `coins` match would leave a row that claims to owe a product nobody is
+      // going to be given. Nothing reads them today because every consumer branches
+      // on the type first — which is exactly why the two writers of this one
+      // snapshot must not be allowed to drift.
+      const snapshotType = normalizePrizeType(contest.prizeType);
+      const snapshotIsProduct = snapshotType === "product";
+      await db.update(schema.contestMatches)
+        .set({
+          prizeType: snapshotType,
+          prizeProductTitle: snapshotIsProduct ? contest.prizeProductTitle ?? null : null,
+          prizeProductImageUrl: snapshotIsProduct ? contest.prizeProductImageUrl ?? null : null,
+          prizeProductValue: snapshotIsProduct ? contest.prizeProductValue ?? null : null,
+        })
+        .where(and(
+          eq(schema.contestMatches.id, match.id),
+          isNull(schema.contestMatches.prizeType),
+        ));
+    }
+    if (rewardAmount == null) {
+      // Legacy match with no snapshot: derive it once, clamp it to the pot, and
+      // persist it so this match settles deterministically from now on.
+      rewardAmount = Math.min(Number(contest?.reward ?? pot), pot);
+      await db.update(schema.contestMatches)
+        .set({ prizeCoins: rewardAmount })
+        .where(and(
+          eq(schema.contestMatches.id, match.id),
+          isNull(schema.contestMatches.prizeCoins),
+        ));
+    }
+    if (minVotes == null) {
+      if (!contest) {
+        throw new Error(`Match ${match.id} has no min-vote snapshot and its template is missing.`);
+      }
+      minVotes = Math.max(0, Number(contest.minVotes || 0));
+      await db.update(schema.contestMatches)
+        .set({ minVotesRequired: minVotes })
+        .where(and(
+          eq(schema.contestMatches.id, match.id),
+          isNull(schema.contestMatches.minVotesRequired),
+        ));
+    }
+  }
+  if (minVotes == null) {
+    throw new Error(`Match ${match.id} has no immutable minimum-vote policy snapshot.`);
+  }
+  if (rewardAmount == null) {
+    // No snapshot and no template (standalone match): the pot is the prize.
+    rewardAmount = pot;
+  }
+
+  // Finalization is deliberately fail-closed. The per-match actor closes first,
+  // flushes every accepted vote, and only then returns the authoritative tally.
+  // If that fails, throw so this match remains active and is retried next cron;
+  // never make an irreversible payout from a stale D1 snapshot.
+  const expiresAt = Number(match.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+    throw new Error(`Match ${match.id} has no valid voting deadline.`);
+  }
+  const finalTally = await finalizeVotes(env, match.id, userA.uid, userB.uid, expiresAt);
+  const votesA = finalTally.votesA;
+  const votesB = finalTally.votesB;
+  const totalVotes = finalTally.total;
+
+  // Anti-collusion: if BOTH participants entered from the same device, the
+  // match is void — refund both entry fees and pay NO reward. This closes the
+  // self-match exploit (create + join from one phone to farm rewardCoins).
+  if (userA.deviceId && userB.deviceId && String(userA.deviceId) === String(userB.deviceId)) {
+    const ts = now();
+    const settled = await settleRefund(env, {
+      matchId: match.id,
+      contestId: match.contestId,
+      expectedStatus: "active",
+      finalStatus: "cancelled",
+      participantUids: [userA.uid, userB.uid],
+      refundPerUser: perPlayerEntryFee(match.entryFee),
+      description: "Match voided (same-device entries)",
+      completedAt: ts,
+    });
+    if (!settled) return;
+    await publishMatchStatus(env, match.id, "cancelled", votesA, votesB);
+    console.warn("[resolveMatch] voided same-device match", match.id, userA.uid, userB.uid);
+    // A review flag for staff (lib/achievements.ts). Never an automatic penalty:
+    // a shared family phone looks the same as two accounts on one device.
+    await flagSameDeviceMatch(env, match.id, [userA.uid, userB.uid]);
+    return;
+  }
+
+  // A contest is only eligible for a winner when its configured participation
+  // threshold is reached. Insufficient-vote matches are void and both entrants
+  // get their entry fee back; no winner reward or win stats are awarded.
+  if (totalVotes < minVotes) {
+    const ts = now();
+    const settled = await settleRefund(env, {
+      matchId: match.id,
+      contestId: match.contestId,
+      expectedStatus: "active",
+      finalStatus: "cancelled",
+      participantUids: [userA.uid, userB.uid],
+      refundPerUser: perPlayerEntryFee(match.entryFee),
+      description: `Refund: minimum ${minVotes} votes not reached`,
+      completedAt: ts,
+    });
+    if (!settled) return;
+    await publishMatchStatus(env, match.id, "cancelled", votesA, votesB);
+    const message = `The battle ended with ${totalVotes} of ${minVotes} required votes. Entry fee Diamond were refunded.`;
+    // Same actor-less message to both sides: one batched write (lib/notify.ts).
+    await createNotificationsBulk(env, [userA.uid, userB.uid], { title: "Battle Voided", body: message, type: "contest-refund", targetId: "wallet" });
+    // Entry fees moved back — receipt to both. Awaited (no request to outlive in
+    // cron) and best-effort, so a mail blip never stalls settlement.
+    const voidReason = `it did not reach the minimum ${minVotes} votes`;
+    await sendUserEmail(env, userA.uid, contestRefundEmail(match.title, voidReason));
+    await sendUserEmail(env, userB.uid, contestRefundEmail(match.title, voidReason));
+    return;
+  }
+
+  // Tie -> refund both. Atomically claim the match (active -> completed) FIRST
+  // so an overlapping/duplicate cron run can't refund twice.
+  if (votesA === votesB) {
+    const ts = now();
+    const settled = await settleRefund(env, {
+      matchId: match.id,
+      contestId: match.contestId,
+      expectedStatus: "active",
+      finalStatus: "completed",
+      participantUids: [userA.uid, userB.uid],
+      refundPerUser: perPlayerEntryFee(match.entryFee),
+      description: "Match tied; entry fee refunded",
+      completedAt: ts,
+    });
+    if (!settled) return;
+    await publishMatchStatus(env, match.id, "completed", votesA, votesB);
+    await createNotificationsBulk(env, [userA.uid, userB.uid], { title: "It's a Tie!", body: "The match ended in a tie. Entry fee Diamond refunded.", type: "contest-tie", targetId: "wallet" });
+    await sendUserEmail(env, userA.uid, contestRefundEmail(match.title, "it ended in a tie"));
+    await sendUserEmail(env, userB.uid, contestRefundEmail(match.title, "it ended in a tie"));
+    return;
+  }
+
+  const winnerUid = votesA > votesB ? userA.uid : userB.uid;
+  const loserUid = votesA > votesB ? userB.uid : userA.uid;
+  const ts = now();
+
+  // Coins or a product, never both. `resolveMatchPrize` prefers the match's own
+  // snapshot and only consults the template for a pre-0042 row.
+  const prize = resolveMatchPrize(match, template, rewardAmount);
+
+  const settled = await settleWinner(env, {
+    matchId: match.id,
+    contestId: match.contestId,
+    expectedStatus: "active",
+    winnerUid,
+    loserUid,
+    rewardAmount: prize.coins,
+    description: prize.product
+      ? `Prize won: ${prize.product.title} — "${match.title}"`
+      : `Victory reward for "${match.title}"`,
+    completedAt: ts,
+    productPrize: prize.product,
+  });
+  if (!settled) return;
+
+  await publishMatchStatus(env, match.id, "completed", votesA, votesB, winnerUid);
+  // Win/loss XP just landed: level-ups and achievements (lib/achievements.ts).
+  await syncProgressionSafe(env, winnerUid);
+  await syncProgressionSafe(env, loserUid);
+  if (prize.product) {
+    // A product is not delivered by winning — it has to be claimed, and the claim
+    // needs an address. So the notification's job is to get the winner to that
+    // form, and `targetId` points at the claim rather than the battle.
+    await createNotification(env, winnerUid, {
+      title: "You Won a Prize! 🎁",
+      body: `You won ${prize.product.title} in "${match.title}". Add your delivery details to claim it.`,
+      type: "prize-claim",
+      targetId: `prize:${match.id}`,
+    });
+  } else {
+    await createNotification(env, winnerUid, { title: "You Won! 🏆", body: `Victory! You won the battle "${match.title}" and earned ${prize.coins} DP coin!`, type: "contest-win", targetId: match.id });
+  }
+  await createNotification(env, loserUid, { title: "Battle Ended", body: `The battle "${match.title}" has concluded. You played well!`, type: "contest-loss", targetId: match.id });
+  // Prize awarded to the winner — send a receipt. No "you lost" email.
+  await sendUserEmail(
+    env,
+    winnerUid,
+    prize.product
+      ? prizeClaimEmail(match.title, prize.product.title)
+      : contestWinEmail(match.title, prize.coins),
+  );
+}
+
+async function refundWaitingMatch(env: Env, match: Match): Promise<void> {
+  const userA = match.userA as any;
+  const refund = perPlayerEntryFee(match.entryFee);
+  const ts = now();
+  const settled = await settleRefund(env, {
+    matchId: match.id,
+    contestId: match.contestId,
+    expectedStatus: "waiting_for_opponent",
+    finalStatus: "cancelled",
+    participantUids: userA?.uid ? [userA.uid] : [],
+    refundPerUser: refund,
+    description: "No opponent joined before the waiting deadline",
+    completedAt: ts,
+  });
+  if (!settled) return;
+  if (refund > 0 && userA?.uid) {
+    await createNotification(env, userA.uid, { title: "Contest Refunded", body: `No opponent joined your "${match.title}" contest. ${refund} Diamond have been returned.`, type: "contest-refund", targetId: "wallet" });
+  }
+}
+
+/** Every-10-min cron: resolve expired matches, refund unmatched, notify ending-soon, cleanup stories. */
+/** Expired personal stories whose media is deleted (and row removed) per 10-minute tick. */
+export const EXPIRED_STORY_BATCH = 500;
+/** After this long past expiry, a story whose media delete keeps failing is dropped anyway. */
+export const STORY_MEDIA_GIVE_UP_MS = 7 * 24 * 60 * 60 * 1000;
+
+export async function resolveContests(env: Env): Promise<void> {
+  const db = getDb(env);
+  const nowMs = now();
+
+  // Drain the backlog in pages so a burst of matches expiring at once is fully
+  // resolved in this run instead of trickling 50 per 10-min tick (which would
+  // delay payouts/refunds for hours). resolveMatch/refund flip the row out of
+  // its status, so each page naturally advances without an offset. A safety cap
+  // bounds worst-case cron time.
+  const PAGE = 50;
+  const MAX_PAGES = 20; // up to 1000 matches per category per run
+
+  let lastActiveId: string | null = null;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const activeConditions = [
+      eq(schema.contestMatches.status, "active"),
+      lte(schema.contestMatches.expiresAt, nowMs),
+    ];
+    if (lastActiveId) activeConditions.push(gt(schema.contestMatches.id, lastActiveId));
+    const active = await db.select().from(schema.contestMatches)
+      .where(and(...activeConditions))
+      .orderBy(asc(schema.contestMatches.id))
+      .limit(PAGE).all();
+    for (const m of active) {
+      try {
+        await resolveMatch(env, m);
+      } catch (e) {
+        // Keep this row active for the next cron retry, but do not let one
+        // temporarily unavailable actor block settlement of every other match.
+        console.error("[resolveContests] match settlement deferred", m.id, e);
+      }
+    }
+    if (active.length > 0) lastActiveId = active[active.length - 1].id;
+    if (active.length < PAGE) break;
+  }
+
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const waiting = await db.select().from(schema.contestMatches)
+      .where(and(eq(schema.contestMatches.status, "waiting_for_opponent"), lte(schema.contestMatches.expiresAt, nowMs)))
+      .limit(PAGE).all();
+    for (const m of waiting) {
+      try {
+        await refundWaitingMatch(env, m);
+      } catch (e) {
+        // One bad row must not abort the whole waiting-match refund sweep — the
+        // active loop above already had this guard; this one did not.
+        console.error("[resolveContests] waiting-match refund deferred", m.id, e);
+      }
+    }
+    if (waiting.length < PAGE) break;
+  }
+
+  // ending soon (< 60 min), not yet notified
+  const soon = await db.select().from(schema.contestMatches)
+    .where(and(
+      eq(schema.contestMatches.status, "active"),
+      gt(schema.contestMatches.expiresAt, nowMs),
+      lte(schema.contestMatches.expiresAt, nowMs + 60 * 60 * 1000),
+      eq(schema.contestMatches.endingSoonNotified, false),
+    ))
+    .limit(50).all();
+  // CLAIM first, in one statement, then notify. The old loop notified and then
+  // flagged each match with its own UPDATE (one round trip per match), and an
+  // overlapping tick could notify the same match twice. `ending_soon_notified = 0`
+  // in the WHERE makes the claim atomic; only rows this tick flipped are notified.
+  // A crash after the claim skips a reminder rather than duplicating it — the right
+  // trade for a nudge.
+  if (soon.length) {
+    const claimed = new Set<string>();
+    for (let i = 0; i < soon.length; i += 90) {
+      const ids = soon.slice(i, i + 90).map((m) => m.id);
+      const res = await env.DB.prepare(
+        `UPDATE contest_matches SET ending_soon_notified = 1 WHERE ending_soon_notified = 0 AND id IN (${ids.map(() => "?").join(",")}) RETURNING id`,
+      )
+        .bind(...ids)
+        .all<{ id: string }>();
+      for (const r of res.results ?? []) claimed.add(r.id);
+    }
+    for (const m of soon) {
+      if (!claimed.has(m.id)) continue;
+      const userA = m.userA as any;
+      const userB = m.userB as any;
+      const msg = `⏳ Hurry! The battle "${m.title || "Match"}" ends in less than an hour. Get more votes!`;
+      const participants = [userA?.uid, userB?.uid].filter(Boolean) as string[];
+      await createNotificationsBulk(env, participants, {
+        title: "Battle Ending Soon!", body: msg, type: "contest-ending", targetId: m.id,
+      });
+      // People who SAVED the battle get a "last chance to vote" nudge, under the
+      // same once-per-battle claim (idx_bookmarks_match, migration 0067). Capped:
+      // a nudge, not a broadcast. A failure here never blocks the next battle.
+      try {
+        const savers = await db
+          .select({ uid: schema.bookmarks.userId })
+          .from(schema.bookmarks)
+          .where(eq(schema.bookmarks.matchId, m.id))
+          .limit(1000)
+          .all();
+        const recipients = savers.map((s) => s.uid).filter((u) => !participants.includes(u));
+        if (recipients.length) {
+          await createNotificationsBulk(env, recipients, {
+            title: "Last chance to vote ⏳",
+            body: `"${m.title || "A battle"}" you saved ends in less than an hour. Cast your vote now!`,
+            type: "contest-ending",
+            targetId: m.id,
+          });
+        }
+      } catch (e) {
+        console.error("[cron] saver reminder failed (continuing)", m.id, e);
+      }
+    }
+  }
+
+  // expired story cleanup — also delete the R2 media of expired PERSONAL
+  // ("user") stories so R2 storage doesn't grow forever. Contest stories
+  // (contest_announcement / contest_vs) carry each participant's OWN entry as
+  // their media, so we must NOT delete their objects here — doing so would blank
+  // out the battle itself. R2 DELETE ops are free.
+  //
+  // Bounded at EXPIRED_STORY_BATCH per tick, and the row delete below is bounded to
+  // exactly the rows whose media was handled here. It used to delete EVERY expired
+  // story after cleaning only the first 500, so on a busy day the rest lost their
+  // row — the only pointer to their R2 objects — and leaked storage forever.
+  // Leftovers now wait for the next 10-minute tick with their row intact.
+  //
+  // A row is removed only once its media delete SUCCEEDED (or there was nothing to
+  // delete). A provider outage keeps the row — the only pointer to the object — for
+  // the next tick. Oldest first, so a row whose media can never be deleted cannot
+  // pin the head of the batch: past STORY_MEDIA_GIVE_UP_MS it is dropped anyway and
+  // logged as a leak.
+  const expiredUserStories = await db
+    .select({ id: schema.stories.id, userId: schema.stories.userId, mediaUrl: schema.stories.mediaUrl, expiresAt: schema.stories.expiresAt })
+    .from(schema.stories)
+    .where(and(lte(schema.stories.expiresAt, nowMs), eq(schema.stories.type, "user")))
+    .orderBy(asc(schema.stories.expiresAt))
+    .limit(EXPIRED_STORY_BATCH)
+    .all();
+  const handledIds: string[] = [];
+  for (const s of expiredUserStories) {
+    // Provider-aware: an encoded story video is a whole `videos/<id>/` folder,
+    // and stories expire every 24h, so a single-key delete would leak one per story.
+    // Never a battle card, even if a personal story named one: that object is
+    // owned by its match and may still back another participant's live story.
+    if (!s.mediaUrl || vsImageKeyFromPublicUrl(env, s.mediaUrl)) {
+      handledIds.push(s.id);
+      continue;
+    }
+    try {
+      // On behalf of the story's author only: a repost names someone else's
+      // media, and expiring the repost must not delete the original.
+      await deleteMediaByUrl(env, s.mediaUrl, s.userId);
+      handledIds.push(s.id);
+    } catch (e) {
+      if (Number(s.expiresAt) < nowMs - STORY_MEDIA_GIVE_UP_MS) {
+        console.error("[cron] story media delete kept failing; dropping row (object leaked)", s.id, e);
+        handledIds.push(s.id);
+      } else {
+        console.error("[cron] story media delete failed; row kept for retry", s.id, e);
+      }
+    }
+  }
+
+  // The shared VS composite: deleted only once NO live story of its battle still
+  // references it (one participant deleting or outliving the other must not
+  // blank the survivor). The match row and both entries are kept — match history
+  // outlives its stories. See lib/matchStories.ts#sweepVsComposites.
+  await sweepVsComposites(env, nowMs);
+
+  // Personal stories: only the rows whose media was just deleted (chunked to stay
+  // under D1's bound-parameter limit). Contest stories own no media of their own
+  // (see above), so every expired one can go.
+  for (let i = 0; i < handledIds.length; i += 90) {
+    await db.delete(schema.stories).where(inArray(schema.stories.id, handledIds.slice(i, i + 90)));
+  }
+  await db
+    .delete(schema.stories)
+    .where(
+      and(
+        lte(schema.stories.expiresAt, nowMs),
+        or(isNull(schema.stories.type), ne(schema.stories.type, "user")),
+      ),
+    );
+
+  // due scheduled/segmented broadcasts
+  await processScheduledNotifications(env);
+
+  // Drive VS Story publications the join-time kick did not finish (transient
+  // render/R2 failures, expired leases, videos that became ready). After the
+  // time-sensitive notifications, and bounded per tick, because each one may wait
+  // on a render; failures are recorded on the match, never thrown into this
+  // schedule.
+  await reconcileVsPublications(env, { limit: 5 }).catch((e) =>
+    console.error("[cron] VS publication reconcile failed (continuing)", e),
+  );
+
+  // Referrals: expire the ones that never qualified, and pay any whose payout
+  // was interrupted (lib/referralProgram.ts — every step idempotent).
+  await reconcileReferrals(env).catch((e) => console.error("[cron] referral reconcile failed (continuing)", e));
+
+  // Advance any in-flight broadcast by one page. Deliberately last, and one page
+  // per tick, so a large broadcast can never starve the rest of this schedule.
+  await drainBroadcastJobs(env).catch((e) =>
+    console.error("[cron] broadcast drain failed", e),
+  );
+}
+
+/**
+ * Close contest templates whose validity window has run out.
+ *
+ * `GET /read/contests` already hides an expired template, so this is not what
+ * stops users joining — it is what keeps `status` honest. Without it the admin
+ * panel would list a contest as "Live" forever after it stopped being offered,
+ * which is the kind of drift that makes an operator distrust the whole screen.
+ *
+ * Deliberately refuses to end a contest that still has a waiting match, for the
+ * same reason `PATCH /admin/contests/:id` refuses: that match's creator has
+ * already paid, and its contest row is where the settlement terms live.
+ *
+ * That deferral is bounded, and only because the window is enforced on the WRITE
+ * path too (`assertContestOpenNow` in startMatch/joinMatch): no new waiting
+ * match can be created against an expired contest, so the set this is waiting on
+ * can only shrink. Each member drains on its own clock — `autoCancelHours`,
+ * capped at 168h by validation — and is refunded, after which a later tick ends
+ * the contest. Were the window only a read-side filter, every late entry would
+ * re-arm this and the sweep could defer indefinitely.
+ */
+export async function expireContests(env: Env): Promise<{ ended: number; deferred: number; failed: number }> {
+  const db = getDb(env);
+  const nowMs = now();
+
+  // `ends_at <= now` never matches a NULL, so unbounded contests are excluded by
+  // SQL's own NULL semantics; isNotNull is here to say so out loud.
+  const due = await db
+    .select({ id: schema.contests.id })
+    .from(schema.contests)
+    .where(and(
+      eq(schema.contests.status, "live"),
+      isNotNull(schema.contests.endsAt),
+      lte(schema.contests.endsAt, nowMs),
+    ))
+    .limit(200)
+    .all();
+
+  const endedIds: string[] = [];
+  // Tracked apart from `deferred` so the cron_runs detail can distinguish "this
+  // contest is legitimately waiting on a match" from "the write failed". Rolled
+  // into one number, a persistently failing UPDATE looks exactly like normal
+  // operation.
+  let failed = 0;
+  for (const row of due) {
+    // Re-check status and the waiting-match guard inside the UPDATE so an admin
+    // editing the same contest in this window cannot be silently overwritten.
+    const res = await db
+      .update(schema.contests)
+      .set({ status: "ended" })
+      .where(and(
+        eq(schema.contests.id, row.id),
+        eq(schema.contests.status, "live"),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${schema.contestMatches}
+          WHERE ${schema.contestMatches.contestId} = ${row.id}
+            AND ${schema.contestMatches.status} = 'waiting_for_opponent'
+        )`,
+      ))
+      .run()
+      .catch((e) => {
+        console.error("[cron] expireContests update failed (continuing)", row.id, e);
+        failed += 1;
+        return null;
+      });
+    if (res?.meta.changes) endedIds.push(row.id);
+  }
+
+  // One invalidation for the whole batch, including each contest's DETAIL key —
+  // GET /read/contests/:id does not filter by status, so without this a closed
+  // contest keeps reporting itself as live for up to the 60s cache TTL.
+  if (endedIds.length > 0) await invalidateContestCaches(env, endedIds);
+
+  return { ended: endedIds.length, deferred: due.length - endedIds.length - failed, failed };
+}
+
+/** Send any pending scheduled notifications whose send_at has passed. */
+export async function processScheduledNotifications(env: Env): Promise<void> {
+  const db = getDb(env);
+  const due = await db
+    .select()
+    .from(schema.scheduledNotifications)
+    .where(and(eq(schema.scheduledNotifications.status, "pending"), lte(schema.scheduledNotifications.sendAt, now())))
+    .limit(20)
+    .all();
+  for (const n of due) {
+    // Claim atomically so overlapping cron runs don't double-send.
+    const claim = await db
+      .update(schema.scheduledNotifications)
+      .set({ status: "sent", sentAt: now() })
+      .where(and(eq(schema.scheduledNotifications.id, n.id), eq(schema.scheduledNotifications.status, "pending")))
+      .run();
+    if (claim.meta.changes === 0) continue;
+    try {
+      // Hand off to the resumable broadcast job rather than fanning out here:
+      // this cron has other work to do and cannot afford a full table walk.
+      const { estimatedRecipients } = await enqueueBroadcast(env, {
+        title: n.title,
+        body: n.body,
+        image: n.image || undefined,
+        segment: (n.segment as any) || undefined,
+      });
+      await db
+        .update(schema.scheduledNotifications)
+        .set({ recipients: estimatedRecipients })
+        .where(eq(schema.scheduledNotifications.id, n.id));
+    } catch (e) {
+      console.error("[cron] scheduled notification failed", n.id, e);
+    }
+  }
+}
+
+/** `YYYY-MM` of the month that has just ended (the one being settled). */
+export function previousMonthPeriod(at: number = Date.now()): string {
+  const d = new Date(at);
+  // Day 0 of the current month is the last day of the previous month.
+  const prev = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0));
+  return `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+// Coins for ranks 1..3 come from the gamification settings (`hallOfFameRewards`,
+// default [1000, 500, 250]), editable in the admin Coin Economy → Earn tab. The
+// amount is persisted per winner in `hall_of_fame_awards` when a period is first
+// settled, so changing it never alters a payout already owed.
+/** Badge granted for ranks 1..3. Indexed by rank - 1. */
+const HALL_OF_FAME_BADGES = ["Gold Hall of Fame", "Silver Hall of Fame", "Bronze Hall of Fame"];
+
+/** Deterministic ledger id for a period's payout. Unique per (period, uid). */
+const hallOfFameLedgerId = (period: string, uid: string) => `hall_of_fame:${period}:${uid}`;
+
+/** One winner of a settled period, as stored in `hall_of_fame_awards`. */
+interface HallOfFameWinner {
+  uid: string;
+  rank: number;
+  reward: number;
+  wins: number;
+}
+
+/**
+ * Monthly cron: top-3 by monthlyWins get coins/xp/badge, then reset monthlyWins.
+ *
+ * Exactly-once per (period, uid), and safe to re-run at ANY later date. Three
+ * independent guards, because the failure mode is minting coins:
+ *
+ *  1. THE WINNER SET IS PERSISTED, NOT RE-DERIVED. The first settlement of a
+ *     period writes `hall_of_fame_awards`; every later run replays those rows.
+ *     Deriving live from `users.monthly_wins` was wrong for a re-run because the
+ *     run itself resets that counter: re-running a past month paid whoever led
+ *     the CURRENT month and then wiped the in-progress leaderboard. Periods
+ *     settled before that table existed are detected by their ledger ids instead.
+ *
+ *  2. THE CREDIT IS GATED ON ITS LEDGER ROW NOT EXISTING. The ledger insert is
+ *     `INSERT OR IGNORE` on a deterministic id, so on a replay it is ignored —
+ *     which means it cannot be the thing that stops the balance moving. It used
+ *     to be gated only on the `idempotency_keys` claim, and the retention sweep
+ *     deleted those after seven days (see PRUNABLE_CLAIM_SCOPES), so a re-run
+ *     past the window credited coins with no ledger row: exactly the drift
+ *     lib/moneyHealth.ts alarms on. This gate needs no retention to hold.
+ *
+ *  3. THE CLAIM STILL SERIALISES CONCURRENT RUNS. Two simultaneous triggers in
+ *     the same millisecond are separated by the nonce, as before.
+ *
+ * `monthly_wins` is only reset on a FIRST settlement (never on a replay), and
+ * only once every winner has actually been paid — so a failure cannot erase the
+ * leaderboard it was settling, and a replay cannot erase the current month.
+ */
+export async function monthlyHallOfFame(env: Env, period = previousMonthPeriod()): Promise<{
+  period: string;
+  paid: number;
+  skipped: number;
+  reset: boolean;
+  /** True when this run replayed an already-settled period instead of deriving one. */
+  replayed: boolean;
+}> {
+  const db = getDb(env);
+
+  const { winners, derived } = await resolveHallOfFameWinners(env, db, period);
+  if (winners.length === 0) {
+    // Either nobody won anything this month, or the period was settled before
+    // `hall_of_fame_awards` existed and its ledger rows prove it. Both are no-ops.
+    return { period, paid: 0, skipped: 0, reset: false, replayed: !derived };
+  }
+
+  let paid = 0;
+  let skipped = 0;
+  const failures: string[] = [];
+  const progression = await getProgression(env);
+
+  for (const winner of winners) {
+    const { uid, rank, reward } = winner;
+    const badge = HALL_OF_FAME_BADGES[rank - 1] ?? HALL_OF_FAME_BADGES[2];
+    const ts = now();
+    const claimKey = `hall_of_fame:${period}:${rank}:${uid}`;
+    const ledgerId = hallOfFameLedgerId(period, uid);
+    const nonce = crypto.randomUUID();
+
+    try {
+      const user = await db.select().from(schema.users).where(eq(schema.users.uid, uid)).get();
+      if (!user) {
+        // The account was deleted between winning and being paid. Nothing to
+        // credit, and nothing broken — record it as skipped rather than failing
+        // the whole run (which would block the other two winners).
+        console.warn("[monthlyHallOfFame] winner no longer exists, skipping", period, uid);
+        skipped++;
+        continue;
+      }
+      const currentBadges = ((user.badges as unknown as any[]) || []).slice();
+      if (!currentBadges.includes(badge)) currentBadges.push(badge);
+
+      // The claim row is written first; both money statements after it are gated
+      // on OUR nonce having won that claim AND on the payout's ledger row not
+      // already existing. `notPaidGate` is the guard that needs no retention.
+      //
+      // The balance UPDATE comes BEFORE the ledger INSERT deliberately. The
+      // INSERT is the only statement that writes `coin_transactions`, so placing
+      // it last means both statements evaluate `notPaidGate` against the SAME
+      // pre-transaction snapshot and can therefore only both apply or both
+      // no-op — the balance can never move without its ledger row, and vice
+      // versa. (Gating the UPDATE after the INSERT would always read `false`.)
+      // D1 runs a batch sequentially inside one transaction, so this ordering
+      // costs nothing in atomicity.
+      const claimGate = `EXISTS (SELECT 1 FROM idempotency_keys WHERE key = ? AND nonce = ?)`;
+      const notPaidGate = `NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)`;
+      // The account could be deleted between the read above and this batch. Without
+      // this arm the ledger insert would still apply while the balance update
+      // matched no row — drift in the other direction.
+      const payeeGate = `EXISTS (SELECT 1 FROM users WHERE uid = ?)`;
+      const gates = `${claimGate} AND ${notPaidGate} AND ${payeeGate}`;
+      // The reward is Diamonds (users.locked_coins, lib/diamonds.ts): a free
+      // platform reward, so it pays entry fees and is never withdrawn. As DP
+      // coins it was a monthly cash-out for anyone farming wins between their
+      // own accounts.
+      const results = await env.DB.batch([
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO idempotency_keys (key, nonce, scope, created_at) VALUES (?, ?, ?, ?)`,
+        ).bind(claimKey, nonce, "hall_of_fame", ts),
+        env.DB.prepare(
+          `UPDATE users
+              SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, badges = ?, monthly_wins = 0, updated_at = ?
+            WHERE uid = ? AND ${gates}`,
+        ).bind(reward, reward, JSON.stringify(currentBadges), ts, uid, claimKey, nonce, ledgerId, uid),
+        // Hall of Fame XP (lib/xpService.ts), same gates, before the ledger insert.
+        ...xpAwardStatements(env, progression, {
+          uid,
+          action: "hall_of_fame",
+          eventId: `hall_of_fame:${period}:${uid}`,
+          sourceType: "hall_of_fame",
+          sourceId: period,
+          ts,
+          gate: gates,
+          gateArgs: [claimKey, nonce, ledgerId, uid],
+        }).statements,
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO coin_transactions
+             (id, uid, amount, type, description, created_at, locked_delta)
+           SELECT ?, ?, ?, 'monthly_hall_of_fame_reward', ?, ?, ?
+            WHERE ${gates}`,
+        ).bind(
+          ledgerId,
+          uid,
+          reward,
+          `Hall of Fame rank #${rank} (${period}) · Diamond`,
+          ts,
+          reward,
+          claimKey,
+          nonce,
+          ledgerId,
+          uid,
+        ),
+      ]);
+
+      if (Number(results[1]?.meta?.changes || 0) > 0) {
+        paid++;
+        await createNotification(env, uid, {
+          title: "Monthly Hall of Fame! 🏆",
+          body: `Congratulations! You ranked #${rank} this month. You've earned ${reward} Diamond and the ${badge}!`,
+          type: "hall-of-fame",
+          targetId: "profile",
+        });
+      } else {
+        // Already settled for this period — expected on a manual re-trigger.
+        skipped++;
+      }
+    } catch (e) {
+      console.error("[monthlyHallOfFame] payout failed", period, uid, e);
+      failures.push(uid);
+    }
+  }
+
+  if (failures.length > 0) {
+    // Do NOT reset the leaderboard: `hall_of_fame_awards` now records who is
+    // owed, but the counters are still the human-readable record of the month.
+    // Throwing surfaces this in the cron failure alert so it can be re-run
+    // (which is now safe, and will replay the persisted set).
+    throw new Error(
+      `Hall of Fame ${period}: ${failures.length} payout(s) failed (${failures.join(", ")}); monthly wins left intact for retry.`,
+    );
+  }
+
+  // Reset the monthly leaderboard for EVERYONE (not just the top 3) so next
+  // month starts clean — otherwise non-winners' monthlyWins accumulate forever
+  // and the "monthly" ranking silently becomes an all-time cumulative one.
+  //
+  // ONLY on a first settlement. On a replay the counters belong to a DIFFERENT,
+  // in-progress month and wiping them would destroy live data to re-finish an
+  // old payout.
+  if (derived) {
+    await db.update(schema.users).set({ monthlyWins: 0, updatedAt: now() }).where(gt(schema.users.monthlyWins, 0));
+  }
+  return { period, paid, skipped, reset: derived, replayed: !derived };
+}
+
+/**
+ * The winner set for `period`: replayed if already settled, derived if not.
+ *
+ * `derived` tells the caller whether this run is the FIRST settlement, which is
+ * what licenses it to reset `monthly_wins`.
+ */
+async function resolveHallOfFameWinners(
+  env: Env,
+  db: ReturnType<typeof getDb>,
+  period: string,
+): Promise<{ winners: HallOfFameWinner[]; derived: boolean }> {
+  const existing = await db
+    .select()
+    .from(schema.hallOfFameAwards)
+    .where(eq(schema.hallOfFameAwards.period, period))
+    .orderBy(asc(schema.hallOfFameAwards.rank))
+    .all();
+  if (existing.length > 0) {
+    return {
+      winners: existing.map((row) => ({
+        uid: row.uid,
+        rank: Number(row.rank),
+        reward: Number(row.reward) || 0,
+        wins: Number(row.wins) || 0,
+      })),
+      derived: false,
+    };
+  }
+
+  // No award rows. Before deriving a set from the LIVE leaderboard, make sure
+  // this period was not already settled before that table existed — the ledger
+  // ids are deterministic, so their presence is proof. Without this check, the
+  // first run after this deploy would re-pay every historical period on request.
+  const alreadyLedgered = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM coin_transactions
+      WHERE type = 'monthly_hall_of_fame_reward' AND id LIKE ?`,
+  )
+    .bind(`hall_of_fame:${period}:%`)
+    .first<{ n: number }>();
+  if (Number(alreadyLedgered?.n || 0) > 0) {
+    console.warn(
+      `[monthlyHallOfFame] ${period} was settled before hall_of_fame_awards existed ` +
+        `(${alreadyLedgered?.n} ledger row(s)); refusing to re-derive a winner set.`,
+    );
+    return { winners: [], derived: false };
+  }
+
+  const top = await db
+    .select()
+    .from(schema.users)
+    .where(gt(schema.users.monthlyWins, 0))
+    .orderBy(desc(schema.users.monthlyWins))
+    .limit(3)
+    .all();
+  if (top.length === 0) return { winners: [], derived: true };
+
+  const ts = now();
+  const hallRewards = (await getGamification(env)).hallOfFameRewards;
+  const derivedWinners: HallOfFameWinner[] = top.map((u, i) => ({
+    uid: u.uid,
+    rank: i + 1,
+    reward: hallRewards[i] ?? 0,
+    wins: Number(u.monthlyWins) || 0,
+  }));
+
+  // Persist the set BEFORE paying anyone, so a crash mid-payout leaves a record
+  // of who is owed. `onConflictDoNothing` makes two concurrent first runs safe:
+  // whichever lands first defines the period, and the re-read below means the
+  // loser pays that set rather than its own.
+  await db
+    .insert(schema.hallOfFameAwards)
+    .values(
+      derivedWinners.map((w) => ({
+        period,
+        uid: w.uid,
+        rank: w.rank,
+        reward: w.reward,
+        wins: w.wins,
+        createdAt: ts,
+      })),
+    )
+    .onConflictDoNothing()
+    .run();
+
+  const settled = await db
+    .select()
+    .from(schema.hallOfFameAwards)
+    .where(eq(schema.hallOfFameAwards.period, period))
+    .orderBy(asc(schema.hallOfFameAwards.rank))
+    .all();
+  return {
+    winners: settled.map((row) => ({
+      uid: row.uid,
+      rank: Number(row.rank),
+      reward: Number(row.reward) || 0,
+      wins: Number(row.wins) || 0,
+    })),
+    derived: true,
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// SEO audit
+// ---------------------------------------------------------------------------
+
+/** Re-audit at most this often. */
+const SEO_AUDIT_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Refresh the SEO audit, but only if the stored one is stale.
+ *
+ * The audit has its OWN 6-hourly cron trigger (see wrangler.toml [triggers]), not
+ * a slot on the 10-minute sweep. It was on the sweep first and never ran once: a
+ * Worker invocation has a hard subrequest ceiling, the sweep already spends most
+ * of it on D1, and this adds ~21 more. It exceeded the limit every time — and could not
+ * report that either, because `runCronJob` writes its failure row through another
+ * subrequest, so the job showed as "never ran" rather than "failed".
+ *
+ * The freshness guard below is kept even though the schedule now matches it: it
+ * makes the manual "Re-scan" trigger and any overlapping run cheap instead of
+ * duplicating a full audit.
+ *
+ * Returns a small summary rather than the whole audit: the return value is stored
+ * in `cron_runs.detail`, which is meant for a glanceable trail, and this doubles as
+ * the score history the dashboard's single stored snapshot cannot give.
+ */
+export async function seoAuditJob(
+  env: Env,
+  opts: { force?: boolean } = {},
+): Promise<{ skipped: true; ageMs: number } | { overall: number | null; critical: number; high: number; posts: number; ms: number }> {
+  if (!opts.force) {
+    const existing = await getSeoAudit(env).catch(() => null);
+    const ageMs = existing?.ranAt ? Date.now() - Number(existing.ranAt) : Infinity;
+    if (ageMs < SEO_AUDIT_INTERVAL_MS) return { skipped: true, ageMs };
+  }
+
+  const audit = await runSeoAudit(env);
+  const db = getDb(env);
+  await db
+    .insert(schema.settings)
+    .values({ id: "seoAudit", data: audit as any, updatedAt: now() })
+    .onConflictDoUpdate({
+      target: schema.settings.id,
+      set: { data: audit as any, updatedAt: now() },
+    });
+  // The settings reader caches for 60s; without this the dashboard can show the
+  // previous audit for a minute after a manual re-scan and look broken.
+  await invalidateSetting(env, "seoAudit");
+
+  return {
+    overall: audit.overall,
+    critical: audit.totals.critical,
+    high: audit.totals.high,
+    posts: audit.scope.posts,
+    ms: audit.durationMs,
+  };
+}

@@ -1,0 +1,113 @@
+/**
+ * Which two entries a battle story draws, and in which order.
+ *
+ * Pulled out of `StoryVsFrame` as a pure function so the part that can actually
+ * be wrong — picking the right media for each side, preferring the optimised
+ * variant, deciding video vs photo, and what to do when the battle can't be
+ * loaded — is testable. The component keeps only the layout, which is two
+ * `flex: 1` halves in a `flexDirection: 'row'`.
+ */
+import { matchPrize } from './contestPrize';
+
+export interface VsSideData {
+  uid?: string;
+  username: string;
+  /** Admin-granted blue check on this participant, from the enriched match read. */
+  verified?: boolean;
+  /** Best available image/video url for this side. */
+  uri: string | null;
+  avatarUri: string | null;
+}
+
+export interface VsFrameData {
+  /** Left half. Always the battle's creator (userA), for both viewers. */
+  left: VsSideData;
+  /** Right half. Always the joiner (userB). */
+  right: VsSideData;
+  isVideo: boolean;
+  title: string;
+  /** Coin prize. Always 0 for a product battle — read `productPrize` instead. */
+  prize: number;
+  /**
+   * Product prize name, when the battle awards one.
+   *
+   * The shared frame is the surface whose whole job is making a battle look worth
+   * entering, and a product battle used to share with no prize on it at all: its
+   * coin figure is 0 by construction, and the pill was gated on that number being
+   * positive.
+   */
+  productPrize: string | null;
+}
+
+function side(participant: any): VsSideData {
+  return {
+    uid: participant?.uid,
+    username: participant?.username || 'user',
+    verified: !!participant?.verified,
+    // Prefer the resized variant; it falls back to the original url itself until
+    // Cloudflare Transformations is enabled, so this is always safe.
+    uri: participant?.mediaUrlOptimized || participant?.mediaUrl || null,
+    avatarUri: participant?.profilePicThumb || participant?.profilePic || null,
+  };
+}
+
+/**
+ * The battle's composite head-to-head image, if one has been produced.
+ *
+ * When present this is a single file showing both entries with the VS tag, which
+ * is what gets shared outside the app and what the story displays directly.
+ *
+ * Read from the MATCH, never from the story row — the row keeps each user's own
+ * entry as its media. That is what keeps blocking working: a viewer who blocked a
+ * participant gets no match back, so they never see the composite.
+ *
+ * Rendered by the server once both entries are accepted (migration 0055). Null is
+ * still normal: while the server is preparing it, for battles that predate it, and
+ * for every battle whose stories have expired (the sweep deletes the card and
+ * clears the column). So this is never a precondition, only a preference.
+ */
+export function vsImageOf(match: any): string | null {
+  const url = match?.vsImageUrl;
+  return typeof url === 'string' && url.length > 0 ? url : null;
+}
+
+/**
+ * Build the frame data, or return null when a head-to-head frame is not possible.
+ *
+ * Null means "fall back to the single entry this story row carries". That happens
+ * for a real reason rather than an error: `/read/matches/:id` deliberately returns
+ * nothing when a participant is blocked by the viewer, and a story outlives
+ * nothing else that could remove the match.
+ *
+ * The order is deliberately NOT viewer-relative — userA is always on the left,
+ * for both participants and for anyone else watching. Both users must see the
+ * same story, and mirroring it per viewer would quietly make them two different
+ * stories.
+ */
+export function resolveVsFrame(match: any): VsFrameData | null {
+  const userA = match?.userA;
+  const userB = match?.userB;
+  // Both sides are required — a "VS" with one photo is not the thing being asked
+  // for, so the caller shows the single-entry fallback instead.
+  if (!userA?.uid || !userB?.uid) return null;
+
+  const left = side(userA);
+  const right = side(userB);
+  if (!left.uri || !right.uri) return null;
+
+  // The match carries its own prize snapshot (read.ts `mapMatch` spreads
+  // `publicPrize`), so this needs no second fetch of the contest template.
+  // `matchPrize` is that resolution, shared with the feed and Explore cards —
+  // the arithmetic used to live inline here and every other surface invented
+  // its own, which is how the feed ended up advertising `entryFee * 1.8`.
+  const resolved = matchPrize(match);
+
+  return {
+    left,
+    right,
+    isVideo: match?.type === 'video',
+    title: match?.title || 'Battle',
+    prize: resolved.type === 'coins' ? resolved.coins : 0,
+    productPrize: resolved.type === 'product' ? resolved.product.title : null,
+  };
+}

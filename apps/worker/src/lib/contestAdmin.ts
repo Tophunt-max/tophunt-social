@@ -1,0 +1,453 @@
+import { httpsError } from "./http";
+import { PRIZE_TYPES, assertProductPrize } from "./prizes";
+
+const CONTEST_TYPES = ["photo", "video"] as const;
+const CONTEST_STATUSES = ["live", "upcoming", "paused", "ended"] as const;
+const CONTEST_CANONICAL_EXTRA_KEYS = [
+  "id",
+  "title",
+  "name",
+  "type",
+  "status",
+  "bannerUrl",
+  "bannerImageUrl",
+  "totalEntryFee",
+  "entryFishCoins",
+  "entryDpcoin",
+  "rewardCoins",
+  "prizePool",
+  "winningCoins",
+  "voteDurationDays",
+  "durationHours",
+  "autoCancelHours",
+  "minVotes",
+  "minLevel",
+  "maxLevel",
+  "createdBy",
+  "createdAt",
+  // Validity window and every alias it is accepted under. These are physical
+  // columns now, so a copy left behind in `extra` would be a second, silently
+  // stale source of truth for the same value.
+  "startsAt",
+  "startAt",
+  "startDate",
+  "endsAt",
+  "endAt",
+  "endDate",
+  "validUntil",
+  "expiresAt",
+  "totalMatches",
+  "waitingMatches",
+  "activeMatches",
+  // Prize kind and the physical-product fields (migration 0042). Physical columns,
+  // so a copy in `extra` would be a second, silently stale source of truth for what
+  // a contest has promised to give away.
+  "prizeType",
+  "prizeProductTitle",
+  "prizeProductImageUrl",
+  "prizeProductValue",
+  "prizeProductDescription",
+  // Promo budget that pays the part of the prize above the pot (migration 0068).
+  "subsidyBudgetId",
+  // Admin-only coin cost of a product prize. A physical column, and never public.
+  "prizeCostCoins",
+  // Never stored: the approval password and the audit reason travel in the body.
+  "approvalPassword",
+  "reason",
+] as const;
+
+export const hasOwn = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
+export const isRecord = (value: unknown): value is Record<string, any> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+function firstAlias(body: Record<string, any>, aliases: string[]): { present: boolean; value?: any } {
+  for (const aliasName of aliases) {
+    if (hasOwn(body, aliasName)) return { present: true, value: body[aliasName] };
+  }
+  return { present: false };
+}
+
+function contestInteger(value: unknown, field: string, min: number, max: number): number {
+  if (typeof value === "boolean" || value === null || (typeof value === "string" && !value.trim())) {
+    throw httpsError("invalid-argument", `${field} must be an integer between ${min} and ${max}.`);
+  }
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw httpsError("invalid-argument", `${field} must be an integer between ${min} and ${max}.`);
+  }
+  return parsed;
+}
+
+function contestText(value: unknown, field: string, maxLength: number): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length > maxLength) {
+    throw httpsError("invalid-argument", `${field} must be a string of at most ${maxLength} characters.`);
+  }
+  return value;
+}
+
+/**
+ * A validity-window bound, normalised to epoch milliseconds.
+ *
+ * `null` / `""` mean "unbounded" and are preserved as null rather than coerced
+ * to 0 — `new Date("")` is Invalid Date and `Number(null)` is 0, and either
+ * silently turns "no expiry" into "expired in 1970", which would hide every
+ * contest it was applied to.
+ *
+ * Accepts an epoch-ms number (what our own admin panel and app send back), a
+ * numeric string, or an ISO-8601 string (what a hand-written curl or the seed
+ * scripts are most likely to send).
+ *
+ * A string form WITHOUT an explicit offset — "2026-09-01T18:30" or
+ * "2026-09-01" — resolves against the Worker's timezone, which is UTC. That is
+ * not the same as the identical text typed into the admin panel, where it means
+ * the admin's local time. Send epoch ms, or include an offset ("...+05:30"), if
+ * the distinction matters.
+ */
+function contestTimestamp(value: unknown, field: string): number | null {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return null;
+  if (typeof value === "boolean") {
+    throw httpsError("invalid-argument", `${field} must be null, epoch milliseconds, or an ISO-8601 date string.`);
+  }
+
+  let ms: number;
+  if (typeof value === "number") {
+    ms = value;
+  } else if (typeof value === "string") {
+    const trimmed = value.trim();
+    // A bare integer string is epoch ms; anything else goes through Date so
+    // "2026-09-01T18:30:00.000Z" and "2026-09-01" both work.
+    ms = /^-?\d+$/.test(trimmed) ? Number(trimmed) : new Date(trimmed).getTime();
+  } else {
+    throw httpsError("invalid-argument", `${field} must be null, epoch milliseconds, or an ISO-8601 date string.`);
+  }
+
+  if (!Number.isFinite(ms) || !Number.isInteger(ms)) {
+    throw httpsError("invalid-argument", `${field} must be null, epoch milliseconds, or an ISO-8601 date string.`);
+  }
+  // Reject seconds-based timestamps outright. A caller sending 1788000000 means
+  // 2026, but as milliseconds it is 1970 — so it would be accepted, stored, and
+  // instantly expire the contest. The floor is 2001-09-09, comfortably below any
+  // date this product can be configured with and far above any plausible
+  // seconds value.
+  if (ms < 1_000_000_000_000) {
+    throw httpsError(
+      "invalid-argument",
+      `${field} must be in epoch MILLISECONDS (got ${ms}, which is before 2001 — seconds were probably sent).`,
+    );
+  }
+  // ~year 10000. Guards against overflow nonsense being stored forever.
+  if (ms > 253_402_300_799_000) {
+    throw httpsError("invalid-argument", `${field} is too far in the future.`);
+  }
+  return ms;
+}
+
+/**
+ * The window must be orderable and must leave the contest some life.
+ *
+ * Called with the MERGED values on PATCH, exactly like assertPrizeFundedByPot:
+ * a patch that only moves `startsAt` past an untouched `endsAt` is just as
+ * broken as one that sets both the wrong way round, and the validator only ever
+ * sees the request body.
+ */
+export function assertContestWindow(
+  startsAt: number | null,
+  endsAt: number | null,
+  opts: { requireFuture?: boolean } = {},
+): void {
+  if (startsAt !== null && endsAt !== null && endsAt <= startsAt) {
+    throw httpsError("invalid-argument", "The contest end time must be after its start time.");
+  }
+  // Only enforced on create. An admin ending a running contest early sets
+  // endsAt to a moment that may already have passed by the time the request
+  // lands, and that is a legitimate "close this now" — but a contest CREATED
+  // already expired is always a mistake, and one that is invisible afterwards
+  // because the app never lists it.
+  if (opts.requireFuture && endsAt !== null && endsAt <= Date.now()) {
+    throw httpsError("invalid-argument", "The contest end time must be in the future.");
+  }
+}
+
+/**
+ * Refuse to take a player's coins for a contest that is outside its validity
+ * window.
+ *
+ * `GET /read/contests` hiding an out-of-window contest is presentation, not
+ * enforcement: the detail endpoint does not filter, a list response is cached
+ * for 60s, and a screen fetched before the deadline can submit after it. Without
+ * this the window would only be a suggestion, and the two flows that debit an
+ * entry fee — `startMatch` and `joinMatch` — would happily charge for a contest
+ * that has closed, or one scheduled to open next week that was saved as `live`
+ * up front (which is exactly the workflow the admin panel recommends).
+ *
+ * `status === 'live'` is checked separately by both callers and is deliberately
+ * left there: it is a different question, and the cron only reconciles it to the
+ * window every 10 minutes.
+ */
+export function assertContestOpenNow(
+  contest: { startsAt?: number | null; endsAt?: number | null },
+  action: "new matches" | "opponents",
+): void {
+  const nowMs = Date.now();
+  const startsAt = contest.startsAt ?? null;
+  const endsAt = contest.endsAt ?? null;
+  if (startsAt !== null && startsAt > nowMs) {
+    throw httpsError("failed-precondition", `This contest has not opened yet, so it is not accepting ${action}.`);
+  }
+  if (endsAt !== null && endsAt <= nowMs) {
+    throw httpsError("failed-precondition", `This contest has closed, so it is no longer accepting ${action}.`);
+  }
+}
+
+export function contestBannerUrl(value: unknown): string | null {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") {
+    throw httpsError("invalid-argument", "bannerUrl must be null or a valid HTTP(S) URL.");
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 2048) {
+    throw httpsError("invalid-argument", "bannerUrl must be null or a valid HTTP(S) URL up to 2048 characters.");
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("invalid protocol");
+  } catch {
+    throw httpsError("invalid-argument", "bannerUrl must be null or a valid HTTP(S) URL.");
+  }
+  return trimmed;
+}
+
+/** Shared parser for every server-side admin contest create/PATCH path. */
+export function validateContestInput(
+  body: unknown,
+  creating: boolean,
+): { recognized: boolean; values: Record<string, any> } {
+  if (!isRecord(body)) throw httpsError("invalid-argument", "A JSON object is required.");
+  const values: Record<string, any> = {};
+  let recognized = false;
+
+  const title = firstAlias(body, ["title", "name"]);
+  if (title.present || creating) {
+    recognized ||= title.present;
+    if (typeof title.value !== "string") throw httpsError("invalid-argument", "title is required.");
+    const trimmed = title.value.trim();
+    if (!trimmed || trimmed.length > 160) {
+      throw httpsError("invalid-argument", "title is required and must be at most 160 characters.");
+    }
+    values.title = trimmed;
+  }
+
+  const type = firstAlias(body, ["type"]);
+  if (type.present || creating) {
+    recognized ||= type.present;
+    const value = type.present ? type.value : "photo";
+    if (!CONTEST_TYPES.includes(value)) throw httpsError("invalid-argument", "type must be photo or video.");
+    values.type = value;
+  }
+
+  const status = firstAlias(body, ["status"]);
+  if (status.present || creating) {
+    recognized ||= status.present;
+    const value = status.present ? status.value : "upcoming";
+    if (!CONTEST_STATUSES.includes(value)) {
+      throw httpsError("invalid-argument", "status must be live, upcoming, paused, or ended.");
+    }
+    values.status = value;
+  }
+
+  const fee = firstAlias(body, ["totalEntryFee", "entryFishCoins", "entryDpcoin"]);
+  if (fee.present || creating) {
+    recognized ||= fee.present;
+    const total = contestInteger(fee.present ? fee.value : 0, "totalEntryFee", 0, 1_000_000);
+    // Two players each pay half. An odd total would charge a fractional number
+    // of coins, and fractions in a whole-number currency accumulate float drift
+    // that makes the ledger impossible to reconcile against balances.
+    if (total % 2 !== 0) {
+      throw httpsError(
+        "invalid-argument",
+        `totalEntryFee must be an even number of coins — each of the two players pays half (got ${total}).`,
+      );
+    }
+    values.totalEntryFee = total;
+  }
+
+  const reward = firstAlias(body, ["rewardCoins", "prizePool", "winningCoins"]);
+  if (reward.present || creating) {
+    recognized ||= reward.present;
+    values.rewardCoins = contestInteger(reward.present ? reward.value : 0, "rewardCoins", 0, 10_000_000);
+  }
+
+  // --- prize kind -----------------------------------------------------------
+  // A contest awards coins OR a physical product, never both. The product fields
+  // are only parsed when the kind says product, so a coin contest cannot carry a
+  // half-filled product that a later PATCH would accidentally activate.
+  const prizeType = firstAlias(body, ["prizeType"]);
+  if (prizeType.present || creating) {
+    recognized ||= prizeType.present;
+    const raw = prizeType.present ? prizeType.value : "coins";
+    if (!PRIZE_TYPES.includes(raw)) {
+      throw httpsError("invalid-argument", `prizeType must be one of: ${PRIZE_TYPES.join(", ")}.`);
+    }
+    values.prizeType = raw;
+  }
+
+  const productTitle = firstAlias(body, ["prizeProductTitle", "productTitle"]);
+  const productImage = firstAlias(body, ["prizeProductImageUrl", "productImageUrl"]);
+  const productValue = firstAlias(body, ["prizeProductValue", "productValue"]);
+  const productDescription = firstAlias(body, ["prizeProductDescription", "productDescription"]);
+  const productTouched =
+    productTitle.present || productImage.present || productValue.present || productDescription.present;
+  recognized ||= productTouched;
+
+  if (values.prizeType === "product") {
+    // Validated as a unit, because "a product prize with no image" is not a state
+    // worth persisting — the image is what every card renders.
+    const product = assertProductPrize({
+      title: productTitle.value,
+      imageUrl: productImage.value,
+      value: productValue.present ? productValue.value : 0,
+      description: productDescription.present ? productDescription.value : undefined,
+    });
+    values.prizeProductTitle = product.title;
+    values.prizeProductImageUrl = product.imageUrl;
+    values.prizeProductValue = product.value;
+    values.prizeProductDescription = product.description;
+    // A product contest pays no coins. Forced rather than merely validated so an
+    // admin switching a coin contest to a product one cannot leave a stale reward
+    // behind that settlement would then credit.
+    values.rewardCoins = 0;
+  } else if (values.prizeType === "coins") {
+    // Clear the product columns on the way back to coins, for the same reason.
+    values.prizeProductTitle = null;
+    values.prizeProductImageUrl = null;
+    values.prizeProductValue = 0;
+    values.prizeProductDescription = null;
+  } else if (productTouched) {
+    // Product fields sent on a PATCH that does not say which kind this is. Refused
+    // rather than guessed: writing them without setting `prizeType` would store a
+    // product nobody is going to be given, and inferring "product" from their
+    // presence would silently change what a live contest awards.
+    throw httpsError(
+      "invalid-argument",
+      "Include prizeType when changing product prize fields.",
+    );
+  }
+
+  // Promo prize budget (lib/promoBudget.ts). The admin route checks the budget
+  // itself (exists, right kind, not closed) and asks for the approval password.
+  const subsidy = firstAlias(body, ["subsidyBudgetId"]);
+  if (subsidy.present) {
+    recognized = true;
+    const v = subsidy.value;
+    if (v === null || v === "") values.subsidyBudgetId = null;
+    else if (typeof v === "string" && v.length <= 64) values.subsidyBudgetId = v;
+    else throw httpsError("invalid-argument", "subsidyBudgetId must be a budget id or null.");
+  } else if (creating) {
+    values.subsidyBudgetId = null;
+  }
+  // Admin-only coin cost of a product prize (what one product costs the
+  // platform, in coins). Never sent to the app. Only meaningful for a product.
+  const cost = firstAlias(body, ["prizeCostCoins"]);
+  if (cost.present) {
+    recognized = true;
+    values.prizeCostCoins = contestInteger(cost.value ?? 0, "prizeCostCoins", 0, 10_000_000);
+  } else if (creating) {
+    values.prizeCostCoins = 0;
+  }
+  if (values.prizeType === "coins") values.prizeCostCoins = 0;
+
+  const durationDays = firstAlias(body, ["voteDurationDays"]);
+  const durationHours = firstAlias(body, ["durationHours"]);
+  if (durationDays.present || durationHours.present || creating) {
+    recognized ||= durationDays.present || durationHours.present;
+    let rawDuration: unknown = 1;
+    if (durationDays.present) {
+      rawDuration = durationDays.value;
+    } else if (durationHours.present) {
+      if (
+        typeof durationHours.value === "boolean" ||
+        durationHours.value === null ||
+        (typeof durationHours.value === "string" && !durationHours.value.trim())
+      ) {
+        throw httpsError("invalid-argument", "durationHours must represent 1 to 30 days.");
+      }
+      const hours = Number(durationHours.value);
+      if (!Number.isFinite(hours) || hours <= 0) {
+        throw httpsError("invalid-argument", "durationHours must represent 1 to 30 days.");
+      }
+      rawDuration = Math.ceil(hours / 24);
+    }
+    values.voteDurationDays = contestInteger(rawDuration, "voteDurationDays", 1, 30);
+  }
+
+  const autoCancel = firstAlias(body, ["autoCancelHours"]);
+  if (autoCancel.present || creating) {
+    recognized ||= autoCancel.present;
+    values.autoCancelHours = contestInteger(autoCancel.present ? autoCancel.value : 24, "autoCancelHours", 1, 168);
+  }
+
+  // Optional level-based tournament eligibility (migration 0070). Empty = no
+  // limit. It gates who may ENTER; it never changes votes, fees or prizes.
+  for (const field of ["minLevel", "maxLevel"] as const) {
+    const lv = firstAlias(body, [field]);
+    if (lv.present) {
+      recognized = true;
+      values[field] = lv.value === null || lv.value === "" ? null : contestInteger(lv.value, field, 1, 1000);
+    }
+  }
+  if (values.minLevel != null && values.maxLevel != null && values.maxLevel < values.minLevel) {
+    throw httpsError("invalid-argument", "maxLevel must be at least minLevel.");
+  }
+
+  const minVotes = firstAlias(body, ["minVotes"]);
+  if (minVotes.present || creating) {
+    recognized ||= minVotes.present;
+    values.minVotes = contestInteger(minVotes.present ? minVotes.value : 0, "minVotes", 0, 1_000_000);
+  }
+
+  const banner = firstAlias(body, ["bannerUrl", "bannerImageUrl"]);
+  if (banner.present || creating) {
+    recognized ||= banner.present;
+    values.bannerUrl = contestBannerUrl(banner.present ? banner.value : null);
+  }
+
+  // Validity window. Default null on create — "no expiry", which is how every
+  // contest that existed before this feature behaves, so seed scripts and any
+  // older client that posts without these keys are unaffected.
+  const startsAt = firstAlias(body, ["startsAt", "startAt", "startDate"]);
+  if (startsAt.present || creating) {
+    recognized ||= startsAt.present;
+    values.startsAt = contestTimestamp(startsAt.present ? startsAt.value : null, "startsAt");
+  }
+
+  const endsAt = firstAlias(body, ["endsAt", "endAt", "endDate", "validUntil", "expiresAt"]);
+  if (endsAt.present || creating) {
+    recognized ||= endsAt.present;
+    values.endsAt = contestTimestamp(endsAt.present ? endsAt.value : null, "endsAt");
+  }
+
+  for (const [field, maxLength] of [["description", 1000], ["rules", 5000]] as const) {
+    if (hasOwn(body, field)) {
+      recognized = true;
+      values[field] = contestText(body[field], field, maxLength);
+    }
+  }
+
+  return { recognized, values };
+}
+
+export function cleanContestExtra(value: unknown): Record<string, any> {
+  const extra = isRecord(value) ? { ...value } : {};
+  for (const key of CONTEST_CANONICAL_EXTRA_KEYS) delete extra[key];
+  return extra;
+}
+
+export function createContestExtra(body: Record<string, any>, values: Record<string, any>): Record<string, any> {
+  const nested = isRecord(body.extra) ? body.extra : {};
+  const extra = cleanContestExtra({ ...nested, ...body });
+  delete extra.extra;
+  if (hasOwn(values, "description")) extra.description = values.description;
+  if (hasOwn(values, "rules")) extra.rules = values.rules;
+  return extra;
+}

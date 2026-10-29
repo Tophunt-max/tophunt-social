@@ -1,0 +1,448 @@
+import React, { useState, useEffect } from 'react';
+import { balancesOf } from '@/src/lib/balances';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, ScrollView, TextInput, ImageBackground } from 'react-native';
+import { Alert } from '@/src/lib/appAlert';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@/src/lib/icons';
+import { BackButton } from '@/src/components/ui/BackButton';
+import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
+import { ContestListSkeleton } from '@/src/components/skeletons/ContestListSkeleton';
+import * as ImagePicker from 'expo-image-picker';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { contestService } from '@/src/services/contests/contestService';
+import { contestMediaService } from '@/src/services/contests/uploadMedia';
+import { useAuth } from '@/src/hooks/useAuth';
+import { useAuthGate } from '@/src/hooks/useAuthGate';
+import { useProfile } from '@/src/hooks/useProfileData';
+import { useThemeColor } from '@/hooks/use-theme-color';
+import { LinearGradient } from 'expo-linear-gradient';
+import { goToCongratulations } from '@/src/lib/contestSuccess';
+import { getDeviceId } from '@/src/lib/deviceId';
+import { validateVideo, CONTEST_MAX_VIDEO_SEC } from '@/src/lib/videoValidation';
+import { ContestCountdownBadge, ContestEntryBadge, ContestPrizeLine } from '@/src/components/contests/ContestBadges';
+import { useCountdown } from '@/src/hooks/useCountdown';
+import { entryFeePerPlayer } from '@/src/lib/contestPricing';
+import { hasEnded } from '@/src/lib/countdown';
+import { useAbortOnUnmount } from '@/src/hooks/useAbortOnUnmount';
+import { isUploadCancelled } from '@/src/lib/uploadToR2';
+
+const BRAND_PRIMARY = '#FF4D67';
+
+export default function VideoContestScreen() {
+  const beginUpload = useAbortOnUnmount();
+  const router = useRouter();
+  const { contestId, matchId, mode } = useLocalSearchParams();
+  const { user } = useAuth();
+  const { requireAuth } = useAuthGate();
+  const { data: profile } = useProfile(user?.uid || '');
+  
+  const [contests, setContests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedContest, setSelectedContest] = useState<any>(null);
+  const [media, setMedia] = useState<string | null>(null);
+  const [caption, setCaption] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+
+  const bgColor = useThemeColor({}, 'background');
+  const textColor = useThemeColor({}, 'text');
+  const cardBg = useThemeColor({ light: '#FFFFFF', dark: '#1F222A' }, 'background');
+  const inputBg = useThemeColor({ light: '#F9F9F9', dark: '#2A2D35' }, 'background');
+  const borderColor = useThemeColor({ light: '#EEEEEE', dark: '#35383F' }, 'border');
+  const subTextColor = useThemeColor({ light: '#9E9E9E', dark: '#E0E0E0' }, 'text');
+
+  const player = useVideoPlayer(media, (player) => {
+    player.loop = true;
+    player.play();
+    player.muted = true;
+  });
+
+  useEffect(() => {
+    if (contestId) {
+      fetchContestDetail(contestId as string);
+    } else if (matchId) {
+      // Joining an existing battle. Without this branch a join deep-link fell
+      // through to the contest LIST, so the user picked an unrelated template and
+      // `handleAction` then sent that template's id as the matchId.
+      fetchMatchDetail(matchId as string);
+    } else {
+      loadContests();
+    }
+  }, [contestId, matchId]);
+
+  const loadContests = async () => {
+    try {
+      const data = await contestService.getAvailableContests('video');
+      setContests(data);
+    } catch (error) { console.error(error); } finally { setLoading(false); }
+  };
+
+  const fetchContestDetail = async (id: string) => {
+    setLoading(true);
+    try {
+      const contest = await contestService.getContestById(id);
+      setSelectedContest(contest);
+    } catch (error) { console.error(error); } finally { setLoading(false); }
+  };
+
+  /**
+   * Load the battle being joined and present it as the selected contest, so the
+   * entry fee, prize and title shown are the ones this battle was created with.
+   * Mirrors `fetchMatchDetail` in the photo setup screen.
+   */
+  const fetchMatchDetail = async (id: string) => {
+    setLoading(true);
+    try {
+      const match = await contestService.getMatchById(id);
+      if (!match) {
+        Alert.alert('Battle unavailable', 'This battle is no longer open to join.');
+        router.replace('/explore');
+        return;
+      }
+      setSelectedContest({
+        ...match,
+        // The match carries the entry fee it was created with; the contest
+        // template it came from may since have been edited.
+        id: match.contestId || match.id,
+        title: match.title,
+        totalEntryFee: match.entryFee,
+        entryFishCoins: match.entryFee,
+        rewardCoins: match.rewardAmount ?? match.prizeCoins,
+        // The prize the MATCH was created with, not the template's current one —
+        // the match payload carries its own snapshot, and joining a battle must
+        // show what that battle pays rather than what the contest pays today.
+        //
+        // Four fields, not five: `contest_matches` has no description column, so
+        // the snapshot deliberately does not carry one. Nothing needs it — the
+        // description is contest copy, not part of what settlement owes.
+        prizeType: match.prizeType,
+        prizeProductTitle: match.prizeProductTitle,
+        prizeProductImageUrl: match.prizeProductImageUrl,
+        prizeProductValue: match.prizeProductValue,
+        isJoinMode: true,
+      });
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Could not load this battle.');
+      router.replace('/explore');
+    } finally { setLoading(false); }
+  };
+
+  const pickVideo = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['videos'],
+      allowsEditing: true,
+      quality: 1,
+      videoMaxDuration: CONTEST_MAX_VIDEO_SEC,
+    });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    // `videoMaxDuration` only caps in-app recording; a library-picked clip can
+    // still be longer, so validate the chosen asset explicitly.
+    const check = validateVideo(
+      { durationMs: asset.duration, fileSize: asset.fileSize },
+      { maxDurationSec: CONTEST_MAX_VIDEO_SEC },
+    );
+    if (!check.ok) {
+      Alert.alert('Video too long', check.message);
+      return;
+    }
+    setMedia(asset.uri);
+  };
+
+  const handleAction = async () => {
+    // The listing is public; entering/joining needs an account (entry fee).
+    if (!requireAuth('join')) return;
+    if (!selectedContest || !media || !user || caption.trim().length === 0) {
+      Alert.alert("Error", "Please upload a video and write a caption.");
+      return;
+    }
+
+    // Was `entryFishCoins || entryFee`, both of which are the pot for BOTH
+    // players — so this gate demanded twice the real price, and disagreed with
+    // the price the card in this very file advertises.
+    const fee = entryFeePerPlayer(selectedContest);
+    // Entry fees are paid in Diamonds only (src/lib/balances.ts).
+    const userCoins = balancesOf(profile as any).diamonds;
+    if (userCoins < fee) {
+        Alert.alert("Diamond kam hain", `Entry ke liye ${fee} Diamond chahiye, aapke paas ${userCoins} hain. Diamond store se lo ya daily reward, tasks se kamao.`);
+        return;
+    }
+
+    // The list this contest came from is cached for 60s and this screen may have
+    // been open far longer, so re-check the window before uploading and paying.
+    // The Worker refuses too; this turns a failed submit into a clear message.
+    if (hasEnded(selectedContest.endsAt)) {
+      Alert.alert("Contest closed", "This contest has closed and is no longer accepting entries.");
+      return;
+    }
+
+    setUploading(true);
+    const isJoining = !!(selectedContest.isJoinMode || mode === 'join' || matchId);
+    const signal = beginUpload();
+    try {
+      const downloadUrl = await contestMediaService.uploadMedia(media, selectedContest.id || selectedContest.contestId, user.uid, 'video', undefined, signal);
+      // Left the screen during the upload: do NOT enter (and pay for) the battle.
+      if (signal.aborted) return;
+      const deviceId = await getDeviceId();
+
+      let resultMatchId: string | undefined;
+      if (isJoining) {
+        const joinTargetId = (matchId as string) || selectedContest.id;
+        await contestService.joinMatch({
+          matchId: joinTargetId,
+          mediaUrl: downloadUrl,
+          mediaType: 'video',
+          caption,
+          deviceId,
+        });
+        resultMatchId = joinTargetId;
+      } else {
+        const res = await contestService.startMatch({
+          contestId: selectedContest.id,
+          mediaUrl: downloadUrl,
+          mediaType: 'video',
+          caption,
+          deviceId,
+        });
+        resultMatchId = res?.matchId;
+      }
+      goToCongratulations(router, {
+        contestName: selectedContest.title || selectedContest.name,
+        isJoining,
+        matchId: resultMatchId,
+      });
+    } catch (error: any) {
+      if (isUploadCancelled(error) || signal.aborted) return;
+      Alert.alert("Oops!", error.message || "Failed to submit.");
+    } finally {
+      if (!signal.aborted) setUploading(false);
+    }
+  };
+
+  if (loading) {
+    // Same header as the loaded screen, so only the list area changes.
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: bgColor }]}>
+        <View style={styles.header}>
+          <BackButton size={26} color={textColor} />
+          <Text style={[styles.title, { color: textColor }]}>Video Contests</Text>
+          <View style={{ width: 28 }} />
+        </View>
+        <View style={{ padding: 16 }}>
+          <ContestListSkeleton count={3} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={[styles.container, {backgroundColor: bgColor}]}>
+      <View style={styles.header}>
+        <BackButton size={26} color={textColor} />
+        <Text style={[styles.title, {color: textColor}]}>Video Contests</Text>
+        <View style={{ width: 28 }} />
+      </View>
+
+      {!selectedContest ? (
+        <FlatList
+          data={contests}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={{ padding: 16 }}
+          renderItem={({ item }) => (
+            <VideoContestCard
+              item={item}
+              cardBg={cardBg}
+              subTextColor={subTextColor}
+              onEnter={() => requireAuth('join') && setSelectedContest(item)}
+            />
+          )}
+        />
+      ) : (
+        <ScrollView contentContainerStyle={{ padding: 20 }}>
+          <Text style={[styles.subtitle, {color: textColor}]}>{selectedContest.title || selectedContest.name}</Text>
+
+          {/*
+            The prize, on the screen where the user is about to pay to enter.
+            This was the one entry flow that showed no prize at all: joining a battle
+            copies the match's own prize snapshot onto `selectedContest`, and the
+            photo setup screen renders it, but this one dropped it — so a product
+            battle asked for an entry fee without saying what it awards.
+          */}
+          <View style={[styles.prizeBanner, { backgroundColor: inputBg, borderColor }]}>
+            <ContestPrizeLine contest={selectedContest} labelColor={subTextColor} />
+          </View>
+
+          <TouchableOpacity style={[styles.mediaUpload, {backgroundColor: inputBg, borderColor}]} onPress={pickVideo}>
+            {media ? (
+              <VideoView player={player} style={styles.previewVideo} contentFit="cover" />
+            ) : (
+              <View style={styles.placeholder}>
+                <Ionicons name="videocam" size={40} color={BRAND_PRIMARY} />
+                <Text style={{color: subTextColor, marginTop: 10, fontFamily: 'Urbanist-Medium'}}>Tap to Select Video</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TextInput 
+            style={[styles.captionInput, { color: textColor, backgroundColor: inputBg, borderColor }]} 
+            placeholder="Write a catchy caption..."
+            placeholderTextColor={subTextColor}
+            value={caption}
+            onChangeText={setCaption}
+            multiline
+          />
+
+          <TouchableOpacity 
+            style={[styles.joinButton, { opacity: uploading ? 0.6 : 1 }]} 
+            onPress={handleAction}
+            disabled={uploading}
+          >
+            <LinearGradient colors={[BRAND_PRIMARY, '#FF8A9B']} style={styles.gradient}>
+                {uploading ? <ActivityIndicator color="white" /> : <Text style={styles.joinButtonText}>Submit Entry</Text>}
+            </LinearGradient>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  );
+}
+
+/**
+ * One video contest in the list. Mirrors ContestCard in ../photo/index.tsx —
+ * a real component because it runs `useCountdown`.
+ *
+ * The fee here was `entryFishCoins || totalEntryFee`, both of which are the
+ * TOTAL pot for both players, so the card quoted double the real cost.
+ * `ContestEntryBadge` shows the per-player figure, or FREE when there is none.
+ */
+function VideoContestCard({
+  item,
+  cardBg,
+  subTextColor,
+  onEnter,
+}: {
+  item: any;
+  cardBg: string;
+  subTextColor: string;
+  onEnter: () => void;
+}) {
+  const { ended } = useCountdown(item?.endsAt);
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.92}
+      style={[styles.contestCard, { backgroundColor: cardBg }, ended && styles.contestCardEnded]}
+      disabled={ended}
+      onPress={onEnter}
+    >
+      <ImageBackground
+        // No banner -> no source; cardBanner's own background colour
+        // is the placeholder (was a via.placeholder.com request).
+        source={item.bannerUrl ? { uri: item.bannerUrl } : undefined}
+        style={styles.cardBanner}
+        imageStyle={styles.cardBannerImg}
+      >
+        <LinearGradient colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.85)']} style={styles.bannerGradient}>
+          <View style={styles.topRow}>
+            {ended ? (
+              <View style={[styles.livePill, styles.endedPill]}>
+                <Ionicons name="lock-closed" size={10} color="#FFF" />
+                <Text style={styles.livePillText}>CLOSED</Text>
+              </View>
+            ) : (
+              <View style={styles.livePill}>
+                <View style={styles.livePillDot} />
+                <Text style={styles.livePillText}>LIVE</Text>
+              </View>
+            )}
+            <View style={styles.badgeRow}>
+              <ContestCountdownBadge endsAt={item.endsAt} />
+              <ContestEntryBadge contest={item} />
+            </View>
+          </View>
+          <Text style={styles.cardTitle} numberOfLines={2}>{item.title || item.name}</Text>
+        </LinearGradient>
+      </ImageBackground>
+
+      <View style={styles.cardFooter}>
+        <ContestPrizeLine contest={item} labelColor={subTextColor} />
+        <LinearGradient
+          colors={ended ? ['#9AA0AA', '#7E848E'] : [BRAND_PRIMARY, '#FF8A9B']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.startBtn}
+        >
+          <Text style={styles.startBtnText}>{ended ? 'Closed' : 'Enter'}</Text>
+          {!ended && <ArrowIcon size={16} color="#FFF" variant="arrow" />}
+        </LinearGradient>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
+  title: { fontSize: 22, fontFamily: 'Urbanist-Bold' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  contestCard: {
+    borderRadius: 22,
+    marginBottom: 20,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    overflow: 'hidden',
+  },
+  cardBanner: { width: '100%', height: 190, backgroundColor: '#2A2D36' },
+  cardBannerImg: { borderTopLeftRadius: 22, borderTopRightRadius: 22 },
+  bannerGradient: { flex: 1, justifyContent: 'flex-end', padding: 16 },
+  topRow: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    right: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  livePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255,77,103,0.95)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  livePillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF' },
+  livePillText: { color: '#FFF', fontSize: 10, fontFamily: 'Urbanist-Bold', letterSpacing: 0.5 },
+  endedPill: { backgroundColor: 'rgba(75,85,99,0.95)' },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  contestCardEnded: { opacity: 0.6 },
+  cardTitle: { fontSize: 22, fontFamily: 'Urbanist-Bold', color: '#FFF' },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
+  // The reward block's styles now live with the component that renders it,
+  // src/components/contests/ContestBadges.tsx#ContestPrizeLine.
+  prizeBanner: { borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 14 },
+  startBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    borderRadius: 14,
+  },
+  startBtnText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 15 },
+  subtitle: { fontSize: 20, fontFamily: 'Urbanist-Bold', marginBottom: 20 },
+  mediaUpload: { width: '100%', height: 350, borderRadius: 24, overflow: 'hidden', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderStyle: 'dashed' },
+  previewVideo: { width: '100%', height: '100%' },
+  placeholder: { alignItems: 'center' },
+  captionInput: { marginTop: 20, height: 100, borderRadius: 16, padding: 15, borderWidth: 1, textAlignVertical: 'top', fontFamily: 'Urbanist-Medium' },
+  joinButton: { marginTop: 30, height: 56, borderRadius: 16, overflow: 'hidden' },
+  gradient: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  joinButtonText: { color: 'white', fontSize: 18, fontFamily: 'Urbanist-Bold' }
+});

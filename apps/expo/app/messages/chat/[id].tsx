@@ -1,0 +1,799 @@
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { GiftedChat, IMessage, BubbleProps, TimeProps, InputToolbarProps, Bubble, InputToolbar } from 'react-native-gifted-chat';
+import * as ImagePicker from 'expo-image-picker';
+import { readApi, readApiWithCursor, callApi } from '@/src/services/api';
+import { appendOlder, hasNewIncoming, mergeThread, newClientId, outgoingMessageId, type ServerMessage } from '@/src/lib/chatThread';
+import { uploadToR2 } from '@/src/lib/uploadToR2';
+import { optimizeImageForUpload } from '@/src/lib/imageOptimize';
+import { live, subscribeChannel } from '@/src/services/realtime';
+import { loadOfflineInGroup, offlineOwner, saveOfflineInGroup } from '@/src/lib/offlineStore';
+import { useLocalSearchParams } from 'expo-router';
+
+/** Offline copies: the newest messages of the most recently opened chats. */
+const OFFLINE_GROUP = 'chat';
+const OFFLINE_MESSAGES = 40;
+const OFFLINE_CHATS = 20;
+import {
+  View,
+  Text,
+  ActivityIndicator,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  FlatList,
+  Keyboard,
+  Platform,
+} from 'react-native';
+import { Alert } from '@/src/lib/appAlert';
+import { useAuth } from '@/src/hooks/useAuth';
+import ChatHeader from '@/components/chat/ChatHeader';
+import { Ionicons } from '@/src/lib/icons';
+import { CloseIcon } from '@/src/components/ui/CloseIcon';
+
+const PINK = '#FF4D67';
+
+// On web a long, space-less token (like a share URL) will not wrap and would
+// stretch its bubble off-screen. These CSS props force it to break; they are
+// web-only and simply ignored on native, where Text already breaks by glyph.
+const WRAP_LONG: any =
+  Platform.OS === 'web' ? { wordBreak: 'break-word', overflowWrap: 'anywhere' } : {};
+
+type LoadState = 'loading' | 'ready' | 'error';
+
+/** Merge a server page into the GiftedChat list (see src/lib/chatThread.ts). */
+const merge = (prev: IMessage[], rows: any): IMessage[] =>
+  mergeThread(prev as any, (Array.isArray(rows) ? rows : []) as ServerMessage[]) as unknown as IMessage[];
+
+export default function ChatScreen() {
+  const { user: firebaseUser, loading: authLoading } = useAuth();
+  const [messages, setMessages] = useState<IMessage[]>([]);
+  // Cursor to the next OLDER page (X-Next-Cursor), null when the start is reached.
+  const [olderCursor, setOlderCursor] = useState<string | null>(null);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  // Newest incoming message already marked read, so a refresh only re-marks for new ones.
+  const markedReadAt = useRef(0);
+  const params = useLocalSearchParams<{ id?: string; name?: string; avatar?: string; lastSeen?: string }>();
+  const chatId = params.id;
+
+  // A single explicit state machine instead of a lone `isLoading` boolean. The
+  // previous screen only ever flipped loading -> false inside the realtime
+  // callback, which fires ONLY on a successful fetch — so any failure (a 500, a
+  // timeout, an offline blip) left the spinner turning forever. This tracks
+  // failure as a first-class state so the user gets a retry instead of a hang.
+  const [state, setState] = useState<LoadState>('loading');
+  // Bumping this re-runs the load effect — the "Try Again" button.
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // "…is typing" presence. Driven by ephemeral `typing` events on the chat
+  // channel; auto-clears if no keystroke arrives for a few seconds so a dropped
+  // "stopped typing" signal can never leave the indicator stuck on.
+  const [otherTyping, setOtherTyping] = useState(false);
+  const typingClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSent = useRef(0);
+
+  // Live presence of the other member. `online` flips on realtime `presence`
+  // events on this chat channel; `lastSeen` is seeded from the value the inbox
+  // passed through (so the header shows "last seen …" on first paint) and then
+  // kept fresh by the same events.
+  const [otherOnline, setOtherOnline] = useState(false);
+  const [otherLastSeen, setOtherLastSeen] = useState<number | null>(
+    params.lastSeen ? Number(params.lastSeen) || null : null,
+  );
+
+  // Uploading state for an image message (blocks a second pick mid-upload).
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  // In-conversation message search.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  // Recipient identity is passed as query params by whoever opened the chat
+  // (the chat list and the profile "Message" button both already know the other
+  // user). Falls back to a neutral label for a cold deep-link.
+  const recipientName = params.name || 'Chat';
+  const recipientAvatar = params.avatar || null;
+
+  const currentUser = firebaseUser;
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!currentUser || !chatId) {
+      setState('error');
+      return;
+    }
+
+    let cancelled = false;
+    setState('loading');
+    const owner = offlineOwner(currentUser.uid);
+    // The last saved newest page of this chat was painted (offline-friendly).
+    let painted = false;
+    const remember = (rows: any[]) => {
+      if (Array.isArray(rows) && rows.length) void saveOfflineInGroup(owner, OFFLINE_GROUP, chatId, rows.slice(0, OFFLINE_MESSAGES), OFFLINE_CHATS);
+    };
+
+    // 0) SAVED MESSAGES — paint the last saved page right away; the server
+    //    answer below merges over it by id. A failed first fetch then keeps
+    //    these on screen instead of the error state.
+    void loadOfflineInGroup<any[]>(owner, OFFLINE_GROUP, chatId).then((saved) => {
+      if (cancelled || !saved?.data?.length) return;
+      painted = true;
+      setMessages((prev) => (prev.length ? prev : merge(prev, saved.data)));
+      setState((s) => (s === 'loading' || s === 'error' ? 'ready' : s));
+    });
+
+    // 1) INITIAL LOAD — explicit, with real error handling. This is what fixes
+    //    the infinite spinner: a failed first fetch flips us to the error state
+    //    (retryable) rather than leaving `loading` stuck true.
+    //    The server answers with the NEWEST page; older pages load on demand.
+    (async () => {
+      try {
+        const { data: rows, nextCursor } = await readApiWithCursor<any[]>(`/read/chats/${chatId}/messages`);
+        if (cancelled) return;
+        setMessages((prev) => merge(prev, rows));
+        setOlderCursor(nextCursor);
+        markRead(rows);
+        setState('ready');
+        remember(rows);
+      } catch {
+        if (!cancelled && !painted) setState('error');
+      }
+    })();
+
+    // 2) REALTIME UPDATES — the socket pushes new messages; `immediate: false`
+    //    skips its own initial fetch since (1) already did it. A successful
+    //    background refresh also clears a transient error, so the screen
+    //    self-heals the moment connectivity returns.
+    const unsubscribe = live<any[]>(
+      `chat:${chatId}`,
+      () => readApi(`/read/chats/${chatId}/messages`),
+      (rows) => {
+        if (cancelled) return;
+        // Merged by id, never replaced: replacing dropped loaded older pages and
+        // any bubble still being sent.
+        setMessages((prev) => merge(prev, rows));
+        // The screen is open, so new incoming messages are read now. Marking only
+        // on mount left the inbox badge counting messages already on screen.
+        markRead(rows);
+        setState('ready');
+        remember(rows);
+      },
+      { filter: (e) => e.type === 'message', immediate: false },
+    );
+
+    // 3) TYPING + PRESENCE — a separate raw subscription on the same channel,
+    //    since `live()` above only forwards `message` events. Both signals name
+    //    the other member (a DM has exactly two), so anything not from us is
+    //    "them". Ignore our own echo.
+    const unsubAux = subscribeChannel(`chat:${chatId}`, (e) => {
+      if (cancelled || e.uid === currentUser.uid) return;
+      if (e.type === 'typing') {
+        setOtherTyping(true);
+        if (typingClearTimer.current) clearTimeout(typingClearTimer.current);
+        typingClearTimer.current = setTimeout(() => setOtherTyping(false), 4000);
+      } else if (e.type === 'presence') {
+        setOtherOnline(!!e.online);
+        if (typeof e.lastSeen === 'number') setOtherLastSeen(e.lastSeen);
+        // Coming online also means they are no longer "typing" from a stale signal.
+        if (e.online === false) setOtherTyping(false);
+      }
+    });
+
+    // Mark incoming messages as read (best-effort), once per newer incoming message.
+    function markRead(rows: any) {
+      const list = (Array.isArray(rows) ? rows : []) as ServerMessage[];
+      if (!currentUser || !hasNewIncoming(list, currentUser.uid, markedReadAt.current)) return;
+      markedReadAt.current = Math.max(markedReadAt.current, ...list.map((m) => m.createdAt));
+      callApi('markChatRead', { chatId }).catch(() => {});
+    }
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      unsubAux();
+      if (typingClearTimer.current) clearTimeout(typingClearTimer.current);
+    };
+  }, [chatId, currentUser, authLoading, reloadKey]);
+
+  // Tell the other member we're typing — throttled to at most once per ~2.5s so a
+  // fast typist doesn't fan out a broadcast per keystroke. Best-effort.
+  const onInputTextChanged = useCallback(
+    (text: string) => {
+      if (!chatId || !text.trim()) return;
+      const now = Date.now();
+      if (now - lastTypingSent.current < 2500) return;
+      lastTypingSent.current = now;
+      callApi('setTyping', { chatId }).catch(() => {});
+    },
+    [chatId],
+  );
+
+  /**
+   * Send a text message.
+   *
+   * The optimistic bubble is appended immediately, then REMOVED again if the send
+   * fails, and the user is told.
+   *
+   * Previously the failure was written to `console.error` and nowhere else: the
+   * bubble stayed on screen looking exactly like a delivered message, so the user
+   * closed the app believing it had been sent. Worse, the bubble then vanished
+   * without explanation the moment the realtime callback replaced `messages`
+   * wholesale (which happens as soon as either party sends anything) — silent data
+   * loss behind a UI that actively signalled success. The sibling `onPickImage`
+   * already alerted on failure; this now matches it.
+   */
+  const onSend = useCallback(
+    async (newMessages: IMessage[] = []) => {
+      if (!currentUser || !chatId) return;
+      const outgoing = newMessages[0];
+      if (!outgoing) return;
+      // One client id per message, reused by every retry of it: the server stores
+      // the message under `${uid}_${clientId}`, so a retry after a lost response
+      // cannot create a second copy, and the bubble shares the server's id.
+      const clientId = newClientId();
+      const id = outgoingMessageId(currentUser.uid, clientId);
+      const attempt = async (msg: IMessage): Promise<void> => {
+        // Optimistic append so the bubble appears instantly. Not marked sent.
+        setMessages((previous) => GiftedChat.append(previous.filter((m) => m._id !== id), [{ ...msg, _id: id, pending: true }]));
+        try {
+          const res: any = await callApi('sendMessage', { chatId, text: msg.text, clientId });
+          if (res?.message) setMessages((previous) => merge(previous, [res.message]));
+        } catch (error) {
+          console.error('[ChatScreen] Error sending message:', error);
+          // Take the bubble back so the conversation reflects what was actually
+          // delivered. The composer is uncontrolled, so the typed text used to be
+          // simply lost; offer a one-tap retry with the same text instead.
+          setMessages((previous) => previous.filter((m) => m._id !== id));
+          Alert.alert(
+            'Message not sent',
+            'We could not send that message. Check your connection and try again.',
+            [
+              { text: 'Discard', style: 'cancel' },
+              // Same client id: if the first attempt did reach the server, this
+              // returns that message instead of sending it twice.
+              { text: 'Retry', onPress: () => void attempt(msg) },
+            ],
+          );
+        }
+      };
+      await attempt(outgoing);
+    },
+    [chatId, currentUser],
+  );
+
+  // Pick an image, downscale it, upload to the `chat/` R2 folder, then send it as
+  // an image message. The bubble appears optimistically from the LOCAL uri and is
+  // replaced by the server copy on the next realtime refresh.
+  const onPickImage = useCallback(async () => {
+    if (!currentUser || !chatId || uploadingImage) return;
+    let tempId: string | null = null;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission needed', 'Allow photo access to send an image.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9 });
+      if (result.canceled || !result.assets?.length) return;
+      const localUri = result.assets[0].uri;
+
+      setUploadingImage(true);
+      // Optimistic bubble from the local file, under the id the server will use.
+      const clientId = newClientId();
+      tempId = outgoingMessageId(currentUser.uid, clientId);
+      setMessages((prev) =>
+        GiftedChat.append(prev, [
+          {
+            _id: tempId,
+            text: '',
+            image: localUri,
+            createdAt: new Date(),
+            user: { _id: currentUser.uid },
+            pending: true,
+          } as IMessage,
+        ]),
+      );
+
+      const optimized = await optimizeImageForUpload(localUri, 'contest');
+      const mediaUrl = await uploadToR2(optimized, 'image/jpeg', 'chat');
+      const res: any = await callApi('sendMessage', { chatId, mediaUrl, clientId });
+      // The server copy replaces the local-uri bubble (same id).
+      if (res?.message) setMessages((prev) => merge(prev, [res.message]));
+    } catch (error) {
+      console.error('[ChatScreen] Error sending image:', error);
+      // The optimistic bubble used to stay in the thread as if it had been sent.
+      if (tempId) {
+        const failedId = tempId;
+        setMessages((prev) => prev.filter((m) => m._id !== failedId));
+      }
+      Alert.alert('Upload failed', 'Could not send that image. Please try again.');
+    } finally {
+      setUploadingImage(false);
+    }
+  }, [chatId, currentUser, uploadingImage]);
+
+  /** "Load earlier messages": the next older page, below what is shown. */
+  const onLoadEarlier = useCallback(async () => {
+    if (!chatId || !olderCursor || loadingEarlier) return;
+    setLoadingEarlier(true);
+    try {
+      const { data: rows, nextCursor } = await readApiWithCursor<any[]>(`/read/chats/${chatId}/messages`, { before: olderCursor });
+      setMessages((prev) => appendOlder(prev as any, (rows || []) as ServerMessage[]) as unknown as IMessage[]);
+      setOlderCursor(nextCursor);
+    } catch {
+      Alert.alert('Could not load', 'Older messages could not be loaded. Try again.');
+    } finally {
+      setLoadingEarlier(false);
+    }
+  }, [chatId, olderCursor, loadingEarlier]);
+
+  // Run an in-conversation message search against the per-chat endpoint.
+  const runSearch = useCallback(
+    async (q: string) => {
+      const query = q.trim();
+      if (!chatId || !query) {
+        setSearchResults(null);
+        return;
+      }
+      setSearching(true);
+      try {
+        const rows = await readApi(`/read/chats/${chatId}/messages/search?q=${encodeURIComponent(query)}`);
+        setSearchResults(Array.isArray(rows) ? rows : []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    },
+    [chatId],
+  );
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchResults(null);
+    Keyboard.dismiss();
+  }, []);
+
+  const renderBubble = (props: BubbleProps<IMessage>) => (
+    <Bubble
+      {...props}
+      // Instagram-style fully rounded pill bubbles (no tail): gray incoming,
+      // brand-pink outgoing, on a plain white thread. `maxWidth` keeps a bubble
+      // from ever spanning the whole row.
+      wrapperStyle={{
+        left: { backgroundColor: '#EFEFEF', borderRadius: 20, marginBottom: 3, maxWidth: '80%' },
+        right: { backgroundColor: PINK, borderRadius: 20, marginBottom: 3, maxWidth: '80%' },
+      }}
+      // WRAP_LONG breaks unbroken tokens (e.g. a battle share URL). Without it a
+      // long link stayed on one line and pushed the whole bubble off the left
+      // edge of the screen on web.
+      textStyle={{
+        left: { color: '#1A1A1A', fontSize: 15, lineHeight: 21, ...WRAP_LONG },
+        right: { color: '#FFFFFF', fontSize: 15, lineHeight: 21, ...WRAP_LONG },
+      }}
+      // linkStyle isn't a direct Bubble prop; it reaches MessageText through
+      // messageTextProps. Links inherit the same break-long-token behaviour.
+      messageTextProps={{
+        linkStyle: {
+          left: { color: '#1B6EF3', textDecorationLine: 'underline', ...WRAP_LONG },
+          right: { color: '#FFFFFF', textDecorationLine: 'underline', ...WRAP_LONG },
+        },
+      }}
+    />
+  );
+
+  const renderTime = (props: TimeProps<IMessage>) => {
+    const isCurrentUser = props.currentMessage?.user._id === currentUser?.uid;
+    return (
+      <View style={{ paddingHorizontal: 10, paddingBottom: 4 }}>
+        <Text style={[styles.timeText, { color: isCurrentUser ? 'rgba(255,255,255,0.75)' : '#9AA0A6' }]}>
+          {props.currentMessage?.createdAt
+            ? new Date(props.currentMessage.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : ''}
+        </Text>
+      </View>
+    );
+  };
+
+  // gifted-chat v3 exports InputToolbar as a NAMED export, not as a static on
+  // GiftedChat. The old `(GiftedChat as any).InputToolbar` resolved to
+  // `undefined`, so this render function returned `<undefined />` — React threw
+  // "Element type is invalid" the instant the chat mounted, which the app-wide
+  // ErrorBoundary caught as the "Something went wrong" screen. Use the real
+  // component.
+  const renderInputToolbar = (props: InputToolbarProps<IMessage>) => (
+    <View style={styles.inputToolbarContainer}>
+      <InputToolbar
+        {...props}
+        containerStyle={styles.inputToolbar}
+        renderActions={() => (
+          <TouchableOpacity
+            onPress={onPickImage}
+            disabled={uploadingImage}
+            style={styles.attachButton}
+            accessibilityLabel="Send a photo"
+          >
+            {uploadingImage ? (
+              <ActivityIndicator size="small" color={PINK} />
+            ) : (
+              <Ionicons name="image-outline" size={24} color={PINK} />
+            )}
+          </TouchableOpacity>
+        )}
+        renderSend={(sendProps: any) => {
+          const canSend = !!sendProps.text?.trim();
+          return (
+            <TouchableOpacity
+              // gifted-chat v3's onSend expects (message, shouldResetInputToolbar).
+              // Wiring `onPress={sendProps.onSend}` directly instead handed the
+              // press event straight to onSend, so it dispatched a junk message
+              // with no `text` and never cleared the composer — the typed message
+              // was silently dropped. Build the message explicitly and reset.
+              onPress={() => {
+                if (canSend) sendProps.onSend({ text: sendProps.text.trim() }, true);
+              }}
+              disabled={!canSend}
+              style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
+            >
+              <Ionicons name="send" size={19} color="white" />
+            </TouchableOpacity>
+          );
+        }}
+      />
+    </View>
+  );
+
+  // ---- Non-chat states (header stays so the user can always go back) ----
+  const body = () => {
+    if (authLoading || (state === 'loading' && !messages.length)) {
+      return (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={PINK} />
+          <Text style={styles.mutedText}>Loading messages…</Text>
+        </View>
+      );
+    }
+    if (!currentUser) {
+      return (
+        <View style={styles.centered}>
+          <Ionicons name="lock-closed-outline" size={40} color="#C9CDD2" />
+          <Text style={styles.stateTitle}>Please log in</Text>
+          <Text style={styles.mutedText}>Sign in to view this conversation.</Text>
+        </View>
+      );
+    }
+    if (!chatId) {
+      return (
+        <View style={styles.centered}>
+          <Ionicons name="chatbubbles-outline" size={40} color="#C9CDD2" />
+          <Text style={styles.stateTitle}>No chat selected</Text>
+          <Text style={styles.mutedText}>Go back and pick a conversation.</Text>
+        </View>
+      );
+    }
+    if (state === 'error' && !messages.length) {
+      return (
+        <View style={styles.centered}>
+          <View style={styles.errorIconCircle}>
+            <Ionicons name="cloud-offline-outline" size={34} color={PINK} />
+          </View>
+          <Text style={styles.stateTitle}>Couldn’t load messages</Text>
+          <Text style={styles.mutedText}>Check your connection and try again.</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => setReloadKey((k) => k + 1)} activeOpacity={0.85}>
+            <Ionicons name="refresh" size={17} color="white" style={{ marginRight: 8 }} />
+            <Text style={styles.retryText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
+      <GiftedChat
+        messages={messages}
+        onSend={(m) => onSend(m)}
+        loadEarlierMessagesProps={{
+          isAvailable: !!olderCursor,
+          isLoading: loadingEarlier,
+          onPress: onLoadEarlier,
+          label: 'Load earlier messages',
+        }}
+        user={{ _id: currentUser.uid }}
+        renderBubble={renderBubble}
+        renderTime={renderTime}
+        renderInputToolbar={renderInputToolbar}
+        messagesContainerStyle={styles.messagesContainer}
+        minInputToolbarHeight={64}
+        // Hook keystrokes via textInputProps.onChangeText (this GiftedChat version
+        // has no onInputTextChanged prop). It rides alongside the Composer's own
+        // onChange, so it never clobbers the input's text handling.
+        //
+        // The composer's style and placeholder go here too. v3 dropped the
+        // `textInputStyle` / `placeholder` props on InputToolbar: passed there they
+        // failed the typecheck and were ignored at runtime, so the input showed the
+        // library's default style and "Type a message...".
+        textInputProps={{
+          onChangeText: onInputTextChanged,
+          style: styles.textInput,
+          placeholder: 'Type a message…',
+        }}
+        renderFooter={() =>
+          otherTyping ? (
+            <View style={styles.typingRow}>
+              <View style={styles.typingBubble}>
+                <Text style={styles.typingText}>{recipientName.split(' ')[0]} is typing…</Text>
+              </View>
+            </View>
+          ) : null
+        }
+        renderChatEmpty={() => (
+          <View style={styles.emptyChat}>
+            {/* GiftedChat's empty container is inverted, so flip it upright. */}
+            <View style={{ transform: [{ scaleY: -1 }], alignItems: 'center' }}>
+              <View style={styles.emptyIconCircle}>
+                <Ionicons name="chatbubble-ellipses-outline" size={36} color={PINK} />
+              </View>
+              <Text style={styles.stateTitle}>Say hello 👋</Text>
+              <Text style={styles.mutedText}>No messages yet — start the conversation.</Text>
+            </View>
+          </View>
+        )}
+      />
+    );
+  };
+
+  // In-conversation search view — replaces the thread while open, restores it on
+  // Cancel. Media messages carry no text so they never match; results are
+  // newest-first from the per-chat search endpoint.
+  const searchPanel = () => (
+    <View style={styles.searchPanel}>
+      <View style={styles.searchBarRow}>
+        <View style={styles.searchInputWrap}>
+          <Ionicons name="search" size={18} color="#9AA0A6" />
+          <TextInput
+            style={styles.searchFieldInput}
+            placeholder="Search messages…"
+            placeholderTextColor="#9AA0A6"
+            autoFocus
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onSubmitEditing={() => runSearch(searchQuery)}
+            returnKeyType="search"
+          />
+          {searchQuery ? (
+            <TouchableOpacity
+              onPress={() => {
+                setSearchQuery('');
+                setSearchResults(null);
+              }}
+            >
+              <CloseIcon variant="circle" size={18} color="#C9CDD2" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <TouchableOpacity onPress={closeSearch}>
+          <Text style={styles.searchCancel}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+
+      {searching ? (
+        <View style={styles.centered}>
+          <ActivityIndicator color={PINK} />
+        </View>
+      ) : searchResults === null ? (
+        <View style={styles.searchHint}>
+          <Ionicons name="search-outline" size={34} color="#C9CDD2" />
+          <Text style={styles.mutedText}>Search this conversation’s messages.</Text>
+        </View>
+      ) : searchResults.length === 0 ? (
+        <View style={styles.searchHint}>
+          <Ionicons name="sad-outline" size={34} color="#C9CDD2" />
+          <Text style={styles.mutedText}>No messages found for “{searchQuery.trim()}”.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={searchResults}
+          keyExtractor={(m) => m.id}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingVertical: 8 }}
+          renderItem={({ item }) => {
+            const mine = item.senderId === currentUser?.uid;
+            return (
+              <View style={styles.searchResultItem}>
+                <Text style={styles.searchResultWho}>{mine ? 'You' : recipientName.split(' ')[0]}</Text>
+                <Text style={styles.searchResultText} numberOfLines={3}>
+                  {item.text}
+                </Text>
+                <Text style={styles.searchResultTime}>
+                  {new Date(item.createdAt).toLocaleString([], {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </Text>
+              </View>
+            );
+          }}
+        />
+      )}
+    </View>
+  );
+
+  return (
+    <View style={styles.screen}>
+      <ChatHeader
+        recipientName={recipientName}
+        recipientAvatar={recipientAvatar}
+        online={otherOnline}
+        lastSeen={otherLastSeen}
+        onSearchPress={() => setSearchOpen((v) => !v)}
+      />
+      {searchOpen ? searchPanel() : body()}
+    </View>
+  );
+}
+
+const CHAT_BG = '#FFFFFF';
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: CHAT_BG },
+  messagesContainer: { backgroundColor: CHAT_BG },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    backgroundColor: CHAT_BG,
+  },
+  stateTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    marginTop: 14,
+    textAlign: 'center',
+  },
+  mutedText: {
+    fontSize: 14,
+    color: '#9AA0A6',
+    marginTop: 6,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  errorIconCircle: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: 'rgba(255,77,103,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(255,77,103,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: PINK,
+    paddingHorizontal: 28,
+    paddingVertical: 13,
+    borderRadius: 26,
+    marginTop: 22,
+    shadowColor: PINK,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  retryText: { color: 'white', fontSize: 15, fontWeight: '700' },
+  emptyChat: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 32,
+  },
+  inputToolbarContainer: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#ECECEC',
+  },
+  inputToolbar: {
+    backgroundColor: '#F4F4F6',
+    borderRadius: 26,
+    marginHorizontal: 0,
+    marginBottom: 2,
+    borderWidth: 0,
+    paddingHorizontal: 8,
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 21,
+    color: '#1A1A1A',
+    marginLeft: 8,
+    marginTop: 0,
+    marginBottom: 0,
+    paddingTop: 0,
+  },
+  sendButton: {
+    backgroundColor: PINK,
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+    marginBottom: 4,
+  },
+  sendButtonDisabled: { backgroundColor: '#F3A6B2' },
+  attachButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+    marginBottom: 4,
+  },
+  timeText: { fontSize: 11 },
+  searchPanel: { flex: 1, backgroundColor: '#FFFFFF' },
+  searchBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ECECEC',
+  },
+  searchInputWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F4F4F6',
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    height: 44,
+  },
+  searchFieldInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#1A1A1A',
+    marginLeft: 8,
+  },
+  searchCancel: { color: PINK, fontSize: 15, fontWeight: '600', marginLeft: 12 },
+  searchHint: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 },
+  searchResultItem: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#F1F1F4',
+  },
+  searchResultWho: { fontSize: 12, fontWeight: '700', color: PINK, marginBottom: 2 },
+  searchResultText: { fontSize: 15, color: '#1A1A1A', lineHeight: 20 },
+  searchResultTime: { fontSize: 11, color: '#9AA0A6', marginTop: 4 },
+  typingRow: {
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+    paddingTop: 2,
+    alignItems: 'flex-start',
+  },
+  typingBubble: {
+    backgroundColor: '#F1F1F4',
+    borderRadius: 16,
+    borderBottomLeftRadius: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  typingText: { fontSize: 13, color: '#8A8F98', fontStyle: 'italic' },
+});

@@ -1,0 +1,422 @@
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { Table } from "@/components/ui/Table";
+import { Badge } from "@/components/ui/Badge";
+import { PageHeader, fmtDateTime, fmtNumber } from "@/lib/format";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { toast } from "@/lib/toast";
+import { Trophy, XCircle, Eye, Swords, ShieldAlert, ShieldCheck, Package } from "lucide-react";
+
+const STATUS = ["", "active", "waiting_for_opponent", "completed", "cancelled"];
+
+export default function Matches() {
+  const qc = useQueryClient();
+  const { confirm } = useConfirm();
+  const [status, setStatus] = useState("");
+  const [detailId, setDetailId] = useState<string | null>(null);
+
+  const { data = [], isLoading } = useQuery({
+    queryKey: ["matches", status],
+    queryFn: () => api.matches(status || undefined),
+  });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["matches"] });
+
+  const winnerMut = useMutation({
+    mutationFn: ({ id, winnerUid }: { id: string; winnerUid?: string }) => api.declareWinner(id, winnerUid),
+    // A product-prize battle pays no coins — settlement creates a delivery claim
+    // instead — so the old unconditional "reward paid" was simply untrue for those.
+    // The route tells us which happened.
+    onSuccess: (result: any) => {
+      toast.success(
+        result?.prizeType === "product"
+          ? "Winner declared — prize claim created. Fulfil it in Prize Claims."
+          : "Winner declared, DP coin prize paid",
+      );
+      invalidate();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+  const cancelMut = useMutation({
+    mutationFn: (id: string) => api.cancelMatch(id),
+    onSuccess: () => { toast.success("Match cancelled & refunded"); invalidate(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const field = "px-3 py-2 rounded-xl border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+
+  return (
+    <div>
+      <PageHeader
+        title="Contest Matches"
+        subtitle={`${data.length} battles`}
+        action={
+          <select className={field} value={status} onChange={(e) => setStatus(e.target.value)}>
+            {STATUS.map((s) => (
+              <option key={s} value={s}>{s === "" ? "All statuses" : s.replace(/_/g, " ")}</option>
+            ))}
+          </select>
+        }
+      />
+
+      <Table
+        loading={isLoading}
+        data={data}
+        keyFn={(m: any) => m.id}
+        empty="No matches found"
+        columns={[
+          {
+            key: "battle",
+            header: "Battle",
+            render: (m: any) => (
+              <div className="flex items-center gap-2 min-w-0">
+                <Swords size={15} className="text-violet-500 flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground truncate">
+                    {m.userA?.username || "?"} <span className="text-muted-foreground">vs</span> {m.userB?.username || "waiting"}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">{m.title || m.id}</p>
+                </div>
+              </div>
+            ),
+          },
+          {
+            key: "votes",
+            header: "Votes (A / B)",
+            render: (m: any) => (
+              <span className="font-medium">{fmtNumber(m.userA?.votes)} / {fmtNumber(m.userB?.votes)}</span>
+            ),
+          },
+          { key: "status", header: "Status", render: (m: any) => <Badge variant={m.status === "active" ? "active" : m.status === "completed" ? "ended" : m.status === "cancelled" ? "cancelled" : "pending"}>{m.status?.replace(/_/g, " ")}</Badge> },
+          { key: "entry", header: "Entry (💎)", render: (m: any) => <span>{fmtNumber(m.entryFee)}</span> },
+          {
+            key: "reward",
+            header: "Prize (🪙)",
+            // A product battle's rewardAmount is 0 by construction, so rendering the
+            // coin figure alone showed `0` and read as a broken contest.
+            render: (m: any) =>
+              m.prizeType === "product" ? (
+                <span
+                  className="inline-flex max-w-40 items-center gap-1"
+                  title={m.prizeProductTitle || "Product prize"}
+                >
+                  <Package size={13} className="shrink-0 text-violet-600" />
+                  <span className="truncate text-xs font-medium">{m.prizeProductTitle || "Product"}</span>
+                </span>
+              ) : (
+                <span>{fmtNumber(m.rewardAmount)}</span>
+              ),
+          },
+          { key: "created", header: "Created", render: (m: any) => <span className="text-muted-foreground">{fmtDateTime(m.createdAt)}</span> },
+          {
+            key: "actions",
+            header: "",
+            className: "text-right",
+            render: (m: any) => (
+              <div className="flex items-center justify-end gap-1">
+                <IconBtn title="View votes" onClick={() => setDetailId(m.id)}><Eye size={15} /></IconBtn>
+                {m.status !== "completed" && m.status !== "cancelled" && (
+                  <>
+                    <IconBtn
+                      title="Declare winner (by votes)"
+                      onClick={async () => {
+                        if (await confirm({ title: "Declare winner?", description: "Resolve this battle by current votes and pay out the winner." }))
+                          winnerMut.mutate({ id: m.id });
+                      }}
+                    >
+                      <Trophy size={15} className="text-amber-500" />
+                    </IconBtn>
+                    <IconBtn
+                      title="Cancel & refund"
+                      onClick={async () => {
+                        if (await confirm({ title: "Cancel match?", description: "Both Diamond entry fees will be refunded.", variant: "destructive" }))
+                          cancelMut.mutate(m.id);
+                      }}
+                    >
+                      <XCircle size={15} className="text-red-600" />
+                    </IconBtn>
+                  </>
+                )}
+              </div>
+            ),
+          },
+        ]}
+      />
+
+      {detailId && (
+        <MatchDetail
+          id={detailId}
+          onClose={() => setDetailId(null)}
+          onDeclare={(winnerUid) => { winnerMut.mutate({ id: detailId, winnerUid }); setDetailId(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function IconBtn({ children, title, onClick }: any) {
+  return (
+    <button title={title} onClick={onClick} className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground">
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Server-owned VS Story publication state (migration 0055) with a repair action.
+ * Retry is full-admin and audited on the Worker; it never touches entry fees,
+ * refunds or settlement.
+ */
+function VsStoryPanel({ match: m }: { match: any }) {
+  const qc = useQueryClient();
+  const retry = useMutation({
+    mutationFn: () => api.retryVsStory(m.id),
+    onSuccess: (r) => {
+      toast.success(`VS Story: ${r.outcome}${r.reason ? ` (${r.reason})` : ""}`);
+      qc.invalidateQueries({ queryKey: ["match", m.id] });
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+  if (!m.vsStoryStatus && !m.userB?.uid) return null;
+  const status: string = m.vsStoryStatus || "not eligible";
+  const canRetry = m.status === "active" && ["failed", "pending", "processing"].includes(m.vsStoryStatus);
+  return (
+    <div className="rounded-xl border border-border p-3 mb-4 text-xs">
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-foreground">VS Story</span>
+        <Badge variant={status === "published" ? "active" : status === "failed" ? "cancelled" : "pending"}>{status}</Badge>
+        {m.vsStoryAttempts ? <span className="text-muted-foreground">{m.vsStoryAttempts} attempt(s)</span> : null}
+        {canRetry && (
+          <button
+            onClick={() => retry.mutate()}
+            disabled={retry.isPending}
+            className="ml-auto px-3 py-1.5 rounded-lg border border-border font-semibold hover:bg-secondary disabled:opacity-50"
+          >
+            {retry.isPending ? "Retrying…" : "Retry VS Story"}
+          </button>
+        )}
+      </div>
+      {m.vsStoryError && <p className="mt-2 font-mono text-red-600 break-all">{m.vsStoryError}</p>}
+      {m.vsImageUrl && (
+        <a href={m.vsImageUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-primary underline">
+          View composite
+        </a>
+      )}
+    </div>
+  );
+}
+
+function MatchDetail({ id, onClose, onDeclare }: { id: string; onClose: () => void; onDeclare: (uid: string) => void }) {
+  const match = useQuery({ queryKey: ["match", id], queryFn: () => api.match(id) });
+  const votes = useQuery({ queryKey: ["match-votes", id], queryFn: () => api.matchVotes(id) });
+  const audit = useQuery({ queryKey: ["match-audit", id], queryFn: () => api.matchVoteAudit(id) });
+  const m = match.data;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl max-h-[85vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-bold text-foreground mb-4">Match Detail</h3>
+        {!m ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-4 mb-5">
+              {[m.userA, m.userB].map((u: any, idx: number) => (
+                <div key={idx} className={`rounded-xl border p-4 ${m.winnerUid === u?.uid ? "border-amber-400 bg-amber-50/50" : "border-border"}`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-8 h-8 rounded-lg overflow-hidden bg-secondary flex items-center justify-center">
+                      {u?.profilePic ? <img src={u.profilePic} alt="" className="w-full h-full object-cover" /> : <span>{(u?.username || "?")[0]}</span>}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{u?.username || "waiting"}</p>
+                      <p className="text-xs text-muted-foreground">{fmtNumber(u?.votes)} votes</p>
+                    </div>
+                    {m.winnerUid === u?.uid && <Trophy size={15} className="text-amber-500 ml-auto" />}
+                  </div>
+                  {u?.mediaUrl && <img src={u.mediaUrl} alt="" className="w-full h-32 object-cover rounded-lg" />}
+                  {m.status !== "completed" && m.status !== "cancelled" && u?.uid && (
+                    <button onClick={() => onDeclare(u.uid)} className="mt-3 w-full py-2 rounded-lg gradient-purple text-white text-xs font-semibold">
+                      Declare as Winner
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 mb-3 text-sm">
+              <Badge variant={m.status === "active" ? "active" : m.status === "completed" ? "ended" : "pending"}>{m.status?.replace(/_/g, " ")}</Badge>
+              <span className="text-muted-foreground">Total votes: {fmtNumber(m.totalVotes)}</span>
+            </div>
+
+            <VsStoryPanel match={m} />
+
+            <FraudSignals data={audit.data} loading={audit.isLoading} usernameA={m.userA?.username} usernameB={m.userB?.username} />
+
+            <h4 className="font-semibold text-sm text-foreground mb-2">Votes ({votes.data?.length ?? 0})</h4>
+
+            <div className="border border-border rounded-xl overflow-hidden max-h-52 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-secondary/40">
+                  <tr>
+                    <th className="text-left px-3 py-2">Voter</th>
+                    <th className="text-left px-3 py-2">Voted for</th>
+                    <th className="text-left px-3 py-2">Device</th>
+                    <th className="text-left px-3 py-2">When</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(votes.data ?? []).map((v: any) => (
+                    <tr key={v.id} className="border-t border-border">
+                      <td className="px-3 py-2 truncate max-w-[120px]">{v.username || v.voterUid}</td>
+                      <td className="px-3 py-2 truncate max-w-[100px]">{v.votedForUid}</td>
+                      <td className="px-3 py-2 truncate max-w-[100px] text-muted-foreground">{v.deviceId || "—"}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{fmtDateTime(v.createdAt)}</td>
+                    </tr>
+                  ))}
+                  {(votes.data ?? []).length === 0 && (
+                    <tr><td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">No votes yet</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+        <div className="mt-5 flex justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-secondary text-sm font-medium">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * Vote-fraud signals for a battle — detection only, for a human to judge before
+ * paying out or when handling a dispute. Nothing here blocks or auto-voids; it
+ * just makes stuffing visible (same-IP clusters, reused devices, freshly-made
+ * accounts) so an admin can decide to cancel+refund or override the winner.
+ */
+function FraudSignals({
+  data,
+  loading,
+  usernameA,
+  usernameB,
+}: {
+  data: any;
+  loading: boolean;
+  usernameA?: string;
+  usernameB?: string;
+}) {
+  if (loading) {
+    return <div className="mb-4 text-xs text-muted-foreground">Analysing votes for fraud signals…</div>;
+  }
+  if (!data) return null;
+
+  const ipClusters: any[] = data.ipClusters ?? [];
+  const deviceReuse: any[] = data.deviceReuse ?? [];
+  const fresh = data.freshAccounts ?? { forA: 0, forB: 0, withinHours: 24 };
+  const total = Number(data.totalVotes) || 0;
+  const clustered = Number(data.clusteredIpVotes) || 0;
+  const clusteredPct = total > 0 ? Math.round((clustered / total) * 100) : 0;
+
+  const hasSignal = ipClusters.length > 0 || deviceReuse.length > 0 || fresh.forA > 0 || fresh.forB > 0;
+  const nameFor = (side: string) => (side === "A" ? usernameA || "A" : side === "B" ? usernameB || "B" : "?");
+  const sideLabel = (a: number, b: number) => {
+    const parts: string[] = [];
+    if (a) parts.push(`${a} → ${usernameA || "A"}`);
+    if (b) parts.push(`${b} → ${usernameB || "B"}`);
+    return parts.join(", ") || "—";
+  };
+
+  return (
+    <div className="mb-5 rounded-xl border border-border overflow-hidden">
+      <div className={`px-3 py-2 flex items-center gap-2 text-sm font-semibold ${hasSignal ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+        {hasSignal ? <ShieldAlert size={15} /> : <ShieldCheck size={15} />}
+        {hasSignal ? "Vote fraud signals" : "No obvious fraud signals"}
+      </div>
+
+      <div className="p-3 space-y-3 text-xs">
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
+          <span>Total votes: <b className="text-foreground">{total}</b></span>
+          <span>Distinct IPs: <b className="text-foreground">{data.distinctIps ?? 0}</b></span>
+          <span>Distinct devices: <b className="text-foreground">{data.distinctDevices ?? 0}</b></span>
+          <span>
+            From shared IPs: <b className={clusteredPct >= 40 ? "text-amber-600" : "text-foreground"}>{clustered} ({clusteredPct}%)</b>
+          </span>
+        </div>
+
+        {/* IP clusters — the primary stuffing signal. */}
+        <div>
+          <p className="font-semibold text-foreground mb-1">Shared IPs ({ipClusters.length})</p>
+          {ipClusters.length === 0 ? (
+            <p className="text-muted-foreground">No IP was used by more than one voter.</p>
+          ) : (
+            <div className="border border-border rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+              <table className="w-full">
+                <thead className="bg-secondary/40">
+                  <tr>
+                    <th className="text-left px-2 py-1.5">IP</th>
+                    <th className="text-left px-2 py-1.5">Voters</th>
+                    <th className="text-left px-2 py-1.5">Backed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ipClusters.map((c: any) => (
+                    <tr key={c.ip} className="border-t border-border">
+                      <td className="px-2 py-1.5 font-mono">{c.ip}</td>
+                      <td className={`px-2 py-1.5 font-semibold ${c.count >= 4 ? "text-amber-600" : ""}`}>{c.count}</td>
+                      <td className="px-2 py-1.5 text-muted-foreground">{sideLabel(c.forA, c.forB)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Device reuse — rare (per-match dedup), so any hit is worth a look. */}
+        {deviceReuse.length > 0 && (
+          <div>
+            <p className="font-semibold text-amber-700 mb-1">Reused devices ({deviceReuse.length})</p>
+            <div className="border border-border rounded-lg overflow-hidden max-h-32 overflow-y-auto">
+              <table className="w-full">
+                <thead className="bg-secondary/40">
+                  <tr>
+                    <th className="text-left px-2 py-1.5">Device</th>
+                    <th className="text-left px-2 py-1.5">Votes</th>
+                    <th className="text-left px-2 py-1.5">Backed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deviceReuse.map((c: any) => (
+                    <tr key={c.deviceId} className="border-t border-border">
+                      <td className="px-2 py-1.5 font-mono truncate max-w-[140px]">{c.deviceId}</td>
+                      <td className="px-2 py-1.5 font-semibold text-amber-600">{c.count}</td>
+                      <td className="px-2 py-1.5 text-muted-foreground">{sideLabel(c.forA, c.forB)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Fresh accounts — sockpuppets minted around the match start. */}
+        <div>
+          <p className="font-semibold text-foreground mb-1">
+            New accounts voting (created within {fresh.withinHours ?? 24}h of the battle)
+          </p>
+          {fresh.forA === 0 && fresh.forB === 0 ? (
+            <p className="text-muted-foreground">None — voters are established accounts.</p>
+          ) : (
+            <p className="text-muted-foreground">
+              <span className={fresh.forA >= 3 ? "text-amber-600 font-semibold" : ""}>{fresh.forA} → {nameFor("A")}</span>
+              {"  ·  "}
+              <span className={fresh.forB >= 3 ? "text-amber-600 font-semibold" : ""}>{fresh.forB} → {nameFor("B")}</span>
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

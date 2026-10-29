@@ -1,0 +1,299 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { AppImage as Image } from '@/src/components/ui/AppImage';
+import { useDesignWindow } from '@/src/lib/layout';
+import { Ionicons } from '@/src/lib/icons';
+import { BackButton } from '@/src/components/ui/BackButton';
+import { BlogSkeleton } from '@/src/components/skeletons/BlogSkeleton';
+import { useRouter } from 'expo-router';
+import { blogService, BlogPost, BlogCategory } from '@/src/services/blog/blogService';
+import { Colors } from '@/constants/theme';
+import { Header } from '@/src/components/home/Header';
+import { useWebSeo } from '@/src/lib/webSeo';
+
+export default function BlogListScreen() {
+  const router = useRouter();
+  // Card width for the responsive cover (the list is a phone column on desktop too).
+  const { width: screenW } = useDesignWindow();
+  const isDark = useColorScheme() === 'dark';
+
+  useWebSeo({
+    title: 'Blog',
+    description:
+      'Read the latest TopHunt articles — contest answers, quiz solutions, giveaway guides and offer updates.',
+    canonical: 'https://tophunt.in/blog',
+    type: 'website',
+  });
+
+  const backgroundColor = isDark ? Colors.dark.background : Colors.light.background;
+  const cardBg = isDark ? '#1C1C1E' : '#FFFFFF';
+  const textColor = isDark ? '#FFFFFF' : '#121212';
+  const subTextColor = isDark ? '#A0A0A5' : '#8A8A8E';
+  const primaryColor = '#FF3B30';
+  const chipBg = isDark ? '#1C1C1E' : '#F2F2F7';
+
+  const [posts, setPosts] = useState<BlogPost[]>([]);
+  const [categories, setCategories] = useState<BlogCategory[]>([]);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  // Distinct from "loaded, and there are none". See blogService.getPosts.
+  const [failed, setFailed] = useState(false);
+
+  const load = useCallback(
+    async (category: string | null, replace: boolean, cursorParam: number | null = null) => {
+      const res = await blogService.getPosts({ category: category || undefined, cursor: cursorParam, limit: 12 });
+      setPosts((prev) => (replace ? res.posts : [...prev, ...res.posts]));
+      setCursor(res.nextCursor);
+      setHasMore(res.nextCursor !== null);
+    },
+    [],
+  );
+
+  /**
+   * One place that owns the loading/failed pair.
+   *
+   * `finally` matters as much as the `catch`: every one of these paths used to
+   * call `setLoading(false)` on the line after an un-awaited-failure, so a throw
+   * left the skeleton spinning forever with no way back.
+   */
+  const loadFirstPage = useCallback(
+    async (category: string | null, mode: 'initial' | 'refresh') => {
+      if (mode === 'refresh') setRefreshing(true);
+      else setLoading(true);
+      setFailed(false);
+      setCursor(null);
+      setHasMore(true);
+      try {
+        // Categories are best-effort and never throw, so they cannot stop posts.
+        setCategories(await blogService.getCategories());
+        await load(category, true);
+      } catch (error) {
+        console.error('Error loading the blog list:', error);
+        setFailed(true);
+        setPosts([]);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [load],
+  );
+
+  useEffect(() => {
+    loadFirstPage(null, 'initial');
+  }, [loadFirstPage]);
+
+  const onSelectCategory = async (cat: string | null) => {
+    if (cat === activeCategory) return;
+    setActiveCategory(cat);
+    setPosts([]);
+    await loadFirstPage(cat, 'initial');
+  };
+
+  const onEndReached = async () => {
+    if (loadingMore || !hasMore || loading || failed) return;
+    setLoadingMore(true);
+    try {
+      await load(activeCategory, false, cursor);
+    } catch (error) {
+      // Keep the pages already on screen; just stop trying to extend them.
+      console.error('Error loading more blog posts:', error);
+      setHasMore(false);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const onRefresh = () => loadFirstPage(activeCategory, 'refresh');
+
+  const onRetry = () => loadFirstPage(activeCategory, 'initial');
+
+  const formatDate = (ts?: number) => {
+    if (!ts) return '';
+    return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const openPost = (post: BlogPost) => {
+    router.push({ pathname: '/blog/[slug]', params: { slug: post.slug } });
+  };
+
+  const renderItem = ({ item, index }: { item: BlogPost; index: number }) => {
+    // First post gets a larger "featured" treatment.
+    const featured = index === 0 && !activeCategory;
+    return (
+      <TouchableOpacity activeOpacity={0.9} style={[styles.card, { backgroundColor: cardBg }]} onPress={() => openPost(item)}>
+        {item.coverImageUrl ? (
+          <Image
+            // Card-sized variant, falling back to the full image when the Worker
+            // is not building variants. This list was downloading full-resolution
+            // covers to render them a few hundred pixels wide.
+            source={{ uri: item.coverImageUrlThumb || item.coverImageUrl }}
+            // Card width, capped at the 320 variant: one size per blog cover saves
+            // free-plan transformations (the article page uses the 1080 one).
+            displayWidth={Math.min(screenW, 800) - 32}
+            maxVariantWidth={320}
+            style={featured ? styles.featuredImage : styles.cardImage}
+            contentFit="cover"
+            transition={200}
+          />
+        ) : (
+          <View style={[featured ? styles.featuredImage : styles.cardImage, styles.placeholder, { backgroundColor: chipBg }]}>
+            <Ionicons name="document-text-outline" size={36} color={subTextColor} />
+          </View>
+        )}
+        <View style={styles.cardBody}>
+          {!!item.category && <Text style={[styles.category, { color: primaryColor }]}>{item.category.toUpperCase()}</Text>}
+          <Text style={[styles.cardTitle, { color: textColor }]} numberOfLines={featured ? 3 : 2}>
+            {item.title}
+          </Text>
+          {!!item.excerpt && (
+            <Text style={[styles.excerpt, { color: subTextColor }]} numberOfLines={2}>
+              {item.excerpt}
+            </Text>
+          )}
+          <View style={styles.metaRow}>
+            <Text style={[styles.meta, { color: subTextColor }]}>{item.author || 'TopHunt'}</Text>
+            <Text style={[styles.meta, { color: subTextColor }]}>{formatDate(item.publishedAt || item.createdAt)}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderHeader = () => (
+    <View>
+      <View style={styles.headerRow}>
+        <BackButton size={22} color={textColor} style={[styles.iconBtn, { backgroundColor: chipBg }]} />
+        <Text style={[styles.headerTitle, { color: textColor }]}>Blog</Text>
+        <View style={{ width: 44 }} />
+      </View>
+
+      {categories.length > 0 && (
+        <FlatList
+          horizontal
+          data={[{ category: 'All', count: 0 } as BlogCategory, ...categories]}
+          keyExtractor={(c) => c.category}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 14 }}
+          renderItem={({ item }) => {
+            const value = item.category === 'All' ? null : item.category;
+            const active = value === activeCategory;
+            return (
+              <TouchableOpacity
+                onPress={() => onSelectCategory(value)}
+                style={[styles.chip, { backgroundColor: active ? primaryColor : chipBg }]}
+              >
+                <Text style={[styles.chipText, { color: active ? '#FFF' : subTextColor }]}>{item.category}</Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      )}
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor }]}>
+      <Header />
+      {loading ? (
+        <>
+          {renderHeader()}
+          <BlogSkeleton />
+        </>
+      ) : (
+        <FlatList
+          data={posts}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+          ListHeaderComponent={renderHeader}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+          onEndReached={onEndReached}
+          onEndReachedThreshold={0.5}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={primaryColor} />}
+          ListEmptyComponent={
+            failed ? (
+              <View style={styles.center}>
+                <Ionicons name="cloud-offline-outline" size={48} color={subTextColor} style={{ opacity: 0.5 }} />
+                <Text style={[styles.emptyTitle, { color: textColor }]}>Couldn&apos;t load the blog</Text>
+                <Text style={[styles.emptyBody, { color: subTextColor }]}>
+                  Check your connection and try again.
+                </Text>
+                <TouchableOpacity
+                  onPress={onRetry}
+                  style={[styles.retryBtn, { backgroundColor: primaryColor }]}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.center}>
+                <Ionicons name="newspaper-outline" size={48} color={subTextColor} style={{ opacity: 0.5 }} />
+                <Text style={{ color: subTextColor, marginTop: 12 }}>No posts yet.</Text>
+              </View>
+            )
+          }
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator style={{ marginVertical: 20 }} color={primaryColor} /> : null
+          }
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 80 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 24, fontWeight: '800' },
+  chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
+  chipText: { fontSize: 13, fontWeight: '700' },
+  card: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 18,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  emptyTitle: { fontSize: 17, fontWeight: '700', marginTop: 14 },
+  emptyBody: { fontSize: 14, marginTop: 6, textAlign: 'center', paddingHorizontal: 32 },
+  retryBtn: { marginTop: 18, paddingHorizontal: 26, paddingVertical: 11, borderRadius: 22 },
+  retryText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
+  cardImage: { width: '100%', height: 170 },
+  featuredImage: { width: '100%', height: 220 },
+  placeholder: { alignItems: 'center', justifyContent: 'center' },
+  cardBody: { padding: 14 },
+  category: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, marginBottom: 6 },
+  cardTitle: { fontSize: 18, fontWeight: '700', lineHeight: 24, marginBottom: 6 },
+  excerpt: { fontSize: 14, lineHeight: 20, marginBottom: 10 },
+  metaRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  meta: { fontSize: 12, fontWeight: '500' },
+});

@@ -1,0 +1,71 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { useQueryClient } from '@tanstack/react-query';
+import { toggleFollowService } from '@/src/services/users';
+import { followStateFromResult, intentFor, stateInSets, withStateInSets, type FollowState } from '@/src/lib/followState';
+import { useAuthGate } from '@/src/hooks/useAuthGate';
+import { useAuth } from '@/src/hooks/useAuth';
+import { emitToast } from '@/src/lib/toastBridge';
+import { enqueueOutbox, isNetworkFailure } from '@/src/sync';
+
+/**
+ * Optimistic follow / unfollow / request for lists of people (Explore, search).
+ * Seeds from the viewer's `following` list, gates guests at the tap, and rolls
+ * back on failure. Private accounts end up "Requested", not "Following".
+ */
+export function useFollowToggle(initialFollowing: string[] | null | undefined) {
+  const { requireAuth } = useAuthGate();
+  const qc = useQueryClient();
+  const [followed, setFollowed] = useState<Set<string>>(new Set());
+  const [requested, setRequested] = useState<Set<string>>(new Set());
+  const busy = useRef(new Set<string>());
+  const { user } = useAuth();
+  const viewer = user?.uid ?? null;
+
+  // A different account (or none): nothing the previous one followed or
+  // requested may stay on a mounted list.
+  useEffect(() => {
+    setFollowed(new Set());
+    setRequested(new Set());
+  }, [viewer]);
+
+  useEffect(() => {
+    if (initialFollowing) setFollowed(new Set(initialFollowing));
+  }, [initialFollowing]);
+
+  const stateOf = useCallback((id: string): FollowState => stateInSets(followed, requested, id), [followed, requested]);
+
+  const toggle = useCallback(
+    async (id: string) => {
+      if (!requireAuth('follow') || busy.current.has(id)) return;
+      busy.current.add(id);
+      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      const before = stateInSets(followed, requested, id);
+      const apply = (state: FollowState) => {
+        setFollowed((f) => withStateInSets(f, new Set(), id, state).followed);
+        setRequested((r) => withStateInSets(new Set(), r, id, state).requested);
+      };
+      apply(before === 'none' ? 'following' : 'none');
+      const intent = intentFor(before);
+      try {
+        apply(followStateFromResult(await toggleFollowService(id, intent)));
+        qc.invalidateQueries({ queryKey: ['profile'] });
+      } catch (error) {
+        // No answer (offline): keep the change and send the same explicit
+        // intent later. A private account will show "Requested" after it syncs.
+        if (isNetworkFailure(error) && (await enqueueOutbox('user.follow', id, { intent }))) {
+          emitToast('Offline: this will sync when you are back online.', 'info');
+          return;
+        }
+        apply(before);
+        emitToast('Follow update nahi ho paya. Dobara try karo.', 'error');
+      } finally {
+        busy.current.delete(id);
+      }
+    },
+    [followed, requested, requireAuth, qc],
+  );
+
+  return { stateOf, toggle };
+}

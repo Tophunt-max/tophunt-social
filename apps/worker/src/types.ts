@@ -1,0 +1,235 @@
+/**
+ * Cloudflare bindings + secrets available to the Worker.
+ * Bindings come from wrangler.toml; secrets from `wrangler secret put`.
+ */
+export interface Env {
+  // --- Bindings (wrangler.toml) ---
+  DB: D1Database;
+  MEDIA: R2Bucket;
+  /**
+   * Cloudflare Images binding (`[images] binding = "IMAGES"`). Used ONLY to
+   * compose the server-side VS battle card (lib/vsComposite.ts). Optional so a
+   * deployment without it degrades to "VS Story pending" instead of crashing;
+   * the publication workflow reports `renderer_unavailable` and retries.
+   */
+  IMAGES?: ImagesBinding;
+  OTP_KV: KVNamespace;
+  CACHE_KV: KVNamespace;
+  REALTIME: DurableObjectNamespace;
+  // Per-match vote aggregator (SQLite-backed DO) — keeps the high-frequency
+  // vote write path off D1's single writer. Typed for native RPC calls.
+  VOTE_COUNTER: DurableObjectNamespace<import("./voteCounter").VoteCounter>;
+  // Per-subject rate-limit counters (SQLite-backed DO). One instance per uid /
+  // IP / phone / email, so check-and-increment is atomic for that subject —
+  // which a KV read-then-write on an eventually-consistent store never was.
+  // Typed for native RPC calls. See lib/rateLimit.ts for the client.
+  RATE_LIMITER: DurableObjectNamespace<import("./rateLimiter").RateLimiter>;
+  // Workers Rate Limiting binding for guest reads (middleware/auth.ts
+  // `guestReadLimit`). Optional: absent locally and in tests, where the check
+  // fails open.
+  GUEST_READ_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };
+  // Workers Analytics Engine dataset for anonymous usage counters
+  // (lib/usageEvents.ts). Optional: absent locally and in tests, where batches
+  // are accepted and discarded. ANALYTICS_DATASET names it for the SQL read
+  // (default "tophunt_events").
+  ANALYTICS?: { writeDataPoint(p: { indexes?: string[]; blobs?: string[]; doubles?: number[] }): void };
+  ANALYTICS_DATASET?: string;
+  USAGE_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };
+  // Per-chat message store (SQLite-backed DO). Owns chat message BODIES, keeping
+  // the fastest-growing write path off D1's single writer. The `chats` preview
+  // row + `chat_members` index stay in D1 (cross-chat inbox queries). Typed for
+  // native RPC calls; see lib/chatArchive.ts for the client. Seeds lazily from
+  // the D1 `messages` rows on first touch — that seed IS the migration.
+  CHAT_ARCHIVE: DurableObjectNamespace<import("./chatArchive").ChatArchive>;
+
+  // Admin broadcast fan-out queue. A broadcast enqueues one message per page and
+  // the consumer (index.ts `queue()`) advances one page then re-enqueues, so a
+  // send-to-everyone runs in seconds instead of one page per 10-minute cron tick.
+  // OPTIONAL on purpose: with no binding (local dev, or before the queue is
+  // created) `enqueueBroadcast` no-ops the send and the cron safety net drains it.
+  BROADCAST_QUEUE?: Queue<import("./lib/broadcast").BroadcastQueueMessage>;
+
+  // --- Plain vars ---
+  FIREBASE_PROJECT_ID: string;
+  /** Base url new media is written under, e.g. "https://media.tophunt.in". */
+  R2_PUBLIC_BASE_URL: string;
+  /** Public web origin for share links (default https://tophunt.in). */
+  PUBLIC_SITE_ORIGIN?: string;
+  /**
+   * Comma-separated media bases this deployment ALSO owns — the hosts that
+   * `R2_PUBLIC_BASE_URL` used to be. Media urls are stored absolute, so without
+   * this a domain change makes every pre-cutover url unrecognisable to the
+   * url→key mapping that authorises deletes. See `ownedMediaBases` in lib/r2.ts.
+   */
+  R2_LEGACY_BASE_URLS?: string;
+  ALLOWED_ORIGINS: string;
+  // "true" once Cloudflare Transformations is enabled on the media zone. While
+  // this is off, lib/media.ts returns original URLs for every *Thumb /
+  // *Optimized field. See transformationsAvailable().
+  MEDIA_TRANSFORMATIONS?: string;
+  /**
+   * "true" to skip the read-through CACHE_KV cache writes. TESTING ONLY.
+   *
+   * The Workers free plan allows 1,000 KV writes/day, which one person
+   * exercising the app can exhaust in a few hours — after which every `put` in
+   * the Worker fails with 429 until 00:00 UTC. This makes a test session cost
+   * far less: caches simply always miss and values are recomputed from D1.
+   *
+   * Affects CACHES ONLY — including the Cloudflare Cache API tier, which is now the
+   * primary read cache (lib/edgeCache.ts). It does NOT touch OTP_KV (OTP codes, send
+   * cooldowns, re-auth grants, the password-reset verified flag), it does NOT touch
+   * RATE LIMITING of any kind — so it cannot be used to disable abuse or spend
+   * protection — and it does not touch the Firebase token/JWKS caches, which are state
+   * rather than cache. See `kvWritesDisabled` in lib/cache.ts.
+   */
+  KV_WRITES_DISABLED?: string;
+  /**
+   * Scale tier: `"paid"` to unlock the paid-plan tuning, anything else (incl.
+   * unset) means `"free"`. The single switch between running inside the free
+   * plan's quotas and using the Workers Paid plan's headroom — no code change at
+   * the transition. See lib/scale.ts and SCALE_TIER.md.
+   */
+  SCALE_TIER?: string;
+
+  // --- Secrets (wrangler secret put) ---
+  // Firebase Admin service account (JSON string) used for Identity Toolkit + FCM.
+  FIREBASE_SERVICE_ACCOUNT: string;
+
+  // R2 S3-compatible credentials. Used by the Qencode pipeline: presigned reads
+  // of the raw upload, and the destination Qencode writes HLS output to.
+  R2_ACCOUNT_ID: string;
+  R2_ACCESS_KEY_ID: string;
+  R2_SECRET_ACCESS_KEY: string;
+  R2_BUCKET: string;
+
+  // Twilio (SMS OTP).
+  TWILIO_ACCOUNT_SID: string;
+  TWILIO_AUTH_TOKEN: string;
+  TWILIO_PHONE_NUMBER: string;
+
+  // Email provider (Gmail SMTP cannot run on Workers — use an HTTP provider such
+  // as Resend). RESEND_API_KEY + EMAIL_FROM are used by lib/email.ts.
+  RESEND_API_KEY: string;
+  EMAIL_FROM: string;
+
+  // Shared secret for server-to-server admin calls (the admin Next.js API
+  // routes proxy to /admin/* with this in the X-Admin-Secret header).
+  ADMIN_PROXY_SECRET: string;
+
+  // Qencode (video transcoding). Fail-closed: without the API key AND the R2
+  // credentials above, `createVideoUpload` reports "not configured" and video
+  // keeps using the legacy R2 path. The API key must NEVER reach the client —
+  // the app uploads to the Worker, which starts the Qencode job itself.
+  QENCODE_API_KEY?: string;
+
+  // Razorpay payment gateway — used to verify coin top-ups server-side.
+  // If RAZORPAY_KEY_SECRET is unset, top-ups are rejected (never free-minted).
+  RAZORPAY_KEY_ID: string;
+  RAZORPAY_KEY_SECRET: string;
+  // Razorpay webhook signing secret (set in the Razorpay dashboard when you
+  // configure the webhook). Used to verify /webhook/razorpay payloads. If unset,
+  // webhook events are rejected (never credited) — the client callback still works.
+  RAZORPAY_WEBHOOK_SECRET?: string;
+
+  // Observability — optional. When SENTRY_DSN is set, unhandled server errors
+  // are forwarded to Sentry (in addition to structured console logs). If unset,
+  // error tracking is a no-op and nothing else changes.
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  /**
+   * Deploy-level opt-in (exactly "true") required, IN ADDITION to the admin
+   * panel's `ads.trustClient`, before rewarded ads credit on the client's word.
+   * Leave unset in production until an ad-network SSV callback exists.
+   */
+  ALLOW_UNVERIFIED_AD_REWARDS?: string;
+
+  // Capacity monitoring (admin dashboard "Database Capacity" widget). All
+  // OPTIONAL and fail-open: without them the widget still shows table growth +
+  // storage (measured in-Worker); with them it also shows today's live D1
+  // rows_read / rows_written from the Cloudflare GraphQL Analytics API.
+  //   CF_ACCOUNT_ID / CF_D1_DATABASE_ID — not secret (wrangler.toml [vars]).
+  //   CF_ANALYTICS_TOKEN — a READ-ONLY Analytics API token, set via
+  //     `wrangler secret put CF_ANALYTICS_TOKEN`. Never returned to the client.
+  CF_ACCOUNT_ID?: string;
+  CF_D1_DATABASE_ID?: string;
+  CF_ANALYTICS_TOKEN?: string;
+
+  // -------------------------------------------------------------------------
+  // Panel-managed integrations.
+  //
+  // Every credential below can also be set from the admin panel, where it is
+  // stored encrypted in D1 (lib/secretBox.ts). Resolution order is ALWAYS
+  // panel-managed value first, then these environment variables — so an existing
+  // deployment keeps working untouched and credentials can be migrated into the
+  // panel one at a time. `GET /admin/integrations` reports which source is live.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Master key for encrypting panel-managed credentials. Stays a Cloudflare
+   * secret and is NEVER stored in the database — it is what makes the encrypted
+   * rows useless on their own.
+   *
+   * Generate: `openssl rand -base64 32`
+   * Set:      `wrangler secret put SETTINGS_ENCRYPTION_KEY`
+   *
+   * Without it, panel-managed credential WRITES are refused (there is no
+   * plaintext fallback) and the environment variables above are used as before.
+   */
+  SETTINGS_ENCRYPTION_KEY?: string;
+
+  // Alternative SMS gateways (Indian DLT gateways are usually cheaper than
+  // Twilio for OTP traffic). The active provider is an admin-panel setting.
+  MSG91_AUTH_KEY?: string;
+  FAST2SMS_API_KEY?: string;
+  /** HanuOTP (api.hanuotp.in) non-DLT OTP gateway API key. */
+  HANUOTP_API_KEY?: string;
+  /** Token substituted into a custom gateway's URL/body as {token}. */
+  SMS_CUSTOM_TOKEN?: string;
+
+  // Alternative transactional email providers.
+  BREVO_API_KEY?: string;
+  MAILEROO_API_KEY?: string;
+}
+
+/** Authenticated user context attached by the auth middleware. */
+export interface AuthUser {
+  uid: string;
+  email?: string;
+  role?: string;
+  /**
+   * When the user last actually SIGNED IN, in seconds since epoch (the `auth_time`
+   * claim). Not the token's issue time.
+   *
+   * The distinction is the whole point: `iat` moves every hour when the SDK
+   * silently refreshes the token, but `auth_time` only moves when a human proves
+   * who they are again. That makes it the one claim a stolen token cannot
+   * freshen, which is what lib/reauth.ts gates sensitive actions on.
+   *
+   * Optional because a custom-token sign-in (our phone OTP path) still sets it,
+   * but a malformed or unusually old token may not — and a missing value is
+   * treated as "not recent", never as "fine".
+   */
+  authTime?: number;
+  /**
+   * Firebase `firebase.sign_in_provider` claim: "password", "google.com",
+   * "facebook.com", "apple.com", "custom" (our phone OTP), … Used to hold a NEW
+   * account to the admin's sign-up switches (lib/authMethods.ts).
+   */
+  signInProvider?: string;
+}
+
+/** Hono context variables. */
+export type Variables = {
+  user: AuthUser;
+  requestId: string;
+  // Effective admin role for the current /admin request: "superadmin" | "admin"
+  // | "moderator". Server-to-server (shared secret) calls are "superadmin".
+  adminRole: string;
+  /**
+   * Outcome of the last shared read-cache lookup in this request — "hit" (edge),
+   * "kv" (durable tier), "miss" (computed and stored), "skip" (computed, not cacheable) or "bypass"
+   * (Cache API unavailable). Logged on the request line; never the key itself,
+   * since keys can carry uids and target ids.
+   */
+  edgeCache?: "hit" | "kv" | "miss" | "skip" | "bypass";
+};
