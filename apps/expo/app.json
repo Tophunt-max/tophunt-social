@@ -1,16 +1,16 @@
 {
   "expo": {
     "name": "TopHunt",
-    "slug": "instagramdp-c67de8",
+    "slug": "tophunt-social",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "tophunt",
+    "scheme": "tophuntsocial",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "in.tophunt.app",
+      "bundleIdentifier": "in.tophunt.social",
       "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -19,10 +19,7 @@
         "NSPhotoLibraryAddUsageDescription": "TopHunt saves a photo or video to your library when you download it.",
         "NSMicrophoneUsageDescription": "TopHunt uses the microphone to record audio with your contest and story videos.",
         "NSLocationWhenInUseUsageDescription": "TopHunt uses your location only to show contests and entries near you. You can decline and still use the app."
-      },
-      "associatedDomains": [
-        "applinks:tophunt.in"
-      ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -33,7 +30,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "in.tophunt.app",
+      "package": "in.tophunt.social",
       "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA",
@@ -50,22 +47,6 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.SYSTEM_ALERT_WINDOW"
-      ],
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "data": [
-            {
-              "scheme": "https",
-              "host": "tophunt.in"
-            }
-          ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
-        }
       ]
     },
     "web": {
@@ -74,10 +55,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "updates": {
-      "enabled": true,
-      "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0,
-      "url": "https://u.expo.dev/3591f0e2-84b0-4099-87ed-af6e4a5894b3"
+      "enabled": false
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -133,12 +111,6 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    },
-    "extra": {
-      "eas": {
-        "projectId": "3591f0e2-84b0-4099-87ed-af6e4a5894b3"
-      }
-    },
-    "owner": "bubun321uus-organization"
+    }
   }
 }

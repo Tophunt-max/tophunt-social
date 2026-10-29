@@ -12,9 +12,9 @@ name: Uptime check
 # GitHub may delay scheduled runs by several minutes; this is a backstop, not a
 # pager. A dedicated monitor (Cloudflare Health Checks, UptimeRobot) on the same
 # URL alerts faster.
+# tophunt-social: schedule disabled until the new API/web hosts exist.
+# Re-enable by restoring:  schedule: [{ cron: '*/30 * * * *' }]  and updating the URLs below.
 on:
-  schedule:
-    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
     steps:
       - name: API deep health
         run: |
-          code=$(curl -sS -o health.json -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 10 https://api.tophunt.in/health/deep || echo 000)
+          code=$(curl -sS -o health.json -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 10 https://REPLACE_WITH_API_HOST/health/deep || echo 000)
           echo "HTTP $code"
           if [ "$code" != "200" ]; then
             # Names of failing checks only; the endpoint never returns secret values.
@@ -42,7 +42,7 @@ jobs:
           fi
       - name: Web app
         run: |
-          code=$(curl -sS -o index.html -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 10 https://tophunt.in/ || echo 000)
+          code=$(curl -sS -o index.html -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 10 https://REPLACE_WITH_WEB_HOST/ || echo 000)
           echo "HTTP $code"
           if [ "$code" != "200" ] || ! grep -q '<div id="root"' index.html; then
             echo "::error::tophunt.in did not serve the app shell (HTTP $code)"

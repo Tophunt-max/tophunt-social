@@ -297,7 +297,7 @@ async function googleNativeSignIn(): Promise<UserCredential> {
     );
   }
 
-  const redirectUri = AuthSession.makeRedirectUri({ scheme: 'tophunt' });
+  const redirectUri = AuthSession.makeRedirectUri({ scheme: 'tophuntsocial' });
   const discovery = await AuthSession.fetchDiscoveryAsync('https://accounts.google.com');
   const request = new AuthSession.AuthRequest({
     clientId: resolvedClientId,
@@ -327,7 +327,7 @@ async function facebookNativeSignIn(): Promise<UserCredential> {
       'Facebook sign-in is not configured for this build. Please use email or phone.',
     );
   }
-  const redirectUri = AuthSession.makeRedirectUri({ scheme: 'tophunt' });
+  const redirectUri = AuthSession.makeRedirectUri({ scheme: 'tophuntsocial' });
   const request = new AuthSession.AuthRequest({
     clientId: FACEBOOK_APP_ID,
     redirectUri,

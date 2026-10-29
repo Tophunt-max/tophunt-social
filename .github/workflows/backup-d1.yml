@@ -16,10 +16,9 @@ name: Backup D1
 #   CLOUDFLARE_ACCOUNT_ID
 # Optional:
 #   BACKUP_R2_BUCKET       — R2 bucket name for off-site copies
+# tophunt-social: weekly schedule disabled until the new D1 + repo secrets exist.
+# Re-enable by restoring:  schedule: [{ cron: '30 2 * * 0' }]
 on:
-  schedule:
-    # Sundays at 02:30 UTC (08:00 IST) — outside Indian peak hours.
-    - cron: '30 2 * * 0'
   workflow_dispatch:
 
 permissions:
@@ -27,7 +26,7 @@ permissions:
 
 jobs:
   export:
-    name: Export tophunt-db
+    name: Export tophunt-social-db
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -47,7 +46,7 @@ jobs:
       # wrangler.toml points at. Not one backup was ever produced. This step turns
       # that into an explicit, actionable failure (never printing secret values)
       # instead of a bare 7404 from the export.
-      - name: Preflight — can these credentials see tophunt-db?
+      - name: Preflight — can these credentials see tophunt-social-db?
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -59,7 +58,7 @@ jobs:
           expected_account=$(sed -n 's/^CF_ACCOUNT_ID *= *"\(.*\)"/\1/p' wrangler.toml | head -1)
           expected_db=$(sed -n 's/^database_id *= *"\(.*\)"/\1/p' wrangler.toml | head -1)
           if [ -n "$expected_account" ] && [ "$expected_account" != "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::error::The CLOUDFLARE_ACCOUNT_ID secret is NOT the account that owns tophunt-db (wrangler.toml [vars] CF_ACCOUNT_ID). Set the secret to that account's ID and use an API token created in that account."
+            echo "::error::The CLOUDFLARE_ACCOUNT_ID secret is NOT the account that owns tophunt-social-db (wrangler.toml [vars] CF_ACCOUNT_ID). Set the secret to that account's ID and use an API token created in that account."
             exit 1
           fi
           if ! npx wrangler d1 list --json > d1-list.json 2> d1-list.err; then
@@ -68,11 +67,11 @@ jobs:
             exit 1
           fi
           if ! grep -q "\"$expected_db\"" d1-list.json; then
-            echo "::error::Token and account are valid but tophunt-db ($expected_db) is not among the databases this token can see. The database lives in a different account, or the token is scoped to other resources."
+            echo "::error::Token and account are valid but tophunt-social-db ($expected_db) is not among the databases this token can see. The database lives in a different account, or the token is scoped to other resources."
             exit 1
           fi
           rm -f d1-list.json d1-list.err
-          echo "Preflight OK: credentials can see tophunt-db."
+          echo "Preflight OK: credentials can see tophunt-social-db."
 
       - name: Export database
         env:
@@ -81,11 +80,11 @@ jobs:
         run: |
           stamp=$(date -u +%Y-%m-%dT%H-%M-%SZ)
           echo "STAMP=$stamp" >> "$GITHUB_ENV"
-          npx wrangler d1 export tophunt-db --remote --output="tophunt-db-$stamp.sql"
-          ls -lh "tophunt-db-$stamp.sql"
+          npx wrangler d1 export tophunt-social-db --remote --output="tophunt-social-db-$stamp.sql"
+          ls -lh "tophunt-social-db-$stamp.sql"
           # An export that "succeeded" but produced a near-empty file is worse than
           # a failed one, because it looks like a backup. Refuse to accept it.
-          size=$(stat -c%s "tophunt-db-$stamp.sql")
+          size=$(stat -c%s "tophunt-social-db-$stamp.sql")
           if [ "$size" -lt 4096 ]; then
             echo "::error::Export is only ${size} bytes — that is not a real backup. Failing rather than storing it."
             exit 1
@@ -97,7 +96,7 @@ jobs:
       # and check that it is structurally sound and actually holds the data.
       - name: Restore test (isolated SQLite on the runner)
         run: |
-          file="tophunt-db-${STAMP}.sql"
+          file="tophunt-social-db-${STAMP}.sql"
           rm -f restore-test.db
           sqlite3 restore-test.db < "$file"
           integrity=$(sqlite3 restore-test.db "PRAGMA integrity_check;")
@@ -141,8 +140,8 @@ jobs:
             exit 0
           fi
           npx wrangler r2 object put \
-            "$BACKUP_R2_BUCKET/d1/tophunt-db-${{ env.STAMP }}.sql.gz" \
-            --file="tophunt-db-${{ env.STAMP }}.sql.gz" \
+            "$BACKUP_R2_BUCKET/d1/tophunt-social-db-${{ env.STAMP }}.sql.gz" \
+            --file="tophunt-social-db-${{ env.STAMP }}.sql.gz" \
             --remote
 
       # Also kept as an artifact, so a restore is possible even without access to
@@ -151,7 +150,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: d1-backup-${{ env.STAMP }}
-          path: apps/worker/tophunt-db-${{ env.STAMP }}.sql.gz
+          path: apps/worker/tophunt-social-db-${{ env.STAMP }}.sql.gz
           retention-days: 90
 
       - name: Summarise
@@ -161,11 +160,11 @@ jobs:
           {
             echo "### D1 backup"
             echo ""
-            echo "- Snapshot: \`tophunt-db-${{ env.STAMP }}.sql.gz\`"
-            echo "- Size: $(stat -c%s tophunt-db-${{ env.STAMP }}.sql.gz) bytes (gzipped)"
+            echo "- Snapshot: \`tophunt-social-db-${{ env.STAMP }}.sql.gz\`"
+            echo "- Size: $(stat -c%s tophunt-social-db-${{ env.STAMP }}.sql.gz) bytes (gzipped)"
             echo "- Restore test: PASSED (integrity_check ok; users=${RESTORE_USERS}, ledger rows=${RESTORE_LEDGER}, migrations recorded=${RESTORE_MIGRATIONS})"
             echo "- Off-site R2 copy: $([ -n "$BACKUP_R2_BUCKET" ] && echo uploaded || echo 'NOT configured — artifact only (90-day retention)')"
             echo ""
-            echo "Restore: \`gunzip\` then \`npx wrangler d1 execute tophunt-db --remote --file=<file>.sql\`"
+            echo "Restore: \`gunzip\` then \`npx wrangler d1 execute tophunt-social-db --remote --file=<file>.sql\`"
             echo "against a NEW database first — see docs/RUNBOOK.md."
           } >> "$GITHUB_STEP_SUMMARY"

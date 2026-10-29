@@ -17,8 +17,8 @@
       "channel": "preview",
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://tophunt-api-staging.weadown-in.workers.dev",
-        "EXPO_PUBLIC_SHARE_ORIGIN": "https://tophuntdpcontest-89t.pages.dev",
+        "EXPO_PUBLIC_API_URL": "https://tophunt-social-api-staging.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev",
+        "EXPO_PUBLIC_SHARE_ORIGIN": "https://tophunt-social-staging.pages.dev",
         "EXPO_PUBLIC_ENV": "staging"
       }
     },
@@ -26,8 +26,8 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.tophunt.in",
-        "EXPO_PUBLIC_SHARE_ORIGIN": "https://tophunt.in",
+        "EXPO_PUBLIC_API_URL": "https://tophunt-social-api.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev",
+        "EXPO_PUBLIC_SHARE_ORIGIN": "https://tophunt-social.pages.dev",
         "EXPO_PUBLIC_ENV": "production"
       }
     }

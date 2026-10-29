@@ -1,4 +1,4 @@
-name = "tophunt-api"
+name = "tophunt-social-api"
 main = "src/index.ts"
 compatibility_date = "2024-11-27"
 compatibility_flags = ["nodejs_compat"]
@@ -49,7 +49,9 @@ workers_dev = true
 # side effect of a compatibility fix.
 preview_urls = false
 
-routes = [{ pattern = "api.tophunt.in", custom_domain = true }]
+# tophunt-social: no custom domain yet. The API is served on workers.dev until a
+# domain is chosen. Add it back as: routes = [{ pattern = "<api-host>", custom_domain = true }]
+# routes = [{ pattern = "api.tophunt.in", custom_domain = true }]
 
 # Pin the bundler to this package's own tsconfig. Without this, esbuild walks up
 # the monorepo and picks up the root tsconfig.json (which extends
@@ -79,8 +81,8 @@ command = "node scripts/gen-migrations.mjs"
 # ---------------------------------------------------------------------------
 [[d1_databases]]
 binding = "DB"
-database_name = "tophunt-db"
-database_id = "932ccd0f-190a-46df-bdf6-685926f524ff"
+database_name = "tophunt-social-db"
+database_id = "REPLACE_WITH_D1_ID"
 migrations_dir = "migrations"
 
 # ---------------------------------------------------------------------------
@@ -98,7 +100,7 @@ migrations_dir = "migrations"
 # ---------------------------------------------------------------------------
 [[r2_buckets]]
 binding = "MEDIA"
-bucket_name = "tophunt-media"
+bucket_name = "tophunt-social-media"
 
 # Cloudflare Images binding: composes the server-side VS battle card
 # (src/lib/vsComposite.ts) — decode/crop/composite/encode run on Cloudflare
@@ -114,11 +116,11 @@ binding = "IMAGES"
 # ---------------------------------------------------------------------------
 [[kv_namespaces]]
 binding = "OTP_KV"
-id = "216735e0c3fa4bf6a66cc50daee45ac8"
+id = "REPLACE_WITH_OTP_KV_ID"
 
 [[kv_namespaces]]
 binding = "CACHE_KV"
-id = "ea266f67c04a4287aee037a102c0c2e1"
+id = "REPLACE_WITH_CACHE_KV_ID"
 
 # ---------------------------------------------------------------------------
 # Durable Object for real-time WebSocket push (chat, notifications, live votes)
@@ -167,7 +169,7 @@ simple = { limit = 30, period = 60 }
 # Free plan: 100,000 data points written and 10,000 read queries per day.
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
-dataset = "tophunt_events"
+dataset = "tophunt_social_events"
 
 # Per-chat message store (SQLite-backed). Owns chat message bodies, one instance
 # per chatId, so the unbounded message write path stays off D1's single writer.
@@ -209,10 +211,10 @@ new_sqlite_classes = ["ChatArchive"]
 # ---------------------------------------------------------------------------
 [[queues.producers]]
 binding = "BROADCAST_QUEUE"
-queue = "tophunt-broadcast"
+queue = "tophunt-social-broadcast"
 
 [[queues.consumers]]
-queue = "tophunt-broadcast"
+queue = "tophunt-social-broadcast"
 max_batch_size = 10
 max_batch_timeout = 5
 max_retries = 3
@@ -280,7 +282,7 @@ head_sampling_rate = 1
 # database would be far worse than one that fails fast.
 # ---------------------------------------------------------------------------
 [env.staging]
-name = "tophunt-api-staging"
+name = "tophunt-social-api-staging"
 
 # MUST be present and empty. `routes` is an INHERITABLE key in wrangler config:
 # without this line the staging environment inherits the top-level
@@ -310,13 +312,13 @@ routes = []
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "tophunt-db-staging"
+database_name = "tophunt-social-db-staging"
 database_id = "REPLACE_WITH_STAGING_D1_ID"
 migrations_dir = "migrations"
 
 [[env.staging.r2_buckets]]
 binding = "MEDIA"
-bucket_name = "tophunt-media-staging"
+bucket_name = "tophunt-social-media-staging"
 
 [env.staging.images]
 binding = "IMAGES"
@@ -353,7 +355,7 @@ simple = { limit = 30, period = 60 }
 
 [[env.staging.analytics_engine_datasets]]
 binding = "ANALYTICS"
-dataset = "tophunt_events_staging"
+dataset = "tophunt_social_events_staging"
 
 [[env.staging.durable_objects.bindings]]
 name = "CHAT_ARCHIVE"
@@ -362,10 +364,10 @@ class_name = "ChatArchive"
 # Staging broadcast queue. Create once:  wrangler queues create tophunt-broadcast-staging
 [[env.staging.queues.producers]]
 binding = "BROADCAST_QUEUE"
-queue = "tophunt-broadcast-staging"
+queue = "tophunt-social-broadcast-staging"
 
 [[env.staging.queues.consumers]]
-queue = "tophunt-broadcast-staging"
+queue = "tophunt-social-broadcast-staging"
 max_batch_size = 10
 max_batch_timeout = 5
 max_retries = 3
@@ -385,7 +387,7 @@ FIREBASE_PROJECT_ID = "tophuntdpcontest-staging"
 # "tophunt-api-staging.workers.dev", which does not resolve — workers.dev hosts
 # are always `<worker>.<account-subdomain>.workers.dev`, so every staging upload
 # was handed back a dead url.
-R2_PUBLIC_BASE_URL = "https://tophunt-api-staging.weadown-in.workers.dev/media"
+R2_PUBLIC_BASE_URL = "https://tophunt-social-api-staging.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev/media"
 # Nothing to keep compatible on staging; its bucket is disposable.
 R2_LEGACY_BASE_URLS = ""
 # Cannot be enabled on a *.workers.dev host with a /media path prefix — see the
@@ -397,11 +399,11 @@ MEDIA_TRANSFORMATIONS = "false"
 # "true" for a heavy session. See the production block for the full scope.
 KV_WRITES_DISABLED = "false"
 SENTRY_ENVIRONMENT = "staging"
-ANALYTICS_DATASET = "tophunt_events_staging"
+ANALYTICS_DATASET = "tophunt_social_events_staging"
 # Pages preview deployments get a per-commit subdomain, so they cannot be pinned
 # to an exact origin list. Staging is the environment where that is acceptable —
 # production keeps its explicit allow-list.
-ALLOWED_ORIGINS = "http://localhost:5000,http://localhost:8081,https://tophuntdpcontest-89t.pages.dev,https://tophunt-admin-panel.pages.dev"
+ALLOWED_ORIGINS = "http://localhost:5000,http://localhost:8081,https://tophunt-social-staging.pages.dev,https://tophunt-social-admin-staging.pages.dev"
 
 # ---------------------------------------------------------------------------
 # Non-secret vars. Secrets (service account, R2 keys, Twilio, email) are set
@@ -415,8 +417,8 @@ FIREBASE_PROJECT_ID = "tophuntdpcontest"
 # The read-only token is a SECRET, set separately with:
 #   wrangler secret put CF_ANALYTICS_TOKEN
 # Without the token the widget still shows table growth + storage (fail-open).
-CF_ACCOUNT_ID = "8357be8f9dba5721b6b726faff763f0f"
-CF_D1_DATABASE_ID = "932ccd0f-190a-46df-bdf6-685926f524ff"
+CF_ACCOUNT_ID = "REPLACE_WITH_CF_ACCOUNT_ID"
+CF_D1_DATABASE_ID = "REPLACE_WITH_D1_ID"
 
 # Scale tier — how the Worker tunes itself for the Cloudflare FREE vs Workers PAID
 # plan. See src/lib/scale.ts and SCALE_TIER.md. Three values:
@@ -439,6 +441,9 @@ CF_D1_DATABASE_ID = "932ccd0f-190a-46df-bdf6-685926f524ff"
 # so a typo can never change behaviour unsafely.
 SCALE_TIER = "auto"
 
+# Analytics Engine dataset name used by the admin usage SQL read (must match the binding above).
+ANALYTICS_DATASET = "tophunt_social_events"
+
 # Public media origin — the R2 bucket's own custom domain, NOT the Worker.
 #
 # Serving media straight from R2 removes a Worker invocation per image, lets the
@@ -448,7 +453,7 @@ SCALE_TIER = "auto"
 #
 # Prerequisite: R2 -> bucket `tophunt-media` -> Settings -> Public access ->
 # Custom domain -> media.tophunt.in.
-R2_PUBLIC_BASE_URL = "https://media.tophunt.in"
+R2_PUBLIC_BASE_URL = "https://tophunt-social-api.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev/media"
 
 # Media bases this deployment ALSO owns, comma-separated.
 #
@@ -463,7 +468,7 @@ R2_PUBLIC_BASE_URL = "https://media.tophunt.in"
 # `contestBannerKeyFromPublicUrl` and `vsImageKeyFromPublicUrl` correct for both
 # hosts. Keep it until `scripts/media-domain-backfill.sql` has been run AND no
 # app build old enough to have written such a url is still in the wild.
-R2_LEGACY_BASE_URLS = "https://tophunt-api.weadown-in.workers.dev/media"
+R2_LEGACY_BASE_URLS = ""
 
 # Cloudflare Transformations (Image Resizing) switch for the media origin.
 #
@@ -502,7 +507,8 @@ R2_LEGACY_BASE_URLS = "https://tophunt-api.weadown-in.workers.dev/media"
 # of three variants (320/1080/128), so the unique count tracks distinct images
 # and not requests, and repeat views are cache hits. Worth watching in
 # Cloudflare -> Images -> Transformations after this ships.
-MEDIA_TRANSFORMATIONS = "true"
+# tophunt-social: "false" until media is on a real zone host with Transformations enabled.
+MEDIA_TRANSFORMATIONS = "false"
 
 # Video (Qencode). Nothing to set here: encoded video is served from
 # R2_PUBLIC_BASE_URL above (`videos/<id>/playlist.m3u8`). The QENCODE_API_KEY and
@@ -580,4 +586,4 @@ KV_WRITES_DISABLED = "false"
 #
 # For local development, override this in `.dev.vars` (which takes precedence
 # over these vars under `wrangler dev`) rather than adding localhost here.
-ALLOWED_ORIGINS = "https://tophunt.in,https://admin.tophunt.in"
+ALLOWED_ORIGINS = "https://tophunt-social.pages.dev,https://tophunt-social-admin.pages.dev"
