@@ -1,0 +1,39 @@
+{
+  "name": "@tophunt/worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker backend for TopHunt DP Contest (D1 + R2 + KV). Auth stays on Firebase.",
+  "main": "src/index.ts",
+  "scripts": {
+    "gen:migrations": "node scripts/gen-migrations.mjs",
+    "capacity": "node scripts/d1-capacity.mjs",
+    "insights:snapshot": "node scripts/d1-insights-compare.mjs snapshot",
+    "insights:compare": "node scripts/d1-insights-compare.mjs compare",
+    "cache:report": "node scripts/cache-hit-report.mjs",
+    "feed:eval": "vite-node scripts/feed-eval.ts --",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "pretypecheck": "node scripts/gen-migrations.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "migrate": "wrangler d1 migrations apply tophunt-db --remote",
+    "db:migrate:local": "wrangler d1 migrations apply tophunt-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply tophunt-db --remote",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.8",
+    "jose": "^5.9.6",
+    "node-html-parser": "^9.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260815.1",
+    "drizzle-kit": "^0.28.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.6",
+    "wrangler": "^4.132.0"
+  }
+}

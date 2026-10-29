@@ -1,0 +1,4456 @@
+/**
+ * /api — port of apps/functions/src/api/main.ts (the callable `api` router).
+ * Same contract: POST { action, ...data } with `Authorization: Bearer <idToken>`.
+ *
+ * D1 has no interactive transactions, so money-critical mutations use
+ * conditional UPDATEs (e.g. `WHERE dpcoin >= fee`) and check the affected row
+ * count to prevent double-spend / races.
+ */
+import { Hono } from "hono";
+import { eq, and, or, desc, sql, count, like, gte, lt, lte, ne, isNull, inArray, getTableColumns } from "drizzle-orm";
+import type { Env, Variables } from "../types";
+import { getDb, schema } from "../db";
+import { httpsError } from "../lib/http";
+import { requireApiAuth, isAdmin } from "../middleware/auth";
+import { requireFullAdmin as requireFullAdminAction, writeAdminAudit } from "../lib/adminAuthz";
+import { vsImageKeyFromPublicUrl, canonicalMediaUrl, isOwnChatMediaUrl } from "../lib/r2";
+import { deleteMediaByUrl, mediaOwnership } from "../lib/mediaDelete";
+
+import { createNotification, sendPushNotification } from "../lib/notify";
+import { enqueueBroadcast } from "../lib/broadcast";
+import { setCustomClaims } from "../lib/firebaseAdmin";
+import { publish, publishMany } from "../lib/publish";
+import { castVote, bumpEngagement } from "../lib/voteCounter";
+import { appendMessage, markChatMessagesRead, purgeChatMessages } from "../lib/chatArchive";
+import { clientIp, consumeRateLimit, rateLimit } from "../lib/rateLimit";
+import { recordFeedDismissal, removeFeedDismissal } from "../lib/feedDismissals";
+import { mintWsTicket } from "../lib/wsTicket";
+import {
+  assertIdentifiersAvailable,
+  normalizePhone,
+  recordUsernameTransition,
+  validateUsername,
+} from "../lib/userIdentifiers";
+import { enforceIdempotency, releaseIdempotency } from "../lib/idempotency";
+import {
+  contestDetailCacheKey,
+  contestListCacheKeys,
+  commentsCacheKey,
+  userCacheKey,
+  followersCacheKey,
+  followingCacheKey,
+  invalidateAuthState,
+} from "../lib/cache";
+import { purgeShared } from "../lib/edgeCache";
+import { STORIES_FEED_CACHE_KEY } from "../lib/storyAudience";
+import { isPrivateAccount, privateContentLocked } from "../lib/privateAccount";
+import {
+  approveAllFollowRequests,
+  approveFollowRequest,
+  deleteFollowRequest,
+  deleteRequestsBetweenStmts,
+  hasPendingRequest,
+} from "../lib/followRequests";
+import { assertContestOpenNow, createContestExtra, validateContestInput } from "../lib/contestAdmin";
+import { parsePayoutDestination, readWithdrawalPolicy } from "../lib/payouts";
+import { parseDeliveryAddress } from "../lib/deliveryAddress";
+import { normalizePrizeType } from "../lib/prizes";
+import {
+  cancelAccountDeletion,
+  checkDeletionEligibility,
+  requestAccountDeletion,
+} from "../lib/accountDeletion";
+import { exportUserData } from "../lib/accountExport";
+import {
+  assertRecentAuth,
+  assertRecentAuthForDeletion,
+  hasFreshSession,
+  confirmReauthChallenge,
+  sendReauthChallenge,
+} from "../lib/reauth";
+import { revokeAllSessions, revokeOtherSessions } from "../lib/sessionRevocation";
+import {
+  adjustUserWallet,
+  assertCoinAmount,
+  MAX_COIN_AMOUNT,
+  assertPrizeFundedByPot,
+  matchPot,
+  perPlayerEntryFee,
+  roundFiat,
+  WalletReplay,
+} from "../lib/money";
+import { verifyRazorpaySignature } from "../lib/payments";
+import { getRazorpayCredentials } from "../lib/integrations";
+import { creditPaymentOrder, fetchGatewayPayment } from "../lib/coinOrders";
+import {
+  getVerificationStatus,
+  recordPromptShown,
+  refreshVerificationFromFirebase,
+  tryCreditVerificationReward,
+} from "../lib/verificationReward";
+import { assertClean } from "../lib/moderation";
+import { lookupTrack, sanitiseMusicStartMs } from "../lib/music";
+import { assertChatMember } from "../lib/chatAuth";
+import { isContestStoryType } from "../lib/matchStories";
+import { ensureMatchShareImage, publicVsStoryStatus, runVsPublication } from "../lib/vsPublication";
+import {
+  assertMatchInteractionAllowed,
+  assertNotBlocked,
+  assertNotBlockedAny,
+  assertStoryInteractionAllowed,
+  invalidateBlockCache,
+  isBlockedBetween,
+} from "../lib/blocks";
+import { detachTokenFromOtherUsers } from "../lib/pushTokens";
+import { resolvePrefs, serializePrefs } from "../lib/notificationPrefs";
+import { playbackUrlFor, qencodeConfigured, thumbnailUrlFor } from "../lib/qencode";
+import { applyEncodeResult, LIVE_STATUS_RECHECK_MS } from "../lib/videoReconcile";
+import { mediaRouting } from "../lib/mediaRouting";
+import { getAppConfig, getAppControlConfig, getRewardedAdConfig } from "../lib/settings";
+import { appControlGate } from "../lib/appControl";
+import { PROFILE_INCOMPLETE_CODE } from "../lib/accountStatus";
+import { chargeablePackage } from "../lib/coinPricing";
+import { applyReferralCode, ensureReferralCode, qualifyReferral } from "../lib/referralProgram";
+import { chargeableWithdrawal, feeRuleFromConfig } from "../lib/withdrawalFee";
+import { assertLevelEligible, getProgression } from "../lib/progression";
+import { xpAwardStatements, xpEventOutcome, xpReversalStatements } from "../lib/xpService";
+import { syncProgressionSafe } from "../lib/achievements";
+import { handleGamificationAction } from "../lib/gamificationApi";
+import { activeDailyTasks, dailyRewardFor, dailyRewardState, getDailyTaskDefs, getSettings, levelForXp, rewardDayNumber, rewardDayStart, type DailyTaskDef } from "../lib/gamification";
+import { sendEmail, sendUserEmail } from "../lib/email";
+import { passwordChangedEmail, dataExportEmail } from "../lib/emailTemplates";
+import { newId, now, generateJoinId } from "../lib/ids";
+import { lockedPart } from "../lib/rewardLocking";
+import { DIAMONDS_COVER, notEnoughDiamonds } from "../lib/diamonds";
+import { assessWithdrawalRisk, RISK_FLAG_LABELS } from "../lib/withdrawalRisk";
+import {
+  FREE_REWARDS_EXHAUSTED,
+  freeRewardBudgetStatements,
+  freeRewardsBudgetId,
+  notifyBudgetExhausted,
+  ORDER_RESERVATION_TTL_MS,
+  depositReservationId,
+  matchReservationId,
+  orderReservationId,
+  releaseStatement,
+  reserveStatement,
+  tryReserve,
+} from "../lib/promoBudget";
+
+/** Fire-and-forget admin email alert (only if an alert address is configured). */
+function alertAdminEmail(c: any, cfg: any, subject: string, html: string): void {
+  const to = (cfg?.adminAlertEmail as string) || "";
+  if (!to) return;
+  c.executionCtx.waitUntil(sendEmail(c.env, { to, subject, html }).catch(() => {}));
+}
+
+/** Days since epoch in UTC (stable daily bucket key). */
+/**
+ * Today's progress for a daily task type, counted on the server since
+ * `startOfDay`:
+ *  - vote:    votes cast;
+ *  - share:   DIFFERENT battles shared (sharing one battle again does not count);
+ *  - contest: contest entries (startMatch / joinMatch entry-fee ledger rows);
+ *  - ad:      not counted here (claimAdReward credits ads).
+ */
+async function dailyTaskProgress(env: Env, uid: string, type: DailyTaskDef["type"], startOfDay: number): Promise<number> {
+  let row: { n: number } | null = null;
+  if (type === "vote") {
+    row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM votes WHERE voter_uid = ? AND created_at >= ?`).bind(uid, startOfDay).first();
+  } else if (type === "share") {
+    row = await env.DB.prepare(`SELECT COUNT(DISTINCT target_id) AS n FROM shares WHERE user_id = ? AND created_at >= ?`).bind(uid, startOfDay).first();
+  } else if (type === "contest") {
+    row = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM coin_transactions WHERE uid = ? AND type = 'contest_entry_fee' AND created_at >= ?`,
+    ).bind(uid, startOfDay).first();
+  }
+  return Number(row?.n ?? 0);
+}
+
+/** One share per user per battle per this window counts (and bumps the counter). */
+const SHARE_DEDUPE_MS = 24 * 60 * 60 * 1000;
+
+/** Max length of a single comment (server-enforced; UI mirrors this). */
+const MAX_COMMENT_LEN = 500;
+
+/**
+ * Fields `updateProfile` must never touch, because they are CREDENTIALS.
+ *
+ * `users.email` is what Firebase password reset targets and `users.phone` is the
+ * sole lookup key for phone sign-in and phone password reset. Whoever can set
+ * them owns the account, so they only move through the OTP flow in
+ * lib/identifierChange.ts.
+ */
+const IDENTIFIER_KEYS = new Set(["email", "phone", "newEmail", "newPhone"]);
+
+/**
+ * Every real `users` column name, in both its TypeScript and SQL spelling.
+ *
+ * Derived from the schema rather than hand-listed so a column added later is
+ * protected automatically — a hand-maintained denylist is exactly the kind that
+ * silently falls behind. Used to stop unrecognised keys landing in `users.extra`,
+ * which the profile reader merges over the top level.
+ */
+const USER_COLUMN_KEYS = new Set<string>(
+  Object.entries(getTableColumns(schema.users)).flatMap(([tsName, col]) => [
+    tsName,
+    (col as { name: string }).name,
+  ]),
+);
+
+/**
+ * Reports from this many DIFFERENT users hide a battle from the shared feeds until
+ * an admin reviews it (migration 0060). Not a status change: the battle still
+ * settles or refunds exactly as before, and its page stays reachable by link.
+ *
+ * Who counts, so the hold is not a cheap weapon in a live battle:
+ *  - only OPEN reports (a dismissed one is kept as a row, for dedupe, but no
+ *    longer counts — and its reporter cannot report the battle again);
+ *  - never the battle's own participants (the leader could otherwise freeze
+ *    their lead with two friends);
+ *  - only accounts older than MATCH_REPORTER_MIN_AGE_MS (no fresh throwaways);
+ *  - only VERIFIED accounts (email or phone), in good standing. Age alone let
+ *    three day-old throwaway accounts hide any live battle and starve it of votes.
+ */
+export const MATCH_REPORT_HOLD_THRESHOLD = 3;
+export const MATCH_REPORTER_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** Accepted report types, mapped to the one stored. */
+const REPORT_TYPE_ALIASES: Record<string, string> = {
+  match: "match",
+  contestMatch: "match",
+  contestMatches: "match",
+  comment: "comment",
+  user: "user",
+  post: "post",
+  story: "story",
+};
+
+/**
+ * The target must exist and must not be the reporter's own. Reports were stored
+ * for any id string, including your own content and your own account.
+ */
+async function assertReportableTarget(db: any, uid: string, type: string, id: string): Promise<void> {
+  const notFound = () => httpsError("not-found", "That content no longer exists.");
+  const own = () => httpsError("invalid-argument", "You cannot report your own content.");
+  if (type === "user") {
+    if (id === uid) throw own();
+    const u = await db.select({ uid: schema.users.uid }).from(schema.users).where(eq(schema.users.uid, id)).get();
+    if (!u) throw notFound();
+    return;
+  }
+  if (type === "match") {
+    const m = await db.select({ a: schema.contestMatches.userA, b: schema.contestMatches.userB }).from(schema.contestMatches).where(eq(schema.contestMatches.id, id)).get();
+    if (!m) throw notFound();
+    if ((m.a as any)?.uid === uid || (m.b as any)?.uid === uid) throw own();
+    return;
+  }
+  const owner =
+    type === "post"
+      ? (await db.select({ u: schema.posts.userId }).from(schema.posts).where(eq(schema.posts.id, id)).get())?.u
+      : type === "story"
+        ? (await db.select({ u: schema.stories.userId }).from(schema.stories).where(eq(schema.stories.id, id)).get())?.u
+        : ((await db.select({ u: schema.matchComments.userId }).from(schema.matchComments).where(eq(schema.matchComments.id, id)).get()) ??
+            (await db.select({ u: schema.postComments.userId }).from(schema.postComments).where(eq(schema.postComments.id, id)).get()) ??
+            (await db.select({ u: schema.blogComments.userId }).from(schema.blogComments).where(eq(schema.blogComments.id, id)).get()))?.u;
+  if (!owner) throw notFound();
+  if (owner === uid) throw own();
+}
+
+/** Stamp the hold if the threshold is reached. Returns true when THIS call stamped it. */
+async function maybeHoldReportedMatch(env: Env, matchId: string, ts: number): Promise<boolean> {
+  try {
+    const row = await env.DB.prepare(
+      `SELECT COUNT(DISTINCT r.reporter_id) AS n
+         FROM reports r
+         JOIN users u ON u.uid = r.reporter_id
+         JOIN contest_matches m ON m.id = r.target_id
+        WHERE r.target_id = ?
+          AND r.target_type IN ('match','contestMatch','contestMatches')
+          AND r.status = 'open'
+          AND u.created_at <= ?
+          AND (COALESCE(u.email_verified, 0) = 1 OR COALESCE(u.phone_verified, 0) = 1)
+          AND COALESCE(u.is_blocked, 0) = 0
+          AND COALESCE(u.status, 'active') = 'active'
+          AND r.reporter_id <> COALESCE(json_extract(m.user_a, '$.uid'), '')
+          AND r.reporter_id <> COALESCE(json_extract(m.user_b, '$.uid'), '')`,
+    )
+      .bind(matchId, ts - MATCH_REPORTER_MIN_AGE_MS)
+      .first<{ n: number }>();
+    if (Number(row?.n ?? 0) < MATCH_REPORT_HOLD_THRESHOLD) return false;
+    const res = await env.DB.prepare(
+      "UPDATE contest_matches SET moderation_hold_at = ? WHERE id = ? AND moderation_hold_at IS NULL",
+    )
+      .bind(ts, matchId)
+      .run();
+    return (res.meta?.changes ?? 0) > 0;
+  } catch (e) {
+    console.error("[report] moderation hold failed (continuing)", matchId, e);
+    return false;
+  }
+}
+
+export const apiRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// All /api actions require a valid Firebase ID token (matches callable auth).
+//
+// `requireApiAuth`, not `requireAuth`: two of its checks depend on which action
+// is being called. A BLOCKED account must still reach the deletion actions (the
+// generic 403 was what hid the delete button from the users most likely to want
+// it), and an account PENDING deletion must reach cancellation and nothing else.
+// See lib/accountStatus.ts for both lists.
+apiRoute.use("*", requireApiAuth);
+
+// App Control (lib/appControl.ts): maintenance, switched-off features and a
+// hard minimum native version refuse here, with a `reason` the app acts on.
+// Staff (admin/moderator tokens) pass, so they can operate during maintenance.
+apiRoute.use("*", async (c, next) => {
+  const body = await c.req.json<any>().catch(() => ({}));
+  appControlGate(await getAppControlConfig(c.env), {
+    action: typeof body?.action === "string" ? body.action : null,
+    role: c.get("user")?.role ?? null,
+    uid: c.get("user")?.uid ?? null,
+    platform: c.req.header("X-App-Platform") ?? null,
+    appVersion: c.req.header("X-App-Version") ?? null,
+  });
+  await next();
+});
+
+const notPorted = (action: string, file: string): never => {
+  throw httpsError(
+    "internal",
+    `Action '${action}' is not yet ported to the Worker. Original logic: apps/functions/src/${file}.`,
+  );
+};
+
+/** Validate untrusted client identifiers before they reach D1 or a DO. */
+/**
+ * Refuse a contest entry that is one of OUR stored objects but was uploaded by a
+ * different account. `POST /upload` records the uploader on every object, so a
+ * player cannot enter (and have published on their VS Story) someone else's
+ * photo. Objects predating that metadata, and urls that are not ours, pass here;
+ * the VS publication workflow applies the strict trusted-media rules.
+ * Checked BEFORE any entry fee moves.
+ */
+async function assertOwnContestEntry(env: Env, uid: string, mediaUrl: unknown): Promise<void> {
+  if (typeof mediaUrl !== "string" || !mediaUrl) return;
+  // R2 objects carry `customMetadata.uploader`, encoded videos `videos.owner_uid`.
+  // Checking R2 metadata alone would let any playlist url (someone else's video
+  // entry, readable from the public feed) pass and be charged for and entered;
+  // VS publication would refuse it later, after the entry fee had moved.
+  let ownership: Awaited<ReturnType<typeof mediaOwnership>>;
+  try {
+    ownership = await mediaOwnership(env, mediaUrl, uid);
+  } catch (e) {
+    // Fail open on a storage blip: publication re-checks with the bytes in hand.
+    console.error("[contest] entry provenance check failed (continuing)", mediaUrl, e);
+    return;
+  }
+  if (ownership === "foreign") {
+    throw httpsError("permission-denied", "That entry was uploaded by another account. Please upload your own photo or video.");
+  }
+}
+
+
+/** Devices one account keeps push tokens for (newest kept). */
+const MAX_PUSH_TOKENS = 10;
+
+/** Client-chosen message id (sendMessage `clientId`): stable across retries of one message. */
+const CHAT_CLIENT_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
+function requiredId(value: unknown, name: string, maxLength = 256): string {
+  if (typeof value !== "string") {
+    throw httpsError("invalid-argument", `${name} must be a string.`);
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > maxLength || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw httpsError("invalid-argument", `Invalid ${name}.`);
+  }
+  return normalized;
+}
+
+/**
+ * How many stories one highlight may hold.
+ *
+ * `storyIds` is an unbounded JSON array in a single column, and the read endpoint
+ * only ever showed the first 30 — so anything beyond that was invisible weight in
+ * every row read. Enforced on WRITE now, which is the end that can actually refuse.
+ */
+const MAX_HIGHLIGHT_STORIES = 100;
+
+/**
+ * Validate a client-supplied list of story ids and assert the caller wrote every
+ * one of them.
+ *
+ * Returns the de-duplicated ids, in the caller's order. Throws rather than
+ * silently dropping the ids that fail: a highlight is something the user is
+ * curating deliberately, so quietly discarding half of it would be worse than
+ * saying no — and a partial success would also make the IDOR attempt look like it
+ * had worked.
+ */
+async function assertOwnedStoryIds(
+  db: ReturnType<typeof getDb>,
+  uid: string,
+  value: unknown,
+): Promise<string[]> {
+  if (value == null) return [];
+  if (!Array.isArray(value)) {
+    throw httpsError("invalid-argument", "storyIds must be an array of story ids.");
+  }
+  const ids = [...new Set(value.map((v, i) => requiredId(v, `storyIds[${i}]`, 128)))];
+  if (ids.length === 0) return [];
+  if (ids.length > MAX_HIGHLIGHT_STORIES) {
+    throw httpsError(
+      "invalid-argument",
+      `A highlight can hold at most ${MAX_HIGHLIGHT_STORIES} stories.`,
+    );
+  }
+  const owned = await db
+    .select({ id: schema.stories.id })
+    .from(schema.stories)
+    .where(and(inArray(schema.stories.id, ids), eq(schema.stories.userId, uid)))
+    .all();
+  if (owned.length !== ids.length) {
+    // Deliberately does not say WHICH ids failed, or distinguish "not yours" from
+    // "does not exist" — either answer would turn this into an oracle for probing
+    // whether a given story id is real.
+    throw httpsError("permission-denied", "A highlight can only contain your own stories.");
+  }
+  return ids;
+}
+
+apiRoute.post("/", async (c) => {
+  const body = await c.req.json<any>().catch(() => ({}));
+  const action = body?.action;
+  if (!action) throw httpsError("invalid-argument", "Action specify karna zaroori hai.");
+  const env = c.env;
+  const db = getDb(env);
+  const uid = c.get("user").uid;
+
+  // Idempotency guard — only enforced when the client opts in with a key
+  // (safe for retries on critical writes like purchases/joins/claims).
+  if (body.idempotencyKey) await enforceIdempotency(env, uid, String(body.idempotencyKey));
+
+  try {
+  switch (action) {
+    // ================= STORAGE (R2) =================
+    //
+    // `getPresignedUrl` and `getStoryUrl` are GONE, deliberately.
+    //
+    // They minted a signed S3 PUT URL and handed it to the client, which then
+    // uploaded straight to R2. That has two properties we cannot live with now
+    // that uploads are content-validated:
+    //
+    //   1. The bytes never pass through the Worker, so there is nothing to
+    //      inspect. A signed URL is an unconditional write primitive for whatever
+    //      key it names — the only check possible is on the declared type at
+    //      minting time, which is the exact check that turned out to be worthless.
+    //   2. `presignUpload` applied no size limit at all (the 80 MB cap lived in
+    //      the `/upload` handler), so one credential could store an object of any
+    //      size in our bucket.
+    //
+    // Keeping them as a "fallback" would have made the validation optional, and
+    // an optional check on an endpoint every signed-in user can reach is not a
+    // check. Nothing calls them: the app uploads exclusively via `POST /upload`
+    // (apps/expo/src/lib/uploadToR2.ts) and has since the presigned path was
+    // found to CORS-fail in the browser. An old build that still sent these gets
+    // a clear `unimplemented` rather than a silent 500.
+    case "getPresignedUrl":
+    case "getStoryUrl":
+      throw httpsError(
+        "failed-precondition",
+        "Direct-to-R2 uploads are no longer supported. Please update the app.",
+      );
+
+    // ================= VIDEO (Qencode) =================
+    /**
+     * Start a video upload: create the `videos` row and say where to send the
+     * bytes (`POST /upload/video?videoId=…`). See lib/qencode.ts for the
+     * pipeline and why the app never talks to Qencode directly.
+     *
+     * Returns `configured: false` instead of throwing when Qencode is not live,
+     * with `r2Fallback` telling the client whether the legacy `POST /upload`
+     * video path is open (true) or closed (false, retrying there only produces
+     * a confusing rejection).
+     *
+     * `upload: "worker"` is how a current client says it speaks this protocol.
+     * Builds from the Bunny era do not send it; they would read
+     * `configured: true` as "tus to Bunny" and fail with a missing signature,
+     * so they are answered "not configured" with `r2Fallback: true` and keep
+     * uploading a raw MP4 the way they always did (see lib/mediaRouting.ts).
+     */
+    case "createVideoUpload": {
+      if (body?.upload !== "worker" || !(await qencodeConfigured(env))) {
+        const routing = await mediaRouting(env);
+        return c.json({ configured: false, r2Fallback: routing.r2AcceptsVideo });
+      }
+
+      // Every row is a transcode we may pay for, so the cap is charged BEFORE
+      // the row exists — charging afterwards would let a burst of parallel
+      // requests all pass. Spent on ATTEMPTS, not posted videos, hence 30/hour
+      // rather than something tighter: retries on a flaky connection burn it.
+      if (!(await consumeRateLimit(env, `vidup:${uid}`, 30, 3600, { failClosed: true }))) {
+        throw httpsError(
+          "resource-exhausted",
+          "You've started too many video uploads in the last hour. Please try again later.",
+        );
+      }
+
+      const { targetType } = body;
+      if (targetType && !["story", "contest_entry"].includes(String(targetType)))
+        throw httpsError("invalid-argument", "Invalid targetType.");
+
+      const videoId = newId();
+      const ts = now();
+      await db.insert(schema.videos).values({
+        id: videoId,
+        ownerUid: uid,
+        provider: "qencode",
+        status: "uploading",
+        // target_id is filled in when the story / contest entry is created; a row
+        // that stays null is an abandoned upload and can be swept later.
+        targetType: targetType ? String(targetType) : null,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+
+      return c.json({
+        configured: true,
+        provider: "qencode",
+        videoId,
+        // Relative to the API base, so the client never builds it.
+        uploadPath: `/upload/video?videoId=${videoId}`,
+        // The eventual playback URL, so the caller can store it as mediaUrl
+        // without knowing how video URLs are shaped. Not playable until the
+        // encode is ready — `videoStatus` reports that.
+        playbackUrl: playbackUrlFor(env, videoId),
+        thumbnailUrl: thumbnailUrlFor(env, videoId),
+      });
+    }
+
+    /**
+     * Bunny-era action. The upload route now moves the row to `processing`
+     * itself (bytes stored + encode started), so a client claim here would only
+     * be able to put a row into `processing` with no job behind it. Kept as a
+     * no-op so an old build calling it gets a success rather than an error.
+     */
+    case "videoUploadComplete": {
+      return c.json({ success: true, updated: false });
+    }
+
+    /**
+     * Current processing state for a set of videos, so a client showing a
+     * "Processing…" overlay can poll without hitting Qencode directly.
+     *
+     * Scoped to the caller's OWN uploads. The predicate used to be the id list
+     * alone, which made this an enumeration endpoint for other people's media:
+     * `playbackUrl` and `mp4Url` are in the selected columns, so 50 guessed guids
+     * per request returned direct playback links for anyone's video — including
+     * uploads not yet attached to any public object (`targetType`/`targetId` still
+     * null) and videos on stories the caller has been blocked from. `ownerUid` was
+     * already on the row, and `idx_videos_owner` already indexed it.
+     *
+     * The overlay only ever polls for a video the caller just uploaded, so this
+     * costs legitimate callers nothing. It also bounds the Qencode recheck below to
+     * the caller's own media, which is what makes that amplification self-limiting.
+     */
+    case "videoStatus": {
+      const { videoIds } = body;
+      const ids = (Array.isArray(videoIds) ? videoIds : [videoIds])
+        .filter((v: any) => typeof v === "string" && v)
+        .slice(0, 50);
+      if (!ids.length) return c.json({ videos: [] });
+      const columns = {
+        id: schema.videos.id,
+        status: schema.videos.status,
+        thumbnailUrl: schema.videos.thumbnailUrl,
+        durationSec: schema.videos.durationSec,
+        playbackUrl: schema.videos.playbackUrl,
+        mp4Url: schema.videos.mp4Url,
+        updatedAt: schema.videos.updatedAt,
+      };
+      const ownedVideos = and(inArray(schema.videos.id, ids), eq(schema.videos.ownerUid, uid));
+      let rows = await db.select(columns).from(schema.videos).where(ownedVideos).all();
+
+      // Ask Qencode directly for anything still unfinished and not checked in
+      // the last window. A lost callback (or a job started by the cron, which has
+      // no callback) would otherwise only be cleared by the 15-minutes-stale
+      // cron — a video playable in a minute would show "Processing…" for up to
+      // ~25. This clears the overlay within one poll of the encode finishing.
+      //
+      // Bounded three ways: only unfinished rows, only past the recheck window
+      // (each check bumps `updatedAt`, so viewers cannot amplify it), and at most
+      // a few per request. Fail-open — a Qencode blip must still return the row
+      // we have, never break the poll the overlay depends on.
+      const cutoff = now() - LIVE_STATUS_RECHECK_MS;
+      const unfinished = rows
+        .filter((r) => (r.status === "processing" || r.status === "uploading") && Number(r.updatedAt ?? 0) < cutoff)
+        .slice(0, 3);
+      if (unfinished.length && (await qencodeConfigured(env))) {
+        await Promise.all(
+          unfinished.map((r) =>
+            applyEncodeResult(env, r.id).catch((e) => {
+              console.error("[videoStatus] live recheck failed", r.id, e);
+            }),
+          ),
+        );
+        rows = await db.select(columns).from(schema.videos).where(ownedVideos).all();
+      }
+      return c.json({ videos: rows });
+    }
+
+    // ================= CONTEST MATCHES =================
+    case "startMatch": {
+      const { contestId, mediaUrl, mediaType, caption, deviceId, invitedUid } = body;
+      // Idempotency fallback: if the client didn't send an explicit key, derive
+      // a short-lived one so a double-tap / retry can't create two matches and
+      // charge two entry fees. Released below if the action throws.
+      const startIdemKey = body.idempotencyKey ? null : `startMatch:${contestId}:${mediaUrl || ""}`;
+      if (startIdemKey) await enforceIdempotency(env, uid, startIdemKey, 60);
+      try {
+      const contest = await db.select().from(schema.contests).where(eq(schema.contests.id, contestId)).get();
+      if (!contest) throw httpsError("not-found", "Contest template not found.");
+      if (contest.status !== "live") {
+        throw httpsError("failed-precondition", "This contest is not currently accepting new matches.");
+      }
+      // Checked BEFORE the entry fee is debited, and here rather than only in
+      // the read filter — see assertContestOpenNow.
+      assertContestOpenNow(contest, "new matches");
+      const user = await db.select().from(schema.users).where(eq(schema.users.uid, uid)).get();
+      if (!user) throw httpsError("not-found", "User document not found.");
+      // Level-based tournament eligibility, before any fee moves.
+      await assertLevelEligible(env, contest, user.xp);
+      // Checked BEFORE the entry fee is debited. joinMatch refuses a blocked
+      // invitee, so without this the creator pays to create a private match that
+      // the only person allowed to join can never join — the coins would sit
+      // locked until the auto-cancel refund swept them up.
+      if (invitedUid) await assertNotBlockedAny(env, uid, [String(invitedUid)]);
+      await assertOwnContestEntry(env, uid, mediaUrl);
+
+      const totalFee = Number(contest.totalEntryFee || 0);
+      // Whole coins only. `perPlayerEntryFee` floors, so a legacy odd entry fee
+      // charges (and later refunds) an exact integer instead of x.5 coins.
+      const fee = perPlayerEntryFee(totalFee);
+      // Snapshot the prize now. Settlement pays the snapshot, so a later edit to
+      // the contest template cannot change what this match pays out, and the
+      // prize can never exceed the pot these two players fund.
+      const prizeCoins = Math.min(Number(contest.rewardCoins || 0), matchPot(totalFee));
+      /**
+       * The PRODUCT half of that same snapshot, and for exactly the same reason.
+       *
+       * This was missing: migration 0042 added the four columns and `resolveMatchPrize`
+       * reads them, but the only production INSERT into `contest_matches` (this one)
+       * never wrote them. Every new match therefore had `prize_type IS NULL`, which
+       * `resolveMatch` interprets as "row written before 0042" and back-fills from the
+       * live template — at SETTLEMENT time, once voting is already over.
+       *
+       * So the immutability that holds for `prize_coins` did not hold for a product:
+       * a match sitting in `waiting_for_opponent` is not `active`, so the PATCH guard
+       * ("Cannot change the prize while active matches exist") does not cover it, and
+       * an admin who switched the template's prize changed what that already-paid-for
+       * battle would hand over. Writing the snapshot here closes that window, and it
+       * also lets the match payload state its own prize instead of nothing.
+       *
+       * `normalizePrizeType` rather than the raw column: NULL must mean "legacy" for
+       * the degrade path in `resolveMatch` to stay meaningful, so a row this code
+       * writes is never allowed to be NULL.
+       */
+      const prizeType = normalizePrizeType(contest.prizeType);
+      const isProductPrize = prizeType === "product";
+
+      const ts = now();
+      const matchId = newId();
+      // Deterministic, matching the joinMatch side of the same match, so a retry
+      // resolves to the same ledger row instead of a second charge.
+      const entryTransactionId = `contest_entry:${matchId}:${uid}`;
+      const joinIdA = generateJoinId();
+      const expiresAt = ts + (contest.autoCancelHours || 24) * 60 * 60 * 1000;
+      // Promo prize (lib/promoBudget.ts): a contest linked to a contest_prize
+      // budget may promise more than the pot. The difference is RESERVED from the
+      // budget inside the same transaction as the entry fee, and the prize this
+      // match snapshots includes it only if the reservation succeeded — so a
+      // budget that has run out simply falls back to the pot prize, and nothing is
+      // ever promised that is not set aside.
+      const wantSubsidy =
+        !isProductPrize && contest.subsidyBudgetId && Number(contest.rewardCoins || 0) > prizeCoins
+          ? Number(contest.rewardCoins || 0) - prizeCoins
+          : 0;
+      const reservationId = matchReservationId(matchId);
+      // Product prize with an admin-only coin cost (never sent to the app): the
+      // part above the pot is RESERVED from a product_prize budget before anyone
+      // is charged. Unlike a coin prize there is no smaller fallback prize, so an
+      // exhausted budget stops new matches until the admin raises it.
+      const productCost = isProductPrize ? Math.max(0, Number(contest.prizeCostCoins || 0)) : 0;
+      const productSubsidy =
+        isProductPrize && contest.subsidyBudgetId && productCost > matchPot(totalFee) ? productCost - matchPot(totalFee) : 0;
+      if (productSubsidy > 0) {
+        const got = await tryReserve(env, {
+          id: reservationId,
+          budgetId: String(contest.subsidyBudgetId),
+          kind: "product_prize",
+          uid: null,
+          coins: productSubsidy,
+          refType: "match",
+          refId: matchId,
+          expiresAt: null,
+          ts,
+        });
+        if (!got) {
+          c.executionCtx.waitUntil(notifyBudgetExhausted(env, String(contest.subsidyBudgetId), contest.title || "contest"));
+          throw httpsError(
+            "failed-precondition",
+            "Is contest ke prize abhi khatam ho gaye hain. Thodi der baad dobara try karo.",
+            "prize_budget_exhausted",
+          );
+        }
+      }
+      // Media urls are canonicalised onto the current media base BEFORE being
+      // frozen into the snapshot. These two columns are the feed's media and they
+      // are permanent, so a legacy-host url written here is one the manual D1
+      // backfill has to come back for — and `user.profileImageUrl` is read from a
+      // row that may well predate the domain cutover, which is how old hosts kept
+      // propagating into brand-new records long after the cutover.
+      const userASnapshot = {
+        uid, joinId: joinIdA, username: user.username || "Anonymous",
+        profilePic: canonicalMediaUrl(env, user.profileImageUrl) || "",
+        mediaUrl: canonicalMediaUrl(env, mediaUrl), mediaType: mediaType || "photo",
+        caption: caption || "", votes: 0, deviceId: deviceId || "",
+      };
+
+      // The entry-fee debit, its ledger row and the match itself are ONE D1
+      // transaction, and all three are gated on the SAME pre-transaction solvency
+      // snapshot — the two INSERTs run first and do not touch `users`, so the
+      // UPDATE that follows evaluates an identical condition. Either all three
+      // apply or none do.
+      //
+      // Previously the deduct was a standalone statement and the ledger + match
+      // came afterwards in a separate batch, with a compensating refund in a
+      // `catch`. That refund was itself unledgered and ungated, so the failure it
+      // was meant to cover — the batch not applying — left the user charged with
+      // no match; and if the refund also failed, the coins were simply gone with
+      // no trace. Same pattern as joinMatch and lib/money.ts#adjustUserWallet.
+      // Entry fees are paid in Diamonds only (users.locked_coins, see
+      // lib/diamonds.ts). DP coins (dpcoin - locked_coins) are for withdrawal
+      // and never pay an entry. The ledger row records the Diamonds spent, so a
+      // refund gives them back as Diamonds.
+      const solvent = `EXISTS (SELECT 1 FROM users WHERE uid = ? AND ${DIAMONDS_COVER})`;
+      const reserved = `COALESCE((SELECT coins FROM promo_reservations WHERE id = ? AND status = 'held'), 0)`;
+      const createStatements: D1PreparedStatement[] = [
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO coin_transactions
+             (id, uid, amount, type, contest_id, description, created_at, locked_delta)
+           SELECT ?, ?, ?, 'contest_entry_fee', ?, ?, ?, ?
+            WHERE ${solvent}`,
+        ).bind(
+          entryTransactionId,
+          uid,
+          -fee,
+          contestId ?? null,
+          `Entry fee (50% split) for ${contest.title || "contest"} (Diamond)`,
+          ts,
+          -fee,
+          uid,
+          fee,
+        ),
+      ];
+      if (wantSubsidy > 0) {
+        createStatements.push(
+          reserveStatement(env, {
+            id: reservationId,
+            budgetId: String(contest.subsidyBudgetId),
+            kind: "contest_prize",
+            uid: null,
+            coins: wantSubsidy,
+            refType: "match",
+            refId: matchId,
+            expiresAt: null,
+            ts,
+            gate: solvent,
+            gateArgs: [uid, fee],
+          }),
+        );
+      }
+      createStatements.push(
+        env.DB.prepare(
+          `INSERT INTO contest_matches
+             (id, contest_id, status, type, title, entry_fee, is_private, invited_uid,
+              join_id_a, user_a, total_votes, min_votes_required, prize_coins,
+              prize_type, prize_product_title, prize_product_image_url, prize_product_value,
+              created_at, expires_at, subsidy_coins, subsidy_budget_id, prize_cost_coins)
+           SELECT ?, ?, 'waiting_for_opponent', ?, ?, ?, ?, ?, ?, ?, 0, ?,
+                  ? + CASE WHEN ? = 1 THEN ${reserved} ELSE 0 END, ?, ?, ?, ?, ?, ?,
+                  ${reserved},
+                  CASE WHEN ${reserved} > 0 THEN ? ELSE NULL END,
+                  ?
+            WHERE ${solvent}`,
+        ).bind(
+          matchId,
+          contestId ?? null,
+          contest.type || "photo",
+          contest.title || "Untitled Contest",
+          totalFee,
+          invitedUid ? 1 : 0,
+          invitedUid || null,
+          joinIdA,
+          JSON.stringify(userASnapshot),
+          Math.max(0, Number(contest.minVotes || 0)),
+          prizeCoins,
+          // A product's reserved coins pay for the product, not a coin prize.
+          isProductPrize ? 0 : 1,
+          reservationId,
+          prizeType,
+          isProductPrize ? contest.prizeProductTitle ?? null : null,
+          isProductPrize ? contest.prizeProductImageUrl ?? null : null,
+          isProductPrize ? contest.prizeProductValue ?? null : null,
+          ts,
+          expiresAt,
+          reservationId,
+          reservationId,
+          contest.subsidyBudgetId ?? null,
+          productCost,
+          uid,
+          fee,
+        ),
+        env.DB.prepare(
+          `UPDATE users
+              SET dpcoin = dpcoin - ?, locked_coins = locked_coins - ?, updated_at = ?
+            WHERE uid = ? AND ${DIAMONDS_COVER}`,
+        ).bind(fee, fee, ts, uid, fee),
+      );
+      const chargeIndex = createStatements.length - 1;
+      // Entry XP (lib/xpService.ts), only if this batch actually charged: the
+      // entry ledger id is unique to this new match. Reversed if the match is
+      // later cancelled (lib/contestSettlement.ts#settleRefund).
+      createStatements.push(...xpAwardStatements(env, await getProgression(env), {
+        uid,
+        action: "contest_entry",
+        eventId: entryTransactionId,
+        sourceType: "match",
+        sourceId: matchId,
+        ts,
+        gate: `EXISTS (SELECT 1 FROM coin_transactions WHERE id = ? AND created_at = ?)`,
+        gateArgs: [entryTransactionId, ts],
+      }).statements);
+      const createResults = await env.DB.batch(createStatements);
+      if (Number(createResults[chargeIndex]?.meta?.changes || 0) === 0) {
+        // Not charged, no match: give a product reservation made above back.
+        if (productSubsidy > 0) await releaseStatement(env, reservationId, now()).run().catch(() => {});
+        // Nothing was charged and no match was created — the two INSERTs share
+        // this statement's gate.
+        throw await notEnoughDiamonds(env, uid, fee);
+      }
+
+      // Close the create-vs-pause race: the admin pause update refuses to run
+      // while this waiting match exists. If the pause won just before the match
+      // insert, remove the new match and atomically refund the entry fee.
+      let statusAfterCreate: { status: string | null } | undefined;
+      try {
+        statusAfterCreate = await db
+          .select({ status: schema.contests.status })
+          .from(schema.contests)
+          .where(eq(schema.contests.id, contestId))
+          .get();
+      } catch (e) {
+        // The match and charge are already committed. A failed reconciliation
+        // read must not release idempotency and permit a duplicate charged
+        // retry; return the committed match and let normal admin guards see it.
+        console.error("[startMatch] post-create contest status check failed", matchId, e);
+      }
+      if (statusAfterCreate && statusAfterCreate.status !== "live") {
+        try {
+          /**
+           * D1 batches are atomic and sequential. Every financial statement is
+           * gated on the match still being waiting AND on the refund not already
+           * being recorded; the match delete goes last.
+           *
+           * The refund is now a COMPENSATING LEDGER ROW, not a deletion of the
+           * entry-fee row. Deleting it made this the only refund path in the
+           * worker that rewrote history instead of appending to it — the user's
+           * transaction list lost both halves, so a charge they had really been
+           * through became unexplainable, and `settleRefund` / `lib/payouts.ts`
+           * both do the opposite for the same situation.
+           *
+           * It also fixes what the credit was gated on. `stillWaiting` is a fact
+           * about the MATCH, not about the charge being compensated: if the
+           * entry-fee row were already absent (a partially-applied earlier
+           * rollback), the coins were still handed back with nothing offsetting
+           * them. `NOT EXISTS(refund row)` ties the credit to the exact thing it
+           * reverses, and the refund's ledger id is deterministic so a retry
+           * cannot pay it twice.
+           */
+          const refundTransactionId = `contest_entry_refund:${matchId}:${uid}`;
+          const rollbackTs = now();
+          // Raw SQL because BOTH money statements must carry the identical gate.
+          // Drizzle's `onConflictDoNothing()` insert cannot take a WHERE, so
+          // expressing this with the query builder would leave the ledger row
+          // ungated — it would then be written even when the credit no-opped
+          // (an opponent having activated the match), which is exactly the drift
+          // this rollback is supposed to prevent.
+          const refundGate =
+            `EXISTS (SELECT 1 FROM contest_matches WHERE id = ? AND status = 'waiting_for_opponent')
+             AND NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)`;
+          const refundBindings = [matchId, refundTransactionId];
+          // The entry above was paid in Diamonds, so they go back as Diamonds.
+          const relock = "?";
+          // The entry XP granted above is reversed by an append-only reversal
+          // event, which can never drive lifetime XP below zero.
+          const xpUndo = xpReversalStatements(env, {
+            originalId: entryTransactionId,
+            reason: "Entry refunded: contest stopped accepting new matches",
+            actor: "system",
+            ts: rollbackTs,
+            gate: refundGate,
+            gateArgs: refundBindings,
+          });
+          const rollback = await env.DB.batch([
+            // The promo subsidy (if any) goes back to its budget. First, because
+            // every later statement changes what `refundGate` sees.
+            releaseStatement(env, reservationId, rollbackTs, refundGate, refundBindings),
+            ...xpUndo,
+            env.DB.prepare(
+              `UPDATE users
+                  SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ${relock},
+                      updated_at = ?
+                WHERE uid = ? AND ${refundGate}`,
+            ).bind(fee, fee, rollbackTs, uid, ...refundBindings),
+            env.DB.prepare(
+              `INSERT OR IGNORE INTO coin_transactions
+                 (id, uid, amount, type, contest_id, match_id, description, created_at, locked_delta)
+               SELECT ?, ?, ?, 'contest_entry_refund', ?, ?, ?, ?, ${relock}
+                WHERE ${refundGate}`,
+            ).bind(
+              refundTransactionId,
+              uid,
+              fee,
+              contestId ?? null,
+              matchId,
+              "Entry fee refunded (Diamond) — contest stopped accepting new matches",
+              rollbackTs,
+              fee,
+              ...refundBindings,
+            ),
+            env.DB.prepare(
+              `DELETE FROM contest_matches WHERE id = ? AND status = 'waiting_for_opponent'`,
+            ).bind(matchId),
+          ]);
+          if (Number(rollback[3 + xpUndo.length]?.meta?.changes || 0) > 0) {
+            throw httpsError("failed-precondition", "This contest stopped accepting new matches. Your entry fee was refunded.");
+          }
+        } catch (e: any) {
+          if (e?.status === "failed-precondition" || e?.code === "failed-precondition") throw e;
+          // Atomic rollback failure leaves the committed match and charge
+          // intact. Preserve the idempotency claim and return that match.
+          console.error("[startMatch] post-create rollback failed; keeping committed match", matchId, e);
+        }
+      }
+
+      // NO story is created here. This used to auto-post a solo
+      // `contest_announcement` story carrying the creator's raw entry while the
+      // match was still waiting for an opponent — the reported defect. A battle
+      // gets stories only after a real two-participant join, from the server-owned
+      // workflow in lib/vsPublication.ts. Manual stories (createStory) are
+      // unaffected.
+      // Referral: a first contest entry may qualify this user's pending referral;
+      // remember the device for referral fraud checks. Never blocks the entry.
+      c.executionCtx.waitUntil(
+        (async () => {
+          if (deviceId) await env.DB.prepare(`UPDATE users SET device_id = ? WHERE uid = ?`).bind(String(deviceId).slice(0, 128), uid).run();
+          await qualifyReferral(env, uid, "contest");
+        })().catch((e) => console.error("[referral] contest hook failed", e)),
+      );
+      return c.json({ matchId, joinId: joinIdA, status: "waiting_for_opponent", vsStoryStatus: "waiting_for_opponent" });
+      } catch (e) {
+        if (startIdemKey) await releaseIdempotency(env, uid, startIdemKey);
+        throw e;
+      }
+    }
+
+    case "joinMatch": {
+      const { matchId, mediaUrl, mediaType, caption, deviceId } = body;
+      const match = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, matchId)).get();
+      if (!match) throw httpsError("not-found", "Match not found.");
+      if (match.status !== "waiting_for_opponent") throw httpsError("failed-precondition", "Match unavailable.");
+      // Past its waiting deadline the match is due for its automatic refund; the
+      // sweep runs every 10 minutes and joining in that gap charged the joiner for
+      // a battle the creator expected to be cancelled. Also enforced in the claim.
+      if (match.expiresAt != null && Number(match.expiresAt) <= Date.now()) {
+        throw httpsError("failed-precondition", "This battle has expired.");
+      }
+      const userA = match.userA as any;
+      if (userA?.uid === uid) throw httpsError("failed-precondition", "You cannot join your own match.");
+      // Invite-only matches: only the invited user may join.
+      if (match.isPrivate && match.invitedUid && match.invitedUid !== uid)
+        throw httpsError("permission-denied", "This is a private match — you weren't invited.");
+      // Anti-collusion: block joining from the same device as the creator
+      // (multi-account self-matching to farm rewards).
+      if (userA?.deviceId && deviceId && String(userA.deviceId) === String(deviceId))
+        throw httpsError("failed-precondition", "You cannot join a match from the same device as the creator.");
+      // Refused BEFORE the entry fee is debited: a battle is a sustained,
+      // notification-generating interaction, and being forced into one with
+      // someone you blocked is exactly what the block is for.
+      await assertNotBlockedAny(env, uid, [userA?.uid]);
+      // The joiner must bring their OWN entry. Submitting the creator's media url
+      // as "my" entry would put their photo on both halves of the battle and on
+      // the joiner's VS Story. Checked before any money moves.
+      if (!mediaUrl || typeof mediaUrl !== "string") throw httpsError("invalid-argument", "mediaUrl is required.");
+      if (userA?.mediaUrl && canonicalMediaUrl(env, mediaUrl) === canonicalMediaUrl(env, userA.mediaUrl)) {
+        throw httpsError("invalid-argument", "You must upload your own entry to join this battle.");
+      }
+      await assertOwnContestEntry(env, uid, mediaUrl);
+
+      const user = await db.select().from(schema.users).where(eq(schema.users.uid, uid)).get();
+      if (!user) throw httpsError("not-found", "User document not found.");
+      const fee = perPlayerEntryFee(match.entryFee);
+      // Voting window starts on activation and lasts the contest's configured
+      // voteDurationDays — NOT the waiting-room autoCancelHours (which only
+      // bounds how long a match may sit waiting for an opponent).
+      const contestPolicy = match.contestId
+        ? await db.select({
+            voteDays: schema.contests.voteDurationDays,
+            minVotes: schema.contests.minVotes,
+            status: schema.contests.status,
+            reward: schema.contests.rewardCoins,
+            startsAt: schema.contests.startsAt,
+            endsAt: schema.contests.endsAt,
+            minLevel: schema.contests.minLevel,
+            maxLevel: schema.contests.maxLevel,
+          }).from(schema.contests).where(eq(schema.contests.id, match.contestId)).get()
+        : null;
+      if (match.contestId && !contestPolicy) {
+        throw httpsError("failed-precondition", "The contest template for this match no longer exists.");
+      }
+      if (contestPolicy && contestPolicy.status !== "live") {
+        throw httpsError("failed-precondition", "This contest is not currently accepting opponents.");
+      }
+      // A battle must not outlive the contest it belongs to: joining now would
+      // start a vote that runs past the contest's own closing time. The
+      // creator's waiting match is refunded by the existing auto-cancel sweep.
+      if (contestPolicy) assertContestOpenNow(contestPolicy, "opponents");
+      await assertLevelEligible(env, contestPolicy, user.xp);
+      const voteDays = Number(contestPolicy?.voteDays || 1);
+      const minVotesRequired = Math.max(
+        0,
+        Number(match.minVotesRequired ?? contestPolicy?.minVotes ?? 0),
+      );
+
+      const ts = now();
+      const joinIdB = generateJoinId();
+      const entryLedgerId = `contest_entry:${matchId}:${uid}`;
+      // Legacy matches created before prize_coins existed get their snapshot
+      // here, at activation — the same treatment min_votes_required gets.
+      const prizeSnapshot = match.prizeCoins == null
+        ? Math.min(Number(contestPolicy?.reward ?? 0), matchPot(match.entryFee))
+        : Number(match.prizeCoins);
+      // Canonicalised for the same reason as userASnapshot in startMatch.
+      const userBSnapshot = {
+        uid, joinId: joinIdB, username: user.username || "Anonymous",
+        profilePic: canonicalMediaUrl(env, user.profileImageUrl) || "",
+        mediaUrl: canonicalMediaUrl(env, mediaUrl), mediaType: mediaType || "photo",
+        caption: caption || "", votes: 0, deviceId: deviceId || "",
+      };
+
+      // Slot claim, entry-fee ledger and balance deduct are ONE D1 transaction,
+      // gated on the freshly generated `joinIdB` acting as a claim token — the
+      // same pattern lib/contestSettlement.ts uses with settlement_id.
+      //
+      // Previously these were three separate writes: the deduct happened first,
+      // a lost race was compensated by a bare refund that wrote NO ledger row,
+      // and the ledger insert could fail after the slot was already claimed. Now
+      // either all three apply or none do, so a player can never be charged for
+      // a slot they did not get, and no balance moves without a ledger row.
+      //
+      // The same UPDATE marks the battle `vs_story_status = 'pending'`: the ONLY
+      // way a match becomes eligible for VS Story publication is this paid,
+      // server-validated claim (never a client-sent status). The extra guards make
+      // the database itself refuse a second participant, a self-join, or a match
+      // whose creator snapshot is missing — even if the checks above were raced.
+      const claimGate = `EXISTS (SELECT 1 FROM contest_matches WHERE id = ? AND join_id_b = ?)`;
+      const joinResults = await env.DB.batch([
+        env.DB.prepare(
+          `UPDATE contest_matches
+              SET status = 'active', join_id_b = ?, activated_at = ?,
+                  min_votes_required = ?, prize_coins = ?, expires_at = ?, user_b = ?,
+                  vs_story_status = 'pending', vs_story_attempts = 0, vs_story_next_at = ?,
+                  vs_story_claim = NULL, vs_story_error = NULL
+            WHERE id = ? AND status = 'waiting_for_opponent' AND user_b IS NULL
+              AND (expires_at IS NULL OR expires_at > ?)
+              AND json_extract(user_a, '$.uid') IS NOT NULL
+              AND json_extract(user_a, '$.uid') != ?
+              AND EXISTS (SELECT 1 FROM users WHERE uid = ? AND ${DIAMONDS_COVER})`,
+        ).bind(
+          joinIdB,
+          ts,
+          minVotesRequired,
+          prizeSnapshot,
+          ts + Math.max(1, voteDays) * 24 * 60 * 60 * 1000,
+          JSON.stringify(userBSnapshot),
+          ts,
+          matchId,
+          ts,
+          uid,
+          uid,
+          fee,
+        ),
+        // Paid in Diamonds only; the claim above already checked the user has them.
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO coin_transactions
+             (id, uid, amount, type, contest_id, match_id, description, created_at, locked_delta)
+           SELECT ?, ?, ?, 'contest_entry_fee', ?, ?, ?, ?, ?
+            WHERE ${claimGate}`,
+        ).bind(
+          entryLedgerId,
+          uid,
+          -fee,
+          match.contestId ?? null,
+          matchId,
+          `Entry fee (50% split) for ${match.title || "contest"} (Diamond)`,
+          ts,
+          -fee,
+          matchId,
+          joinIdB,
+        ),
+        env.DB.prepare(
+          `UPDATE users
+              SET dpcoin = dpcoin - ?, locked_coins = locked_coins - ?, updated_at = ?
+            WHERE uid = ? AND ${claimGate}`,
+        ).bind(fee, fee, ts, uid, matchId, joinIdB),
+        // Entry XP, gated on the same slot claim as the charge (lib/xpService.ts).
+        ...xpAwardStatements(env, await getProgression(env), {
+          uid,
+          action: "contest_entry",
+          eventId: entryLedgerId,
+          sourceType: "match",
+          sourceId: matchId,
+          ts,
+          gate: claimGate,
+          gateArgs: [matchId, joinIdB],
+        }).statements,
+      ]);
+
+      if (Number(joinResults[0]?.meta?.changes || 0) === 0) {
+        // Nothing was charged and nothing was claimed. Tell the user which of
+        // the two guards rejected them.
+        const stillWaiting = await db
+          .select({ status: schema.contestMatches.status, userA: schema.contestMatches.userA, userB: schema.contestMatches.userB })
+          .from(schema.contestMatches)
+          .where(eq(schema.contestMatches.id, matchId))
+          .get();
+        // The claim's structural guards (slot already filled, missing creator)
+        // reject for reasons other than balance; say so instead of blaming coins.
+        if (!stillWaiting || stillWaiting.status !== "waiting_for_opponent" || stillWaiting.userB || !(stillWaiting.userA as any)?.uid) {
+          throw httpsError("failed-precondition", "Match unavailable.");
+        }
+        if ((stillWaiting.userA as any).uid === uid) {
+          throw httpsError("failed-precondition", "You cannot join your own match.");
+        }
+        throw await notEnoughDiamonds(env, uid, fee);
+      }
+
+      // The battle now has two sides. Kick the server-owned VS publication
+      // (composite + both participants' stories) off the response path. It is
+      // idempotent and lease-guarded, and the cron reconciles anything this run
+      // does not finish, so the join never waits on — or fails because of —
+      // image rendering. The entry fee is already committed above.
+      c.executionCtx.waitUntil(
+        runVsPublication(env, matchId).catch((e) => {
+          console.error("[joinMatch] VS publication kick failed (cron will retry)", matchId, e);
+        }),
+      );
+      // Both entries are now valid (the battle runs): first-contest and creator
+      // achievements may unlock (lib/achievements.ts). Best-effort.
+      c.executionCtx.waitUntil(Promise.all([syncProgressionSafe(env, uid), syncProgressionSafe(env, userA.uid)]));
+
+      c.executionCtx.waitUntil(
+        sendPushNotification(
+          env, userA.uid, "Match Live! 🚀",
+          `${user.username} has joined your battle "${match.title}". Voting is now open!`,
+          "match_active", { matchId },
+        ),
+      );
+
+      // Referral: a first contest entry may qualify this user's pending referral;
+      // remember the device for referral fraud checks. Never blocks the entry.
+      c.executionCtx.waitUntil(
+        (async () => {
+          if (deviceId) await env.DB.prepare(`UPDATE users SET device_id = ? WHERE uid = ?`).bind(String(deviceId).slice(0, 128), uid).run();
+          await qualifyReferral(env, uid, "contest");
+        })().catch((e) => console.error("[referral] contest hook failed", e)),
+      );
+      return c.json({ status: "active", joinId: joinIdB, matchId, vsStoryStatus: "preparing" });
+    }
+
+    /**
+     * Server-confirmed VS Story state for the caller's own battle.
+     *
+     * The congratulations screen polls this instead of assuming success, so it
+     * never claims "your VS Story is live" before both rows exist. A participant
+     * polling a due publication also nudges the workflow (idempotent, leased,
+     * honours backoff) — a refresh can never re-charge or re-submit anything.
+     */
+    case "getMatchStoryStatus": {
+      await rateLimit(env, `vsstatus:${uid}`, 120, 3600);
+      const matchId = requiredId(body.matchId, "matchId", 128);
+      const m = await db
+        .select({
+          status: schema.contestMatches.status,
+          userA: schema.contestMatches.userA,
+          userB: schema.contestMatches.userB,
+          vsStoryStatus: schema.contestMatches.vsStoryStatus,
+          vsStoryNextAt: schema.contestMatches.vsStoryNextAt,
+          vsImageUrl: schema.contestMatches.vsImageUrl,
+        })
+        .from(schema.contestMatches)
+        .where(eq(schema.contestMatches.id, matchId))
+        .get();
+      if (!m) throw httpsError("not-found", "Match not found.");
+      const uidA = (m.userA as any)?.uid;
+      const uidB = (m.userB as any)?.uid;
+      if (uid !== uidA && uid !== uidB) throw httpsError("permission-denied", "Only a participant can check this battle's story.");
+
+      let storyStatus = publicVsStoryStatus(m);
+      let storyId: string | null = null;
+      if (storyStatus === "live") {
+        const own = await db
+          .select({ id: schema.stories.id })
+          .from(schema.stories)
+          .where(and(eq(schema.stories.matchId, matchId), eq(schema.stories.userId, uid), eq(schema.stories.type, "contest_vs")))
+          .get();
+        storyId = own?.id ?? null;
+        // Published, but this user's own row has since expired or been deleted.
+        if (!storyId) storyStatus = "unavailable";
+      } else if (
+        (m.vsStoryStatus === "pending" || m.vsStoryStatus === "processing") &&
+        Number(m.vsStoryNextAt || 0) <= now()
+      ) {
+        c.executionCtx.waitUntil(runVsPublication(env, matchId).catch(() => {}));
+      }
+      return c.json({
+        matchId,
+        matchStatus: m.status,
+        storyStatus,
+        storyId,
+        vsImageUrl: storyStatus === "live" ? m.vsImageUrl ?? null : null,
+      });
+    }
+
+    /**
+     * The canonical share asset for a battle: the server-rendered two-photo VS
+     * card. Every client share path (feed sheet, Story share, Save image, the
+     * congratulations screen) resolves through this, so they all send the same
+     * file — never one participant's raw entry.
+     *
+     * Verifies the object still exists and regenerates it at the same
+     * deterministic key if it was swept (no Stories, ownership or money touched).
+     * Blocked viewers are refused, exactly like any other match interaction.
+     */
+    case "getMatchShareImage": {
+      // Reads are cheap (one row + one R2 HEAD); a sheet opening polls a few
+      // times while an image is being prepared.
+      await rateLimit(env, `vsshare:${uid}`, 600, 3600);
+      const matchId = requiredId(body.matchId, "matchId", 128);
+      await assertMatchInteractionAllowed(env, uid, matchId);
+      const out = await ensureMatchShareImage(env, matchId, {
+        // Only an actual (re)render counts against the per-battle budget, so
+        // popular battles or one noisy viewer cannot switch image sharing off
+        // for everyone by merely opening the sheet.
+        beforeRegenerate: () => rateLimit(env, `vsshare_regen:${matchId}`, 20, 3600),
+      });
+      if (out.status === "preparing") {
+        c.executionCtx.waitUntil(runVsPublication(env, matchId).catch(() => {}));
+      }
+      return c.json(out);
+    }
+
+    /**
+     * RETIRED as a writer: the battle card is now composed by the SERVER from the
+     * two accepted entries (lib/vsPublication.ts) and is no longer accepted from a
+     * client.
+     *
+     * The old contract let a participant upload any image to `vs-cards/` and have
+     * it shown on the OTHER participant's story — an accepted defacement vector
+     * that only existed because the Worker could not compose images. It can now,
+     * so the residual risk is closed rather than bounded.
+     *
+     * Kept as an action so installs still running the capture-and-record code get
+     * a well-formed answer: the server's card when it exists, otherwise a refusal.
+     * Read-only: it never deletes anything (see below).
+     */
+    case "setMatchVsImage": {
+      await rateLimit(env, `vsimage:${uid}`, 30, 3600, { failClosed: true });
+      const matchId = requiredId(body.matchId, "matchId", 128);
+      const imageUrl = requiredId(body.imageUrl, "imageUrl", 2048);
+      if (!vsImageKeyFromPublicUrl(env, imageUrl)) {
+        throw httpsError("invalid-argument", "imageUrl must be an uploaded battle card.");
+      }
+      const match = await db
+        .select({
+          userA: schema.contestMatches.userA,
+          userB: schema.contestMatches.userB,
+          vsImageUrl: schema.contestMatches.vsImageUrl,
+        })
+        .from(schema.contestMatches)
+        .where(eq(schema.contestMatches.id, matchId))
+        .get();
+      // NOTHING is deleted on this path any more. Clients can no longer write to
+      // `vs-cards/`, so a caller-supplied url can only name a SERVER card — and
+      // deleting "the url you sent" would let anyone erase another battle's live
+      // composite by naming it. Legacy client uploads expire via the R2
+      // lifecycle rule on the prefix.
+      if (!match) throw httpsError("not-found", "Match not found.");
+      const uidA = (match.userA as any)?.uid;
+      const uidB = (match.userB as any)?.uid;
+      if (!uidA || !uidB) throw httpsError("failed-precondition", "This battle does not have two participants yet.");
+      if (uid !== uidA && uid !== uidB) throw httpsError("permission-denied", "Only a participant can set the battle image.");
+      if (match.vsImageUrl) return c.json({ success: true, vsImageUrl: match.vsImageUrl, alreadySet: true });
+      throw httpsError("failed-precondition", "The battle image is generated by the server.");
+    }
+
+    case "submitVote": {
+      const matchId = requiredId(body.matchId, "matchId", 128);
+      const votedForUid = requiredId(body.votedForUid, "votedForUid", 128);
+      const deviceId = requiredId(body.deviceId, "deviceId", 256);
+      const voterAccount = await db.select({
+        uid: schema.users.uid,
+        status: schema.users.status,
+        isBlocked: schema.users.isBlocked,
+      }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+      if (!voterAccount) throw httpsError("failed-precondition", "Complete your profile before voting.");
+      if (voterAccount.isBlocked || voterAccount.status !== "active") {
+        throw httpsError("permission-denied", "This account is not eligible to vote.");
+      }
+      // Throttle abusive vote bursts (per user): max 60 / minute.
+      await rateLimit(env, `vote:${uid}`, 60, 60);
+      // Per-IP velocity cap — slows multi-account vote stuffing from one network
+      // beyond the per-user and per-match-device guards (max 40 / minute / IP).
+      const voteIp = c.req.header("cf-connecting-ip") || c.req.header("x-real-ip") || "";
+      // `vote_ip:` not `vote:ip:` — the subject is everything after the FIRST
+      // colon, so the old spelling made it `ip:1.2.3.4` while every other per-IP
+      // key (`upload_ip`, `otpsend`, `create`) resolves to the bare address. One IP
+      // therefore owned two limiter actors, and the next per-IP key added would
+      // have picked one of the two spellings at random.
+      if (voteIp) await rateLimit(env, `vote_ip:${voteIp}`, 40, 60);
+      const match = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, matchId)).get();
+      if (!match) throw httpsError("not-found", "Match not found.");
+      if (match.status !== "active") throw httpsError("failed-precondition", "Battle is not active.");
+      const expiresAt = Number(match.expiresAt);
+      if (!Number.isFinite(expiresAt) || expiresAt <= 0) {
+        throw httpsError("failed-precondition", "This battle has no valid voting deadline.");
+      }
+      // Voting closes exactly at expiry — don't accept votes in the gap before
+      // the resolver cron runs (which can lag up to its 10-min interval).
+      if (expiresAt <= now())
+        throw httpsError("failed-precondition", "Voting has closed for this battle.");
+      const userA = match.userA as any;
+      const userB = match.userB as any;
+      if (uid === userA?.uid || (userB && uid === userB.uid))
+        throw httpsError("failed-precondition", "Participants cannot vote in their own match.");
+      // A vote decides who takes the prize pot, so someone the voter has blocked
+      // (or who blocked them) must not be able to have their outcome influenced
+      // either way. The match row is already loaded, so this is one extra query.
+      await assertNotBlockedAny(env, uid, [userA?.uid, userB?.uid]);
+
+      // validate the vote target is a participant
+      if (votedForUid !== userA?.uid && !(userB && votedForUid === userB.uid))
+        throw httpsError("invalid-argument", "Invalid participant UID for this match.");
+
+      // Dedup + tally happen inside the per-match VoteCounter Durable Object,
+      // which batch-flushes counts to D1 — this keeps the hot vote path off
+      // D1's single writer even under viral load.
+      const tally = await castVote(env, matchId, {
+        voterUid: uid,
+        votedForUid,
+        deviceId,
+        // Recorded so vote fraud can be investigated by network as well as by
+        // device id. The per-IP throttle above already bounds bursts; this makes
+        // clustering visible after the fact.
+        ip: voteIp || null,
+        uidA: userA?.uid,
+        uidB: userB?.uid ?? userA?.uid,
+        expiresAt,
+      });
+      if (tally.votingClosed) throw httpsError("failed-precondition", "Voting has closed for this battle.");
+      if (tally.alreadyVoted) throw httpsError("already-exists", "You have already voted in this match.");
+      if (tally.deviceUsed) throw httpsError("failed-precondition", "This device has already voted in this match.");
+
+      // The vote is already durably committed in the per-match actor. Realtime
+      // fan-out must never turn that success into a client-visible failure, so
+      // publish out-of-band and return the authoritative tally immediately.
+      c.executionCtx.waitUntil(publish(env, `match:${matchId}`, {
+        type: "vote",
+        votedForUid,
+        votesA: tally.votesA,
+        votesB: tally.votesB,
+        totalVotes: tally.total,
+      }));
+      return c.json({
+        success: true,
+        hasVoted: true,
+        votedForUid,
+        votesA: tally.votesA,
+        votesB: tally.votesB,
+        totalVotes: tally.total,
+      });
+    }
+
+    // ================= POSTS =================
+    case "createPost": {
+      await rateLimit(env, `post:${uid}`, 30, 3600);
+      const { mediaUrl, mediaType, caption, location } = body;
+      if (!mediaUrl || !mediaType) throw httpsError("invalid-argument", "Media URL and type are required.");
+      await assertClean(env, caption, location);
+      const postId = newId();
+      const ts = now();
+      await db.insert(schema.posts).values({
+        id: postId, userId: uid, mediaUrl, mediaType, caption: caption || "", location: location || "",
+        likeCount: 0, commentCount: 0, createdAt: ts,
+      });
+      await db.update(schema.users).set({ postsCount: sql`${schema.users.postsCount} + 1` }).where(eq(schema.users.uid, uid));
+      return c.json({ success: true, postId });
+    }
+
+    case "deletePost": {
+      const { postId } = body;
+      if (!postId) throw httpsError("invalid-argument", "Post ID is required.");
+      const post = await db.select().from(schema.posts).where(eq(schema.posts.id, postId)).get();
+      if (!post) throw httpsError("not-found", "Post not found.");
+      if (post.userId !== uid && !(await isAdmin(c as any)))
+        throw httpsError("permission-denied", "You don't have permission to delete this post.");
+      await db.delete(schema.posts).where(eq(schema.posts.id, postId));
+      await db.update(schema.users).set({ postsCount: sql`MAX(${schema.users.postsCount} - 1, 0)` }).where(eq(schema.users.uid, post.userId));
+      // Free the R2 object so storage doesn't leak (DELETE is free in R2).
+      if (post.mediaUrl) await deleteMediaByUrl(env, post.mediaUrl, post.userId).catch(() => {});
+      return c.json({ success: true, message: "Post deleted successfully" });
+    }
+
+    // ================= STORIES =================
+    // `getStoryUrl` is handled with `getPresignedUrl` above.
+    case "createStory": {
+      await rateLimit(env, `story:${uid}`, 40, 3600);
+      const { mediaUrl, mediaType, overlayText, textPosition, mentions, visibility, musicTrackId, musicStartMs } = body;
+      if (!mediaUrl) throw httpsError("invalid-argument", "mediaUrl is required.");
+      await assertClean(env, overlayText);
+      const user = await db.select({ username: schema.users.username, avatar: schema.users.profileImageUrl }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+      const ts = now();
+      const storyId = newId();
+      // Music: only the track ID is accepted, and every stored field is resolved
+      // here from the provider. A client-supplied preview URL would be embedded
+      // as a media load in every viewer's browser — a way to log the IP and
+      // user-agent of everyone who watches the story, from a domain they trust.
+      //
+      // A lookup failure attaches no music and still creates the story. The user
+      // has already waited through a media upload; losing it over a soundtrack
+      // would be the wrong trade, and `stories.music_*` is nullable precisely so
+      // this path is normal rather than exceptional.
+      const track = musicTrackId ? await lookupTrack(env, String(musicTrackId)) : null;
+      // Where in the track to start (migration 0037). Sanitised, not trusted:
+      // whole non-negative ms inside a provider preview. We cannot bound it any
+      // tighter here — the catalogue stores no duration and the story's window
+      // depends on a video length only the client knows — so the exact clamp is
+      // the editor's job and every reader is defensive about the result. Stored
+      // only when a track actually attached, so an offset can never outlive the
+      // song it refers to.
+      const startMs = track ? sanitiseMusicStartMs(musicStartMs) : null;
+      await db.insert(schema.stories).values({
+        id: storyId, userId: uid, username: user?.username,
+        // `user.avatar` is a snapshot of a users row that may predate the media
+        // domain cutover; canonicalise so a new story never reintroduces an old host.
+        avatarUrl: canonicalMediaUrl(env, user?.avatar),
+        mediaUrl: canonicalMediaUrl(env, mediaUrl), mediaType: mediaType || "photo", visibility: visibility || "public",
+        overlayText: overlayText || null, textPosition: textPosition || null, mentions: mentions || null,
+        musicTrackId: track?.id ?? null,
+        musicTitle: track?.title ?? null,
+        musicArtist: track?.artist ?? null,
+        musicArtworkUrl: track?.artworkUrl ?? null,
+        musicPreviewUrl: track?.previewUrl ?? null,
+        musicStartMs: startMs,
+        type: "user", createdAt: ts, expiresAt: ts + 24 * 60 * 60 * 1000,
+      });
+      // `musicAttached` lets the client tell "I chose a track and it saved" from
+      // "the provider was down", instead of silently publishing a silent story.
+      return c.json({ success: true, storyId, musicAttached: !!track });
+    }
+    case "deleteStory": {
+      const { storyId } = body;
+      if (!storyId) throw httpsError("invalid-argument", "storyId is required.");
+      const story = await db.select().from(schema.stories).where(eq(schema.stories.id, storyId)).get();
+      if (!story) throw httpsError("not-found", "Story not found.");
+      if (story.userId !== uid && !(await isAdmin(c as any)))
+        throw httpsError("permission-denied", "Not allowed.");
+      // Provider-aware: a story's media is one R2 object or an encoded video folder.
+      //
+      // Only a PERSONAL story owns its media. A contest story's media is either
+      // the shared VS composite — owned by the match and still displayed by the
+      // other participant's story — or (legacy rows) the author's battle entry,
+      // which the battle itself still shows. Deleting either here would blank
+      // someone else's story or the battle. The composite is removed by the
+      // reference-aware sweep once no live story uses it (lib/matchStories.ts).
+      // The vs-card check covers a personal story that merely NAMES a composite.
+      if (story.mediaUrl && !isContestStoryType(story.type) && !vsImageKeyFromPublicUrl(env, story.mediaUrl)) {
+        await deleteMediaByUrl(env, story.mediaUrl, story.userId);
+      }
+      await db.delete(schema.stories).where(eq(schema.stories.id, storyId));
+      return c.json({ success: true });
+    }
+
+    // ================= USER & SOCIAL =================
+    case "toggleFollow": {
+      // Follow/unfollow churn is a notification-spam and scraping vector.
+      await rateLimit(env, `follow:${uid}`, 120, 3600);
+      const { targetUserId } = body;
+      if (!targetUserId) throw httpsError("invalid-argument", "The function must be called with a 'targetUserId'.");
+      if (targetUserId === uid) throw httpsError("invalid-argument", "You cannot follow yourself.");
+      /**
+       * Optional explicit intent. Without it this is a toggle (older clients).
+       * With it, a tap can never do the OPPOSITE of what the button showed: a
+       * list screen that does not know about a pending request shows "Follow",
+       * and a bare toggle would withdraw the request the user meant to send.
+       *   follow   → follow / request; a no-op if already following or requested
+       *   unfollow / cancel → remove the follow or the request; a no-op if neither
+       */
+      const intent = body.intent === "follow" || body.intent === "unfollow" || body.intent === "cancel" ? body.intent : null;
+      const wantsOff = intent === "unfollow" || intent === "cancel";
+      const existing = await db
+        .select()
+        .from(schema.follows)
+        .where(and(eq(schema.follows.followerId, uid), eq(schema.follows.followingId, targetUserId)))
+        .get();
+
+      // The follow edge touches four cached surfaces: the follower's "following"
+      // list, the target's "followers" list, and both users' profile (denormalized
+      // follower/following counts). Invalidate all four so the next read is fresh.
+      const invalidateFollowCaches = () =>
+        purgeShared(
+          c,
+          followingCacheKey(uid),
+          followersCacheKey(targetUserId),
+          userCacheKey(uid),
+          userCacheKey(targetUserId),
+        );
+
+      if (existing && intent === "follow") return c.json({ success: true, isFollowing: true, requested: false });
+      if (existing) {
+        // Unfollow: one atomic batch. The decrements are gated on the edge still
+        // existing and run BEFORE the delete, as in removeFollower. `existing` is a
+        // plain read, so two concurrent unfollows (a double tap, or an offline
+        // replay racing the original) both reached here and both decremented.
+        const edge = sql`EXISTS (SELECT 1 FROM follows WHERE follower_id = ${uid} AND following_id = ${targetUserId})`;
+        await db.batch([
+          db.update(schema.users).set({ followingCount: sql`MAX(${schema.users.followingCount} - 1, 0)` }).where(and(eq(schema.users.uid, uid), edge)),
+          db.update(schema.users).set({ followersCount: sql`MAX(${schema.users.followersCount} - 1, 0)` }).where(and(eq(schema.users.uid, targetUserId), edge)),
+          db.delete(schema.follows).where(and(eq(schema.follows.followerId, uid), eq(schema.follows.followingId, targetUserId))),
+        ]);
+        c.executionCtx.waitUntil(invalidateFollowCaches());
+        return c.json({ success: true, isFollowing: false, requested: false });
+      }
+      // A pending request to a private account: tapping "Requested" withdraws it.
+      // Checked before the privacy read so a request survives the account going
+      // public only until the owner's switch approves it (lib/followRequests.ts).
+      if (await hasPendingRequest(env, uid, targetUserId)) {
+        if (intent === "follow") return c.json({ success: true, isFollowing: false, requested: true });
+        await deleteFollowRequest(env, uid, targetUserId);
+        return c.json({ success: true, isFollowing: false, requested: false });
+      }
+      if (wantsOff) return c.json({ success: true, isFollowing: false, requested: false });
+      // Guarded on the FOLLOW branch only. Unfollowing must stay possible
+      // whatever the relationship is — refusing it could strand an edge that
+      // predates the block and leave the user unable to clean it up.
+      await assertNotBlocked(env, uid, targetUserId);
+      const me = await db.select({ username: schema.users.username, fullName: schema.users.fullName, avatar: schema.users.profileImageUrl }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+      // PRIVATE target → a pending request instead of a follow (Instagram rule).
+      // Nothing behind the profile header unlocks until the owner confirms.
+      //
+      // The insert is gated on the account STILL being private in the same
+      // statement. The owner's switch to public writes `is_private = 0` and then
+      // approves pending requests; a request read as private just before that
+      // write could otherwise land after the approval and sit, unanswerable, on
+      // a public account. Gated, it inserts nothing and falls through to a
+      // direct follow below.
+      let requested = false;
+      if (await isPrivateAccount(env, targetUserId)) {
+        const ins = await env.DB.prepare(
+          `INSERT OR IGNORE INTO follow_requests (requester_id, target_id, created_at)
+           SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM users WHERE uid = ? AND is_private = 1)`,
+        )
+          .bind(uid, targetUserId, now(), targetUserId)
+          .run();
+        requested = (ins.meta?.changes ?? 0) > 0 || (await hasPendingRequest(env, uid, targetUserId));
+      }
+      if (requested) {
+        // Request → cancel → request is a way to push the owner repeatedly (the
+        // cancel removes the row, not the push already delivered). The request
+        // itself always goes through; only the notification is capped per pair.
+        const notify = await consumeRateLimit(env, `followreq_notify:${uid}:${targetUserId}`, 3, 3600);
+        if (notify) c.executionCtx.waitUntil(
+          createNotification(env, targetUserId, {
+            title: "Follow request",
+            body: `${me?.username || me?.fullName || "Someone"} wants to follow you.`,
+            type: "follow_request", targetId: uid, image: me?.avatar || undefined,
+            actor: { uid, username: me?.username || me?.fullName, avatarUrl: me?.avatar },
+            // One row per requester: each one is confirmed or deleted on its own.
+            noCollapse: true,
+          }),
+        );
+        return c.json({ success: true, isFollowing: false, requested: true });
+      }
+      // Follow: insert edge + bump both counters atomically in a single batch.
+      //
+      // Each counter moves only if the statement before it changed a row, so
+      // the bumps follow the INSERT. The edge check above is a read, so two
+      // concurrent follows (a double tap, or an offline replay racing the
+      // original) both reached this point: the plain insert then failed on the
+      // primary key for the second one. With INSERT OR IGNORE alone, both would
+      // have bumped the counters. `changes()` is the row count of the previous
+      // statement on the same connection, and a D1 batch is one transaction
+      // run in order. test/socialReplay.test.ts injects the race.
+      const followRes = await env.DB.batch([
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO follows (follower_id, following_id, created_at) VALUES (?, ?, ?)`,
+        ).bind(uid, targetUserId, now()),
+        env.DB.prepare(
+          `UPDATE users SET following_count = COALESCE(following_count, 0) + 1 WHERE uid = ? AND changes() > 0`,
+        ).bind(uid),
+        env.DB.prepare(
+          `UPDATE users SET followers_count = COALESCE(followers_count, 0) + 1 WHERE uid = ? AND changes() > 0`,
+        ).bind(targetUserId),
+      ]);
+      if (Number(followRes[0]?.meta?.changes ?? 0) === 0) {
+        // Someone else's request created the edge first; it already notified.
+        return c.json({ success: true, isFollowing: true, requested: false });
+      }
+      c.executionCtx.waitUntil(
+        Promise.all([
+          invalidateFollowCaches(),
+          createNotification(env, targetUserId, {
+            title: "New Follower! 👤",
+            body: `${me?.username || me?.fullName || "Someone"} started following you.`,
+            type: "follow", targetId: uid, image: me?.avatar || undefined,
+            // Enables grouping: "Asha and 3 others started following you".
+            actor: { uid, username: me?.username || me?.fullName, avatarUrl: me?.avatar },
+          }),
+        ]),
+      );
+      return c.json({ success: true, isFollowing: true, requested: false });
+    }
+
+    // ================= FOLLOW REQUESTS (private accounts) =================
+    // The OWNER answers a request. `accept: true` confirms it (the requester
+    // becomes a follower); `accept: false` deletes it silently, as Instagram does.
+    // Both are idempotent: answering an already-answered or withdrawn request is
+    // a no-op success, so a double tap never errors.
+    case "respondFollowRequest": {
+      await rateLimit(env, `followreq:${uid}`, 300, 3600);
+      const requesterId = requiredId(body.requesterId, "requesterId", 128);
+      const accept = body.accept === true;
+      if (!accept) {
+        await deleteFollowRequest(env, requesterId, uid);
+        return c.json({ success: true, accepted: false });
+      }
+      // A block since the request was sent: drop it rather than create a follow.
+      if (await isBlockedBetween(env, uid, requesterId)) {
+        await deleteFollowRequest(env, requesterId, uid);
+        throw httpsError("permission-denied", "This action isn't available for this account.");
+      }
+      const accepted = await approveFollowRequest(env, requesterId, uid, now());
+      if (!accepted) return c.json({ success: true, accepted: false });
+      const me = await db.select({ username: schema.users.username, fullName: schema.users.fullName, avatar: schema.users.profileImageUrl }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+      c.executionCtx.waitUntil(
+        Promise.all([
+          purgeShared(c, followingCacheKey(requesterId), followersCacheKey(uid), userCacheKey(requesterId), userCacheKey(uid)),
+          createNotification(env, requesterId, {
+            title: "Request accepted",
+            body: `${me?.username || me?.fullName || "Someone"} accepted your follow request.`,
+            type: "follow_accept", targetId: uid, image: me?.avatar || undefined,
+            actor: { uid, username: me?.username || me?.fullName, avatarUrl: me?.avatar },
+            noCollapse: true,
+          }),
+        ]),
+      );
+      return c.json({ success: true, accepted: true });
+    }
+
+    // The owner removes someone from their followers (Instagram's "Remove").
+    // Mostly for private accounts: it is how an owner takes back access without
+    // blocking. The removed account is not notified. Counters are gated on the
+    // edge still existing and ordered before its delete (same reasoning as the
+    // block path below), so a concurrent unfollow cannot double-decrement.
+    case "removeFollower": {
+      await rateLimit(env, `follow:${uid}`, 120, 3600);
+      const followerId = requiredId(body.followerId, "followerId", 128);
+      if (followerId === uid) throw httpsError("invalid-argument", "You cannot remove yourself.");
+      const edge = sql`EXISTS (SELECT 1 FROM follows WHERE follower_id = ${followerId} AND following_id = ${uid})`;
+      await db.batch([
+        db.update(schema.users).set({ followingCount: sql`MAX(${schema.users.followingCount} - 1, 0)` }).where(and(eq(schema.users.uid, followerId), edge)),
+        db.update(schema.users).set({ followersCount: sql`MAX(${schema.users.followersCount} - 1, 0)` }).where(and(eq(schema.users.uid, uid), edge)),
+        db.delete(schema.follows).where(and(eq(schema.follows.followerId, followerId), eq(schema.follows.followingId, uid))),
+      ]);
+      c.executionCtx.waitUntil(
+        purgeShared(c, followingCacheKey(followerId), followersCacheKey(uid), userCacheKey(followerId), userCacheKey(uid)),
+      );
+      return c.json({ success: true });
+    }
+
+    // ================= BLOCK / MUTE =================
+    // Deliberately NOT toggles, unlike toggleFollow/toggleBookmark. These are
+    // safety actions: a double-tap or a retried request must never quietly undo
+    // a block, so each direction is its own explicit action and both are
+    // idempotent (onConflictDoNothing / an unconditional delete).
+    // See lib/blocks.ts for the enforcement rules.
+    case "blockUser": {
+      await rateLimit(env, `block:${uid}`, 60, 3600);
+      const targetUserId = requiredId(body.targetUserId, "targetUserId", 128);
+      if (targetUserId === uid) throw httpsError("invalid-argument", "You cannot block yourself.");
+      const target = await db
+        .select({ uid: schema.users.uid })
+        .from(schema.users)
+        .where(eq(schema.users.uid, targetUserId))
+        .get();
+      if (!target) throw httpsError("not-found", "User not found.");
+
+      // A block tears down the follow relationship in BOTH directions. Leaving
+      // the edges in place would keep feeding the blocked user's battles into
+      // the blocker's "Following" tab and keep the blocker listed among the
+      // blocked user's followers — i.e. the block would appear not to have
+      // worked. Read the edges first so the counters are only decremented for
+      // edges that actually existed: D1 batches run in order, so a conditional
+      // `WHERE EXISTS (SELECT ... FROM follows ...)` would already see the
+      // delete that precedes it.
+      const [iFollowThem, theyFollowMe] = await Promise.all([
+        db
+          .select({ followerId: schema.follows.followerId })
+          .from(schema.follows)
+          .where(and(eq(schema.follows.followerId, uid), eq(schema.follows.followingId, targetUserId)))
+          .get(),
+        db
+          .select({ followerId: schema.follows.followerId })
+          .from(schema.follows)
+          .where(and(eq(schema.follows.followerId, targetUserId), eq(schema.follows.followingId, uid)))
+          .get(),
+      ]);
+
+      // Each decrement is gated on the edge still existing and is ordered BEFORE
+      // the delete that removes it. That ordering is the point: D1 batches run
+      // sequentially, so an `EXISTS` placed after its own delete would always be
+      // false, while one placed before it sees the state at commit time. This is
+      // what makes the counters safe against a concurrent unfollow — that request
+      // has already decremented, so the row is gone and these become no-ops
+      // instead of decrementing a second time.
+      const edgeExists = (followerId: string, followingId: string) =>
+        sql`EXISTS (SELECT 1 FROM follows WHERE follower_id = ${followerId} AND following_id = ${followingId})`;
+      const stmts: any[] = [
+        db
+          .insert(schema.userBlocks)
+          .values({ blockerId: uid, blockedId: targetUserId, createdAt: now() })
+          .onConflictDoNothing(),
+      ];
+      if (iFollowThem) {
+        stmts.push(
+          db.update(schema.users).set({ followingCount: sql`MAX(${schema.users.followingCount} - 1, 0)` }).where(and(eq(schema.users.uid, uid), edgeExists(uid, targetUserId))),
+          db.update(schema.users).set({ followersCount: sql`MAX(${schema.users.followersCount} - 1, 0)` }).where(and(eq(schema.users.uid, targetUserId), edgeExists(uid, targetUserId))),
+          db.delete(schema.follows).where(and(eq(schema.follows.followerId, uid), eq(schema.follows.followingId, targetUserId))),
+        );
+      }
+      if (theyFollowMe) {
+        stmts.push(
+          db.update(schema.users).set({ followingCount: sql`MAX(${schema.users.followingCount} - 1, 0)` }).where(and(eq(schema.users.uid, targetUserId), edgeExists(targetUserId, uid))),
+          db.update(schema.users).set({ followersCount: sql`MAX(${schema.users.followersCount} - 1, 0)` }).where(and(eq(schema.users.uid, uid), edgeExists(targetUserId, uid))),
+          db.delete(schema.follows).where(and(eq(schema.follows.followerId, targetUserId), eq(schema.follows.followingId, uid))),
+        );
+      }
+      // Belt and braces against the opposite race: a `toggleFollow` that passed
+      // its block check microseconds before the row above was inserted would
+      // otherwise insert an edge AFTER these deletes and leave a follow that
+      // outlives the block. Deleting again after the block row is committed closes
+      // that window; it is a no-op in the normal case.
+      stmts.push(
+        db.delete(schema.follows).where(
+          or(
+            and(eq(schema.follows.followerId, uid), eq(schema.follows.followingId, targetUserId)),
+            and(eq(schema.follows.followerId, targetUserId), eq(schema.follows.followingId, uid)),
+          ),
+        ),
+        // Pending follow requests in either direction go too: a block must not
+        // leave a request the blocked account could later see confirmed.
+        ...deleteRequestsBetweenStmts(db, uid, targetUserId),
+      );
+      await db.batch(stmts as any);
+
+      // Nothing else is undone. Votes already cast, comments already written and
+      // matches already settled stay exactly as they are — the coin ledger and
+      // contest results reference them, and a prize that has been paid cannot be
+      // retracted because of a later falling-out. Only visibility and the
+      // ability to interact from here on change.
+      c.executionCtx.waitUntil(
+        Promise.all([
+          // Mutual relation → both users' exclusion sets moved.
+          invalidateBlockCache(env, uid, targetUserId),
+          purgeShared(
+            c,
+            followingCacheKey(uid),
+            followersCacheKey(uid),
+            followingCacheKey(targetUserId),
+            followersCacheKey(targetUserId),
+            userCacheKey(uid),
+            userCacheKey(targetUserId),
+          ),
+        ]),
+      );
+      // No notification, by design: telling someone they have been blocked is
+      // the opposite of what the feature is for.
+      return c.json({ success: true, blocked: true });
+    }
+
+    case "unblockUser": {
+      await rateLimit(env, `block:${uid}`, 60, 3600);
+      const targetUserId = requiredId(body.targetUserId, "targetUserId", 128);
+      await db
+        .delete(schema.userBlocks)
+        .where(and(eq(schema.userBlocks.blockerId, uid), eq(schema.userBlocks.blockedId, targetUserId)));
+      // Follows are NOT restored. They were a separate decision and the user has
+      // to make it again deliberately.
+      c.executionCtx.waitUntil(invalidateBlockCache(env, uid, targetUserId));
+      return c.json({ success: true, blocked: false });
+    }
+
+    case "muteUser": {
+      await rateLimit(env, `mute:${uid}`, 120, 3600);
+      const targetUserId = requiredId(body.targetUserId, "targetUserId", 128);
+      if (targetUserId === uid) throw httpsError("invalid-argument", "You cannot mute yourself.");
+      // Same existence check as blockUser. Without it any string becomes a mute
+      // row, and because the management screen resolves rows through the users
+      // table, a row pointing at no account would be invisible there and could
+      // never be undone.
+      const muteTarget = await db
+        .select({ uid: schema.users.uid })
+        .from(schema.users)
+        .where(eq(schema.users.uid, targetUserId))
+        .get();
+      if (!muteTarget) throw httpsError("not-found", "User not found.");
+      await db
+        .insert(schema.userMutes)
+        .values({ muterId: uid, mutedId: targetUserId, createdAt: now() })
+        .onConflictDoNothing();
+      // One-way and silent: the muted user is never told, keeps following, and
+      // can still message and comment. Only this viewer's feed changes.
+      c.executionCtx.waitUntil(invalidateBlockCache(env, uid));
+      return c.json({ success: true, muted: true });
+    }
+
+    case "unmuteUser": {
+      await rateLimit(env, `mute:${uid}`, 120, 3600);
+      const targetUserId = requiredId(body.targetUserId, "targetUserId", 128);
+      await db
+        .delete(schema.userMutes)
+        .where(and(eq(schema.userMutes.muterId, uid), eq(schema.userMutes.mutedId, targetUserId)));
+      c.executionCtx.waitUntil(invalidateBlockCache(env, uid));
+      return c.json({ success: true, muted: false });
+    }
+
+    // Restrict / hide-story-from (migration 0067, lib/socialSafety.ts). Both are
+    // one-way and silent: the other account is never told and follows are kept.
+    // The read paths query the tables directly (no relations cache), so there is
+    // nothing to invalidate except the shared stories base for hides.
+    case "restrictUser":
+    case "hideStoryFrom": {
+      const restrict = action === "restrictUser";
+      await rateLimit(env, `${restrict ? "restrict" : "storyhide"}:${uid}`, 120, 3600);
+      const targetUserId = requiredId(body.targetUserId, "targetUserId", 128);
+      if (targetUserId === uid) throw httpsError("invalid-argument", "You cannot do this to yourself.");
+      const target = await db.select({ uid: schema.users.uid }).from(schema.users).where(eq(schema.users.uid, targetUserId)).get();
+      if (!target) throw httpsError("not-found", "User not found.");
+      if (restrict) {
+        await db
+          .insert(schema.userRestricts)
+          .values({ restricterId: uid, restrictedId: targetUserId, createdAt: now() })
+          .onConflictDoNothing();
+        return c.json({ success: true, restricted: true });
+      }
+      await db
+        .insert(schema.userStoryHides)
+        .values({ ownerId: uid, hiddenUid: targetUserId, createdAt: now() })
+        .onConflictDoNothing();
+      return c.json({ success: true, storyHidden: true });
+    }
+
+    case "unrestrictUser":
+    case "unhideStoryFrom": {
+      const restrict = action === "unrestrictUser";
+      await rateLimit(env, `${restrict ? "restrict" : "storyhide"}:${uid}`, 120, 3600);
+      const targetUserId = requiredId(body.targetUserId, "targetUserId", 128);
+      if (restrict) {
+        await db
+          .delete(schema.userRestricts)
+          .where(and(eq(schema.userRestricts.restricterId, uid), eq(schema.userRestricts.restrictedId, targetUserId)));
+        return c.json({ success: true, restricted: false });
+      }
+      await db
+        .delete(schema.userStoryHides)
+        .where(and(eq(schema.userStoryHides.ownerId, uid), eq(schema.userStoryHides.hiddenUid, targetUserId)));
+      return c.json({ success: true, storyHidden: false });
+    }
+
+    case "getDailyReward": {
+      // The check-in track exactly as `claimDailyReward` will pay it, so the app
+      // never shows amounts of its own.
+      const settings = await getSettings(env);
+      const user = await db
+        .select({ streak: schema.users.streak, lastDailyClaim: schema.users.lastDailyClaim })
+        .from(schema.users)
+        .where(eq(schema.users.uid, uid))
+        .get();
+      if (!user) throw httpsError("not-found", "User not found.");
+      return c.json(dailyRewardState(settings, user, now()));
+    }
+
+    case "claimDailyReward": {
+      const settings = await getSettings(env);
+      if (!settings.dailyLoginEnabled) throw httpsError("failed-precondition", "Daily check-in abhi band hai.");
+      const user = await db.select().from(schema.users).where(eq(schema.users.uid, uid)).get();
+      if (!user) throw httpsError("not-found", "User not found.");
+      const ts = now();
+      // The reward day starts at the admin's reset time (dayResetOffsetMinutes,
+      // 0 = midnight UTC), computed on the server; the client clock is never used.
+      const startOfToday = rewardDayStart(ts, settings.dayResetOffsetMinutes);
+      const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+      const lastMs = user.lastDailyClaim ? Number(user.lastDailyClaim) : 0;
+      if (lastMs >= startOfToday)
+        throw httpsError("already-exists", "Daily reward already claimed today.");
+      // Streak continues only if the previous claim happened during "yesterday".
+      let streak = user.streak || 0;
+      streak = lastMs >= startOfYesterday && lastMs < startOfToday ? streak + 1 : 1;
+      // Either the admin's fixed schedule (repeating) or base + streak bonus,
+      // with the bonus capped at DAILY_STREAK_BONUS_MAX_DAYS. Uncapped, the daily
+      // payout rose forever (lib/gamification.ts#dailyRewardFor).
+      const coinReward = dailyRewardFor(settings, streak);
+      if (!Number.isInteger(coinReward) || coinReward < 0 || coinReward > MAX_COIN_AMOUNT) {
+        throw httpsError("internal", "Daily reward is misconfigured.");
+      }
+      // Free reward: play-only unless App Control says otherwise (lib/rewardLocking.ts).
+      const dailyCfg = await getAppConfig(env);
+      const dailyLocked = lockedPart(dailyCfg, "daily", coinReward);
+      const dailyLedgerId = `daily_reward:${uid}:${startOfToday}`;
+      // Capped by the free-rewards budget when one is set (lib/promoBudget.ts).
+      const dailyBudget = freeRewardBudgetStatements(env, {
+        budgetId: freeRewardsBudgetId(dailyCfg),
+        refId: dailyLedgerId,
+        uid,
+        coins: coinReward,
+        ts,
+        label: "Daily login reward",
+        gate: `EXISTS (SELECT 1 FROM users WHERE uid = ? AND (last_daily_claim IS NULL OR last_daily_claim < ?))`,
+        gateArgs: [uid, startOfToday],
+      });
+      // Atomic guard: the conditional WHERE + affected-row check guarantees only
+      // ONE claim per UTC day even if two requests race.
+      //
+      // The ledger row is written in the SAME transaction, gated on the same
+      // pre-transaction snapshot (`last_daily_claim` before the update). It used
+      // to be a separate statement, so a failure between the two credited coins
+      // with no ledger entry.
+      const eligible = `(last_daily_claim IS NULL OR last_daily_claim < ?)`;
+      const dailyXp = xpAwardStatements(env, await getProgression(env), {
+        uid,
+        action: "daily_checkin",
+        eventId: `daily_checkin:${uid}:${startOfToday}`,
+        sourceType: "checkin",
+        sourceId: String(startOfToday),
+        ts,
+        gate: `EXISTS (SELECT 1 FROM users WHERE uid = ? AND last_daily_claim = ?)
+               AND EXISTS (SELECT 1 FROM coin_transactions WHERE id = ? AND created_at = ?)`,
+        gateArgs: [uid, ts, dailyLedgerId, ts],
+      });
+      const dailyResults = await env.DB.batch([
+        ...dailyBudget.reserve,
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO coin_transactions
+             (id, uid, amount, type, description, created_at, locked_delta)
+           SELECT ?, ?, ?, 'daily_reward', ?, ?, ?
+            WHERE EXISTS (SELECT 1 FROM users WHERE uid = ? AND ${eligible}) AND ${dailyBudget.heldGate}`,
+        ).bind(
+          dailyLedgerId,
+          uid,
+          coinReward,
+          `Daily login reward (${streak} day streak)${dailyLocked > 0 ? " · Diamond" : ""}`,
+          ts,
+          dailyLocked,
+          uid,
+          startOfToday,
+          ...dailyBudget.heldArgs,
+        ),
+        // Also requires THIS request's ledger row. The ledger insert is OR IGNORE on
+        // a per-day id, so if `last_daily_claim` were ever moved back within the day
+        // (an admin edit, a data repair) the balance moved with no ledger row.
+        env.DB.prepare(
+          `UPDATE users
+              SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, streak = ?, last_daily_claim = ?, updated_at = ?
+            WHERE uid = ? AND ${eligible}
+              AND EXISTS (SELECT 1 FROM coin_transactions WHERE id = ? AND created_at = ?)`,
+        ).bind(coinReward, dailyLocked, streak, ts, ts, uid, startOfToday, dailyLedgerId, ts),
+        ...dailyBudget.finalize,
+        // Check-in XP (lib/xpService.ts): only when THIS request's claim applied.
+        ...dailyXp.statements,
+      ]);
+      if (Number(dailyResults[dailyBudget.reserve.length + 1]?.meta?.changes || 0) === 0) {
+        if (dailyBudget.reservationId) {
+          const r = await env.DB.prepare(`SELECT 1 AS x FROM promo_reservations WHERE id = ?`).bind(dailyBudget.reservationId).first();
+          if (!r) {
+            c.executionCtx.waitUntil(notifyBudgetExhausted(env, String(freeRewardsBudgetId(dailyCfg)), "Free rewards (daily login / ads / tasks)"));
+            throw httpsError("failed-precondition", "Aaj ke free rewards khatam ho gaye hain. Thodi der baad try karo.", FREE_REWARDS_EXHAUSTED);
+          }
+        }
+        throw httpsError("already-exists", "Daily reward already claimed today.");
+      }
+      const xpEarned = dailyXp.active ? (await xpEventOutcome(env, dailyXp.eventId, dailyXp.nonce)).delta : 0;
+      c.executionCtx.waitUntil(syncProgressionSafe(env, uid));
+      return c.json({ success: true, coinsEarned: coinReward, xpEarned, streak, lockedCoins: dailyLocked });
+    }
+
+    // (Rewarded ads: see claimAdReward below. It is FAIL-CLOSED: with no AdMob
+    // Server-Side Verification endpoint, it refuses unless ads are enabled AND
+    // `ads.trustClient` is set AND ALLOW_UNVERIFIED_AD_REWARDS is "true", and no
+    // config sets those. Wire SSV before turning it on.)
+    //
+    // ===== Registration verification reward (lib/verificationReward.ts) =====
+    //
+    // None of these accept a uid, an amount or a verification flag: the uid is
+    // the verified token's, the amount is the server's snapshot, and "verified"
+    // is whatever server-side proof has recorded.
+    case "refreshVerification": {
+      // One outbound Firebase lookup per call; money can follow, so fail closed.
+      await rateLimit(env, `verifyrefresh:${uid}`, 20, 3600, { failClosed: true });
+      await refreshVerificationFromFirebase(env, uid);
+      // Referral: email AND mobile verified may qualify a pending referral.
+      await qualifyReferral(env, uid, "verified");
+      const reward = await tryCreditVerificationReward(env, uid);
+      const status = await getVerificationStatus(env, uid);
+      return c.json({ success: true, reward: { credited: reward.credited, coins: reward.coins, reason: reward.reason }, status });
+    }
+    case "claimVerificationReward": {
+      await rateLimit(env, `verifyclaim:${uid}`, 30, 3600, { failClosed: true });
+      const reward = await tryCreditVerificationReward(env, uid);
+      const status = await getVerificationStatus(env, uid);
+      return c.json({ success: true, reward: { credited: reward.credited, coins: reward.coins, reason: reward.reason }, status });
+    }
+    case "markVerificationPromptShown": {
+      await rateLimit(env, `verifyprompt:${uid}`, 30, 3600);
+      const recorded = await recordPromptShown(env, uid);
+      return c.json({ success: true, recorded });
+    }
+
+    case "claimAdReward": {
+      await rateLimit(env, `ad:${uid}`, 20, 60, { failClosed: true });
+      const ads = await getRewardedAdConfig(env);
+
+      // Rewarded ads mint real, withdrawable currency on nothing but the
+      // client's word that an ad was watched. That is only acceptable once the
+      // ad network's Server-Side Verification callback is the thing that
+      // credits, so the feature is OFF unless an admin explicitly turns it on.
+      //
+      // `trustClient: true` is the escape hatch for a non-SSV provider: it still
+      // works, but it has to be a deliberate, visible decision rather than the
+      // silent default it used to be.
+      if (!ads.enabled) {
+        throw httpsError(
+          "failed-precondition",
+          "Rewarded ads are not currently available.",
+        );
+      }
+      // There is no SSV callback endpoint yet, so `trustClient` is the ONLY way
+      // this credits — i.e. any signed-in client calling this with an empty body
+      // mints withdrawable coins up to the daily cap, per account. That was one
+      // admin-panel toggle away (a single compromised or careless admin account).
+      // It now ALSO requires a deploy-level opt-in that only someone with
+      // Cloudflare access can set, so the panel alone can never switch it on.
+      if (!ads.trustClient || (env as any).ALLOW_UNVERIFIED_AD_REWARDS !== "true") {
+        throw httpsError(
+          "failed-precondition",
+          "Rewarded ads must be credited through the ad network's server-side verification callback.",
+        );
+      }
+
+      const ts = now();
+      // Same reward day as the check-in and daily tasks (admin reset time).
+      const day = rewardDayNumber(ts, (await getSettings(env)).dayResetOffsetMinutes);
+      const claimId = newId();
+      const adCfg = await getAppConfig(env);
+      const adLocked = lockedPart(adCfg, "ads", Number(ads.reward) || 0);
+      // The cap is enforced by a COUNT(*) guard evaluated INSIDE the crediting
+      // transaction, and the credit + ledger are gated on that claim row
+      // existing. Concurrent requests are serialised by the transaction, so the
+      // cap is exact rather than approximate.
+      const claimGate = `EXISTS (SELECT 1 FROM ad_reward_claims WHERE id = ?)`;
+      const adBudget = freeRewardBudgetStatements(env, {
+        budgetId: freeRewardsBudgetId(adCfg),
+        refId: `ad:${claimId}`,
+        uid,
+        coins: Number(ads.reward) || 0,
+        ts,
+        label: "Rewarded ad",
+        gate: claimGate,
+        gateArgs: [claimId],
+      });
+      const adResults = await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO ad_reward_claims (id, uid, day, provider, reward, created_at)
+           SELECT ?, ?, ?, ?, ?, ?
+            WHERE (SELECT COUNT(*) FROM ad_reward_claims WHERE uid = ? AND day = ?) < ?`,
+        ).bind(claimId, uid, day, ads.provider, ads.reward, ts, uid, day, ads.dailyCap),
+        ...adBudget.reserve,
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO coin_transactions
+             (id, uid, amount, type, description, created_at, locked_delta)
+           SELECT ?, ?, ?, 'ad_reward', ?, ?, ?
+            WHERE ${claimGate} AND ${adBudget.heldGate}`,
+        ).bind(newId(), uid, ads.reward, adLocked > 0 ? "Rewarded ad view · Diamond" : "Rewarded ad view", ts, adLocked, claimId, ...adBudget.heldArgs),
+        env.DB.prepare(
+          `UPDATE users SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, updated_at = ? WHERE uid = ? AND ${claimGate} AND ${adBudget.heldGate}`,
+        ).bind(ads.reward, adLocked, ts, uid, claimId, ...adBudget.heldArgs),
+        ...adBudget.finalize,
+        // Budget had no room: the claim must not count against today's cap.
+        ...(adBudget.reservationId
+          ? [env.DB.prepare(`DELETE FROM ad_reward_claims WHERE id = ? AND NOT EXISTS (SELECT 1 FROM promo_reservations WHERE id = ?)`).bind(claimId, adBudget.reservationId)]
+          : []),
+      ]);
+
+      if (Number(adResults[0]?.meta?.changes || 0) === 0) {
+        throw httpsError("resource-exhausted", "Daily ad reward limit reached. Come back tomorrow!");
+      }
+      if (Number(adResults[adBudget.reserve.length + 2]?.meta?.changes || 0) === 0) {
+        c.executionCtx.waitUntil(notifyBudgetExhausted(env, String(freeRewardsBudgetId(adCfg)), "Free rewards (daily login / ads / tasks)"));
+        throw httpsError("failed-precondition", "Aaj ke free rewards khatam ho gaye hain. Thodi der baad try karo.", FREE_REWARDS_EXHAUSTED);
+      }
+      const usedToday = await db
+        .select({ n: count() })
+        .from(schema.adRewardClaims)
+        .where(and(eq(schema.adRewardClaims.uid, uid), eq(schema.adRewardClaims.day, day)))
+        .get();
+      return c.json({
+        success: true,
+        coinsEarned: ads.reward,
+        lockedCoins: adLocked,
+        remaining: Math.max(0, ads.dailyCap - Number(usedToday?.n ?? 0)),
+      });
+    }
+
+    // ================= DAILY TASKS =================
+    case "getDailyTasks": {
+      const settings = await getSettings(env);
+      const ts = now();
+      const tasks = activeDailyTasks(getDailyTaskDefs(settings), ts);
+      const day = rewardDayNumber(ts, settings.dayResetOffsetMinutes);
+      const startOfDay = rewardDayStart(ts, settings.dayResetOffsetMinutes);
+      const types = new Set(tasks.map((t) => t.type));
+      const progressByType: Record<string, number> = {};
+      for (const type of types) progressByType[type] = await dailyTaskProgress(env, uid, type, startOfDay);
+      const claimed = await db
+        .select({ taskId: schema.dailyTaskClaims.taskId })
+        .from(schema.dailyTaskClaims)
+        .where(and(eq(schema.dailyTaskClaims.uid, uid), eq(schema.dailyTaskClaims.day, day)))
+        .all();
+      const claimedSet = new Set(claimed.map((r) => r.taskId));
+      const out = tasks.map((t) => {
+        const progress = progressByType[t.type] ?? 0;
+        const isClaimed = claimedSet.has(t.id);
+        // "ad" tasks are credited via the separate claimAdReward flow (watch an
+        // ad), so they're never "claimable" through the generic task claim.
+        const eligible = t.type === "ad" ? false : progress >= t.target;
+        return {
+          id: t.id,
+          title: t.title,
+          reward: t.reward,
+          xp: t.type === "ad" ? 0 : t.xp,
+          target: t.target,
+          type: t.type,
+          progress: Math.min(progress, t.target),
+          claimed: isClaimed,
+          claimable: eligible && !isClaimed,
+          endsAt: t.endsAt,
+        };
+      });
+      return c.json({ tasks: out, resetsAt: startOfDay + 86_400_000 });
+    }
+
+    case "claimDailyTask": {
+      const { taskId } = body;
+      if (!taskId) throw httpsError("invalid-argument", "taskId is required.");
+      const settings = await getSettings(env);
+      const nowMs = now();
+      // A disabled or out-of-window task cannot be claimed.
+      const task = activeDailyTasks(getDailyTaskDefs(settings), nowMs).find((t) => t.id === taskId);
+      if (!task) throw httpsError("not-found", "Unknown task.");
+      if (task.type === "ad") throw httpsError("failed-precondition", "Ad rewards are claimed by watching an ad.");
+      const day = rewardDayNumber(nowMs, settings.dayResetOffsetMinutes);
+      const startOfDay = rewardDayStart(nowMs, settings.dayResetOffsetMinutes);
+
+      // Progress is always recounted on the server.
+      if ((await dailyTaskProgress(env, uid, task.type, startOfDay)) < task.target) {
+        throw httpsError("failed-precondition", "Task not completed yet.");
+      }
+
+      const ts = nowMs;
+      const reward = assertCoinAmount(task.reward, "task reward");
+      const taskCfg = await getAppConfig(env);
+      const taskLocked = lockedPart(taskCfg, "tasks", reward);
+      /**
+       * Claim + credit + ledger in ONE batch, the same shape as `claimAdReward`
+       * above.
+       *
+       * The claim used to be its own statement, followed by a separate batch whose
+       * `dpcoin +=` was gated on NOTHING. A crash or a D1 error between the two
+       * left the claim row present and the reward gone forever: every retry got
+       * `already-exists`, and no sweeper looks for this.
+       *
+       * The replay guard is the LEDGER row, not the claim row. That distinction
+       * matters here and is why this cannot simply copy `claimAdReward` verbatim:
+       * that handler's claim carries a fresh random id per request, so
+       * `EXISTS(claim)` is only ever true for the request that wrote it. This
+       * claim's key is (uid, task_id, day) — stable across retries — so
+       * `EXISTS(claim)` is true on a replay too and would authorise a second
+       * credit. `NOT EXISTS(ledger)` on a deterministic id is exact instead.
+       *
+       * The credit comes BEFORE the ledger insert so both read the same
+       * pre-transaction snapshot of `coin_transactions` and can only both apply or
+       * both no-op. The `users` arm keeps a deleted account from producing a
+       * ledger row with no matching balance change.
+       */
+      const ledgerId = `daily_task:${uid}:${day}:${taskId}`;
+      const taskGate =
+        `EXISTS (SELECT 1 FROM daily_task_claims WHERE uid = ? AND task_id = ? AND day = ?)
+         AND NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)
+         AND EXISTS (SELECT 1 FROM users WHERE uid = ?)`;
+      const taskBindings = [uid, taskId, day, ledgerId, uid];
+      const taskBudget = freeRewardBudgetStatements(env, {
+        budgetId: freeRewardsBudgetId(taskCfg),
+        refId: ledgerId,
+        uid,
+        coins: reward,
+        ts,
+        label: `Daily task "${task.title}"`,
+        gate: taskGate,
+        gateArgs: taskBindings,
+      });
+      const taskXp = xpAwardStatements(env, await getProgression(env), {
+        uid,
+        action: "daily_task",
+        eventId: ledgerId,
+        amount: task.xp,
+        sourceType: "daily_task",
+        sourceId: taskId,
+        ts,
+        gate: `EXISTS (SELECT 1 FROM coin_transactions WHERE id = ? AND created_at = ?)`,
+        gateArgs: [ledgerId, ts],
+      });
+      const taskResults = await env.DB.batch([
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO daily_task_claims (uid, task_id, day, reward, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        ).bind(uid, taskId, day, reward, ts),
+        ...taskBudget.reserve,
+        env.DB.prepare(
+          `UPDATE users SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, updated_at = ? WHERE uid = ? AND ${taskGate} AND ${taskBudget.heldGate}`,
+        ).bind(reward, taskLocked, ts, uid, ...taskBindings, ...taskBudget.heldArgs),
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO coin_transactions
+             (id, uid, amount, type, description, created_at, locked_delta)
+           SELECT ?, ?, ?, 'daily_task', ?, ?, ?
+            WHERE ${taskGate} AND ${taskBudget.heldGate}`,
+        ).bind(ledgerId, uid, reward, `Task reward: ${task.title}${taskLocked > 0 ? " · Diamond" : ""}`, ts, taskLocked, ...taskBindings, ...taskBudget.heldArgs),
+        ...taskBudget.finalize,
+        // Daily-quest XP, only when this request's ledger row was written.
+        ...taskXp.statements,
+      ]);
+      if (Number(taskResults[taskBudget.reserve.length + 1]?.meta?.changes || 0) === 0) {
+        if (taskBudget.reservationId) {
+          const credited = await env.DB.prepare(`SELECT 1 AS x FROM coin_transactions WHERE id = ?`).bind(ledgerId).first();
+          if (!credited) {
+            c.executionCtx.waitUntil(notifyBudgetExhausted(env, String(freeRewardsBudgetId(taskCfg)), "Free rewards (daily login / ads / tasks)"));
+            throw httpsError("failed-precondition", "Aaj ke free rewards khatam ho gaye hain. Thodi der baad try karo.", FREE_REWARDS_EXHAUSTED);
+          }
+        }
+        throw httpsError("already-exists", "Task already claimed today.");
+      }
+      const taskXpEarned = taskXp.active ? (await xpEventOutcome(env, taskXp.eventId, taskXp.nonce)).delta : 0;
+      if (taskXpEarned) c.executionCtx.waitUntil(syncProgressionSafe(env, uid));
+      return c.json({ success: true, reward, lockedCoins: taskLocked, xpEarned: taskXpEarned });
+    }
+
+    // ================= WALLET =================
+    // Step 1 of the purchase flow: create a Razorpay order priced SERVER-SIDE
+    // from the coin package. The client never dictates the price or the number
+    // of coins — that is derived here and stashed so `topup` can trust it.
+    case "createOrder": {
+      const { packageId } = body;
+      if (!packageId) throw httpsError("invalid-argument", "packageId is required.");
+      // Every call makes an authenticated outbound order-create at Razorpay plus
+      // a D1 insert, and it had no limit at all. Generous for a real buyer;
+      // fail-closed because this is a payment path.
+      await rateLimit(env, `createorder:${uid}`, 20, 3600, { failClosed: true });
+      const rzp = await getRazorpayCredentials(env);
+      if (!rzp.keyId || !rzp.keySecret)
+        throw httpsError("failed-precondition", "Payments are not configured on the server.");
+
+      const pkg = await db
+        .select()
+        .from(schema.coinPackages)
+        .where(and(eq(schema.coinPackages.id, String(packageId)), eq(schema.coinPackages.active, true)))
+        .get();
+      if (!pkg) throw httpsError("not-found", "Diamond package not found.");
+
+      // Price = base coins × the admin's coin value, bonus free (lib/coinPricing.ts),
+      // read NOW on the server — the same formula the store displays. The order
+      // row below locks this amount for the payment's whole life.
+      const priced = chargeablePackage(pkg, await getAppConfig(env));
+      const amountPaise = Math.round(priced.priceInr * 100);
+      let bonusCoins = priced.bonusCoins;
+      let totalCoins = priced.totalCoins;
+
+      // Create the order at Razorpay (HTTP Basic auth = key_id:key_secret).
+      const authHeader = btoa(`${rzp.keyId}:${rzp.keySecret}`);
+      const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Basic ${authHeader}` },
+        body: JSON.stringify({
+          amount: amountPaise,
+          currency: "INR",
+          receipt: `rcpt_${uid.slice(0, 8)}_${Date.now()}`,
+          notes: { uid, packageId: String(packageId), coins: totalCoins },
+        }),
+      });
+      if (!rzpRes.ok) {
+        const errTxt = await rzpRes.text().catch(() => "");
+        console.error("[createOrder] Razorpay error", rzpRes.status, errTxt);
+        throw httpsError("internal", "Could not create payment order. Please try again.");
+      }
+      const order = (await rzpRes.json()) as any;
+
+      // A budget-funded bonus (lib/promoBudget.ts) is RESERVED for this order now,
+      // so a budget can never promise more than it holds. If the budget is out of
+      // room, paused, outside its window, or this user hit its per-user limit,
+      // the order still goes through at the same price — just without the bonus.
+      // The price never depended on the bonus (base coins × buy rate).
+      let orderBudgetId: string | null = null;
+      if (priced.bonusLocked && pkg.budgetId) {
+        const got = await tryReserve(env, {
+          id: orderReservationId(String(order.id)),
+          budgetId: pkg.budgetId,
+          kind: "package_bonus",
+          uid,
+          coins: bonusCoins,
+          refType: "order",
+          refId: String(order.id),
+          expiresAt: now() + ORDER_RESERVATION_TTL_MS,
+          ts: now(),
+        });
+        if (got) {
+          orderBudgetId = pkg.budgetId;
+        } else {
+          bonusCoins = 0;
+          totalCoins = priced.baseCoins;
+        }
+      }
+
+      // Persist the server-authoritative intent DURABLY in D1 so a webhook (or a
+      // late client callback) can reconcile and credit the order even if the
+      // client never returns. This is the authoritative record going forward.
+      const orderTs = now();
+      try {
+        await db
+          .insert(schema.paymentOrders)
+          .values({
+            orderId: String(order.id),
+            userId: uid,
+            packageId: String(packageId),
+            coins: totalCoins,
+            bonusCoins,
+            budgetId: orderBudgetId,
+            amountPaise,
+            currency: "INR",
+            status: "created",
+            createdAt: orderTs,
+            updatedAt: orderTs,
+          })
+          .onConflictDoNothing()
+          .run();
+      } catch (e) {
+        console.error("[createOrder] payment_orders insert failed", e);
+        throw httpsError("internal", "Could not initialize payment. Please try again.");
+      }
+
+      // NOTE: there used to be a duplicate of this intent in KV
+      // (`rzp_order:{id}`, 1h ttl), kept as a fast path and to cover orders in
+      // flight across the deploy that introduced `payment_orders`. It is gone.
+      //
+      // It was never a fallback that could fire: the insert above THROWS on
+      // failure, so an order id cannot be handed to the client without a durable
+      // row, and `payment_orders` stores a strict superset of what the KV copy did
+      // (`userId`, `coins`, `bonusCoins`, `amountPaise`, `packageId`, status).
+      // Everything the 1-hour KV entry could have answered for expired long ago.
+      // Keeping it meant a write plus a delete per top-up on the account's scarcest
+      // quota, and — worse — a SECOND crediting path with its own weaker
+      // idempotency story running beside the CAS-guarded one in lib/coinOrders.ts.
+
+      return c.json({
+        orderId: order.id,
+        amount: amountPaise,
+        currency: "INR",
+        keyId: rzp.keyId,
+        coins: totalCoins,
+        bonusCoins,
+        // Budget-funded bonus coins are play-only (cannot be withdrawn).
+        bonusLocked: !!orderBudgetId,
+        bonusApplied: !priced.bonusLocked || !!orderBudgetId,
+        name: pkg.name || `${totalCoins} Diamond`,
+      });
+    }
+
+    // Step 2: verify the checkout result and credit coins. The coin count comes
+    // from the order record created above — NOT from the client — so a client
+    // can never mint arbitrary coins by calling this directly.
+    case "topup": {
+      const { paymentId, orderId, signature } = body;
+      if (!paymentId || !orderId || !signature)
+        throw httpsError("invalid-argument", "paymentId, orderId and signature are required.");
+
+      // SECURITY: verify the payment server-side. Fail closed if the gateway is
+      // not configured — never credit coins without a verified payment.
+      if (!(await getRazorpayCredentials(env)).keySecret)
+        throw httpsError("failed-precondition", "Payments are not configured on the server.");
+      const verified = await verifyRazorpaySignature(env, { orderId, paymentId, signature });
+      if (!verified) throw httpsError("permission-denied", "Payment verification failed.");
+
+      const orderRow = await db
+        .select({
+          userId: schema.paymentOrders.userId,
+          status: schema.paymentOrders.status,
+          paymentId: schema.paymentOrders.paymentId,
+          coins: schema.paymentOrders.coins,
+        })
+        .from(schema.paymentOrders)
+        .where(eq(schema.paymentOrders.orderId, String(orderId)))
+        .get();
+      if (!orderRow) throw httpsError("not-found", "Payment order not found or expired.");
+      if (orderRow.userId !== uid) throw httpsError("permission-denied", "Order does not belong to this user.");
+
+      // The signature proves the order/payment pair is genuine, but it is issued
+      // on AUTHORIZATION, not capture. Confirm with the gateway that the money
+      // was actually captured — and for how much, in which currency, against
+      // which order — before minting withdrawable coins. Anything short of a
+      // confirmed capture is reported as pending, not credited: the webhook and
+      // the reconcile sweep both credit a captured payment later, through the
+      // same exactly-once path.
+      const gateway = await fetchGatewayPayment(env, String(paymentId));
+      if (gateway?.orderId && gateway.orderId !== String(orderId))
+        throw httpsError("permission-denied", "Payment does not belong to this order.");
+      if (gateway && (gateway.status === "failed" || gateway.status === "refunded"))
+        throw httpsError("failed-precondition", "This payment was not completed.");
+      if (!gateway || gateway.status !== "captured") {
+        if (orderRow.status === "paid" && orderRow.paymentId === String(paymentId))
+          throw httpsError("already-exists", "Payment already processed.");
+        return c.json({
+          success: true,
+          pending: true,
+          coins: 0,
+          message: "Payment received. Your Diamonds will be added as soon as the bank confirms it.",
+        });
+      }
+
+      // Primary path: credit the persisted order (shared with the webhook so we
+      // never double-credit regardless of which arrives first).
+      const res = await creditPaymentOrder(env, db, {
+        orderId: String(orderId),
+        paymentId: String(paymentId),
+        source: "callback",
+        expectedFromUid: uid,
+        capturedAmountPaise: gateway.amountPaise,
+        capturedCurrency: gateway.currency,
+      });
+      if (res.reason === "owner_mismatch")
+        throw httpsError("permission-denied", "Order does not belong to this user.");
+      if (res.reason === "invalid_amount")
+        throw httpsError("failed-precondition", "Invalid order amount.");
+      if (res.reason === "already") {
+        // `already` covers both "credited by the webhook first" and "terminal
+        // (refunded / disputed)". Only the first is a success the app may show
+        // as coins added; the second must not be reported as a purchase.
+        const after = await db
+          .select({ status: schema.paymentOrders.status, paymentId: schema.paymentOrders.paymentId })
+          .from(schema.paymentOrders)
+          .where(eq(schema.paymentOrders.orderId, String(orderId)))
+          .get();
+        if (after?.status === "paid" && after.paymentId === String(paymentId))
+          throw httpsError("already-exists", "Payment already processed.");
+        throw httpsError("failed-precondition", "This payment was refunded or cancelled.");
+      }
+      if (res.credited) {
+        return c.json({ success: true, message: "Diamond added successfully!", coins: res.coins });
+      }
+
+      /**
+       * `creditPaymentOrder` is now the ONLY crediting path on this action.
+       *
+       * There used to be a second one here, reading the legacy `rzp_order:{id}` KV
+       * intent and doing its own insert/update/ledger by hand. It has been removed
+       * rather than ported, for two reasons beyond the KV cost:
+       *
+       *  - IT COULD NOT BE REACHED. `createOrder` throws if the `payment_orders`
+       *    insert fails, so no order id reaches a client without a durable row, and
+       *    the KV entry it depended on had a 1-hour ttl.
+       *  - IT WAS THE WEAKER PATH. It guarded double-credit with a `payments`
+       *    insert alone, whereas `creditPaymentOrder` takes an atomic status CAS on
+       *    the order (created|expired -> paid) FIRST, which is what makes the
+       *    client callback and the gateway webhook safe to race. Two crediting
+       *    paths with different idempotency models is precisely the shape that
+       *    produces a double credit under retry.
+       *
+       * `amount_mismatch` means the gateway captured less than the server-set
+       * price, or in a different currency.
+       */
+      if (res.reason === "amount_mismatch")
+        throw httpsError("failed-precondition", "Invalid order amount.");
+      throw httpsError("not-found", "Payment order not found or expired.");
+    }
+
+    case "requestWithdrawal": {
+      const { amount, method, accountDetails } = body;
+      const amt = assertCoinAmount(amount, "amount");
+      // Anti-spam: max 5 withdrawal requests per hour per user.
+      await rateLimit(env, `withdraw:${uid}`, 5, 3600, { failClosed: true });
+
+      // Honor the admin App Control withdrawal config. `payoutsFrozen` is an
+      // emergency kill-switch that blocks all new payout requests instantly
+      // (e.g. during a suspected-fraud incident) without disabling the feature.
+      const cfg = await getAppConfig(env);
+      const policy = readWithdrawalPolicy(cfg);
+      if (!policy.enabled || policy.payoutsFrozen)
+        throw httpsError("failed-precondition", "Withdrawals are currently disabled.");
+      // The superadmin's coins are the platform's own (house account, left out
+      // of the coin economy reports in lib/coinEconomy.ts), so they never pay out.
+      const requester = await env.DB.prepare(`SELECT role FROM users WHERE uid = ?`).bind(uid).first<{ role: string | null }>();
+      if (requester?.role === "superadmin")
+        throw httpsError("permission-denied", "Superadmin ke coin platform ke hain, inka withdrawal nahi hota.");
+      if (amt < policy.minAmount)
+        throw httpsError("failed-precondition", `Minimum withdrawal is ${policy.minAmount} DP coin.`);
+      if (policy.maxAmount > 0 && amt > policy.maxAmount)
+        throw httpsError("failed-precondition", `Maximum withdrawal is ${policy.maxAmount} DP coin per request.`);
+
+      // Validate the destination BEFORE reserving coins: a typo'd UPI id or a
+      // malformed IFSC used to reach the admin panel — and a real bank transfer
+      // — completely unchecked.
+      const destination = parsePayoutDestination(method, accountDetails);
+
+      // Rolling 24h velocity cap. The 5-per-hour rate limit bounded the number
+      // of requests but not their total, so a whole balance could still leave in
+      // one go. Rejected requests don't count against the cap.
+      if (policy.maxPerDay > 0) {
+        const since = now() - 24 * 60 * 60 * 1000;
+        const recent = await db
+          .select({ total: sql<number>`COALESCE(SUM(${schema.withdrawals.amount}), 0)` })
+          .from(schema.withdrawals)
+          .where(and(
+            eq(schema.withdrawals.userId, uid),
+            gte(schema.withdrawals.createdAt, since),
+            ne(schema.withdrawals.status, "rejected"),
+          ))
+          .get();
+        const already = Number(recent?.total ?? 0);
+        if (already + amt > policy.maxPerDay) {
+          throw httpsError(
+            "failed-precondition",
+            `Daily payout limit is ${policy.maxPerDay} DP coin. You have already requested ${already} in the last 24 hours.`,
+          );
+        }
+      }
+
+      // Platform fee (lib/withdrawalFee.ts): deducted from the payout, quoted to
+      // the user before they confirm, and LOCKED on the row below. If the app's
+      // quote no longer matches (the fee changed while the screen was open), refuse
+      // instead of charging an amount the user never saw.
+      const quote = chargeableWithdrawal(amt, policy.conversionRate, feeRuleFromConfig(cfg));
+      if (body.quotedFee !== undefined && body.quotedFee !== null) {
+        const seen = Number(body.quotedFee);
+        if (!Number.isFinite(seen) || Math.abs(seen - quote.feeInr) > 0.005) {
+          throw httpsError(
+            "failed-precondition",
+            `FEE_CHANGED: Platform fee badal gayi hai: ab ₹${quote.feeInr.toFixed(2)} hai, aapko ₹${quote.netInr.toFixed(2)} milenge. Dobara confirm karo.`,
+          );
+        }
+      }
+
+      const ts = now();
+      const id = newId();
+      const cashAmount = quote.netInr;
+      // Risk review for the admin who approves this payout (lib/withdrawalRisk.ts).
+      const risk = await assessWithdrawalRisk(env, uid, ts);
+
+      // Escrow the coins, create the withdrawal row and write the hold ledger
+      // entry in ONE transaction.
+      //
+      // Previously the deduct was its own statement followed by a separate
+      // batch, with no compensating revert: if that batch failed, the user's
+      // coins were simply gone — no withdrawal row, no ledger entry, nothing to
+      // reconcile against. Both inserts are gated on the same pre-transaction
+      // balance snapshot as the deduct, so all three apply or none do.
+      //
+      // The rolling 24h cap is ALSO enforced inside this transaction. The SELECT
+      // above is only a friendly early message: it is a read-then-write, so
+      // several parallel requests all saw the same `already` total and together
+      // exceeded `maxPerDay`. Only the withdrawal INSERT evaluates solvency and
+      // the cap; the ledger row and the deduct are gated on that row existing, so
+      // the cap sees the same snapshot and all three still apply or none do.
+      // Only WITHDRAWABLE coins can leave: locked (play-only) promo coins stay.
+      const solvent = `EXISTS (SELECT 1 FROM users WHERE uid = ? AND dpcoin - locked_coins >= ?)`;
+      const capGate =
+        policy.maxPerDay > 0
+          ? `AND (SELECT COALESCE(SUM(amount), 0) FROM withdrawals
+                   WHERE user_id = ? AND created_at >= ? AND status != 'rejected') + ? <= ?`
+          : "";
+      const capBindings =
+        policy.maxPerDay > 0 ? [uid, ts - 24 * 60 * 60 * 1000, amt, policy.maxPerDay] : [];
+      const created = `EXISTS (SELECT 1 FROM withdrawals WHERE id = ?)`;
+      const withdrawalResults = await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO withdrawals
+             (id, user_id, amount, cash_amount, gross_amount, fee_amount, fee_detail, method, account_details, status, reserved, created_at, updated_at, risk_level, risk_flags)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?
+            WHERE ${solvent} ${capGate}`,
+        ).bind(
+          id,
+          uid,
+          amt,
+          cashAmount,
+          quote.grossInr,
+          quote.feeInr,
+          JSON.stringify(quote.rule),
+          destination.method,
+          destination.accountDetails,
+          ts,
+          ts,
+          risk.level,
+          JSON.stringify(risk.flags),
+          uid,
+          amt,
+          ...capBindings,
+        ),
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO coin_transactions
+             (id, uid, amount, type, description, created_at)
+           SELECT ?, ?, ?, 'withdrawal_hold', ?, ?
+            WHERE ${created}`,
+        ).bind(
+          `withdrawal_hold:${id}`,
+          uid,
+          -amt,
+          `Payout requested (${destination.method}) — DP coin reserved`,
+          ts,
+          id,
+        ),
+        env.DB.prepare(
+          `UPDATE users SET dpcoin = dpcoin - ?, updated_at = ?
+            WHERE uid = ? AND dpcoin - locked_coins >= ? AND ${created}`,
+        ).bind(amt, ts, uid, amt, id),
+      ]);
+      if (Number(withdrawalResults[2]?.meta?.changes || 0) === 0) {
+        const me = await env.DB.prepare(`SELECT dpcoin, locked_coins FROM users WHERE uid = ?`).bind(uid).first<{ dpcoin: number; locked_coins: number }>();
+        const withdrawable = Math.max(0, Number(me?.dpcoin ?? 0) - Number(me?.locked_coins ?? 0));
+        if (withdrawable < amt && Number(me?.dpcoin ?? 0) >= amt) {
+          throw httpsError(
+            "failed-precondition",
+            `Diamond withdraw nahi hote, sirf DP coin withdraw hote hain. Abhi withdraw kar sakte ho: ${withdrawable} DP coin.`,
+          );
+        }
+        if (policy.maxPerDay > 0 && withdrawable >= amt) {
+          throw httpsError(
+            "failed-precondition",
+            `Daily payout limit is ${policy.maxPerDay} DP coin. Try a smaller amount or wait 24 hours.`,
+          );
+        }
+        throw httpsError("failed-precondition", "DP coin balance kam hai.");
+      }
+
+      await db.insert(schema.adminNotifications).values({
+        id: newId(), title: risk.level === "high" ? "⚠️ HIGH RISK Withdrawal Request" : "New Withdrawal Request",
+        message: `${risk.level !== "low" ? `[Risk: ${risk.level} — ${risk.flags.map((f) => RISK_FLAG_LABELS[f] ?? f).join(", ")}] ` : ""}A user requested a payout of ${amt} DP coin to ${destination.masked} — pay ₹${quote.netInr.toFixed(2)} (gross ₹${quote.grossInr.toFixed(2)} − platform fee ₹${quote.feeInr.toFixed(2)}).`,
+        link: "/withdrawals", isRead: false, createdAt: ts,
+      });
+      alertAdminEmail(c, cfg, "New Withdrawal Request",
+        `<p>A user requested a payout of <b>${amt} DP coin</b> via ${destination.method}: pay <b>₹${cashAmount.toFixed(2)}</b> (gross ₹${quote.grossInr.toFixed(2)} − platform fee ₹${quote.feeInr.toFixed(2)}).</p><p>Review it in the admin panel → Withdrawals.</p>`);
+      return c.json({ success: true, withdrawalId: id, cashAmount, grossAmount: quote.grossInr, feeAmount: quote.feeInr });
+    }
+
+    // Manual QR/UPI deposit: user pays externally then submits the UTR here.
+    // Admin approves/rejects in the panel; coins are credited on approval.
+    case "requestDeposit": {
+      const { packageId, utr, method, screenshotUrl } = body;
+      if (!packageId) throw httpsError("invalid-argument", "Select a coin package to continue.");
+      if (!utr || String(utr).trim().length < 4)
+        throw httpsError("invalid-argument", "A valid UTR / transaction reference is required.");
+      // Anti-spam: max 5 deposit submissions per hour per user.
+      await rateLimit(env, `deposit:${uid}`, 5, 3600, { failClosed: true });
+
+      const cfg = await getAppConfig(env);
+      const gw = (cfg?.paymentGateway as any) || {};
+      const mode = gw.mode || "auto";
+      if (mode === "auto") throw httpsError("failed-precondition", "Manual deposits are currently disabled.");
+
+      // ONE pricing rule for every path: base coins × the admin's coin value,
+      // bonus free (lib/coinPricing.ts) — the same price the store shows and
+      // Razorpay charges. Never trust a client-sent amount: the coins credited
+      // come from the package row, the rupees expected from that rule, and both
+      // are stored on the deposit when it is submitted.
+      const pkg = await db
+        .select()
+        .from(schema.coinPackages)
+        .where(and(eq(schema.coinPackages.id, String(packageId)), eq(schema.coinPackages.active, true)))
+        .get();
+      if (!pkg) throw httpsError("not-found", "Diamond package not found.");
+
+      const priced = chargeablePackage(pkg, cfg);
+      let bonusCoins = priced.bonusCoins;
+      let amt = priced.totalCoins;
+      const payAmount = priced.priceInr;
+
+      // Hard-block reused UTRs: a bank reference can only fund one deposit. Reject
+      // at submit time if a non-rejected deposit already carries this UTR (any
+      // user) — stops replaying one payment reference across multiple requests.
+      const utrClean = String(utr).trim();
+      const utrDupe = await db
+        .select({ id: schema.deposits.id })
+        .from(schema.deposits)
+        .where(and(sql`lower(${schema.deposits.utr}) = ${utrClean.toLowerCase()}`, sql`${schema.deposits.status} != 'rejected'`))
+        .get();
+      if (utrDupe) throw httpsError("already-exists", "This UTR / transaction reference has already been submitted.");
+
+      const ts = now();
+      const id = newId();
+      // Budget-funded bonus: held (no expiry) until the deposit is approved or
+      // rejected. Out of room → the deposit is still accepted, without the bonus.
+      let depositBudgetId: string | null = null;
+      if (priced.bonusLocked && pkg.budgetId) {
+        const got = await tryReserve(env, {
+          id: depositReservationId(id),
+          budgetId: pkg.budgetId,
+          kind: "package_bonus",
+          uid,
+          coins: bonusCoins,
+          refType: "deposit",
+          refId: id,
+          expiresAt: null,
+          ts,
+        });
+        if (got) {
+          depositBudgetId = pkg.budgetId;
+        } else {
+          bonusCoins = 0;
+          amt = priced.baseCoins;
+        }
+      }
+      try {
+        await db.insert(schema.deposits).values({
+          id,
+          userId: uid,
+          amount: amt,
+          payAmount,
+          packageId: String(packageId),
+          bonusCoins,
+          budgetId: depositBudgetId,
+          method: method || "qr",
+          utr: String(utr).trim(),
+          screenshotUrl: screenshotUrl ? String(screenshotUrl) : null,
+          status: "pending",
+          createdAt: ts,
+          updatedAt: ts,
+        });
+      } catch (e) {
+        // No deposit row → nothing will ever use or release the hold.
+        if (depositBudgetId) await releaseStatement(env, depositReservationId(id), now()).run().catch(() => {});
+        throw e;
+      }
+      await db.insert(schema.adminNotifications).values({
+        id: newId(), title: "New Deposit Request",
+        message: `A user submitted a ${amt}-Diamond deposit (UTR ${String(utr).trim()}).`, link: "/deposits", isRead: false, createdAt: ts,
+      });
+      alertAdminEmail(c, cfg, "New Deposit Request",
+        `<p>A user submitted a <b>${amt}-coin</b> deposit (₹${payAmount.toFixed(2)}${pkg.name ? ` — ${pkg.name}` : ""}).</p><p>UTR: <b>${String(utr).trim()}</b></p><p>Verify & approve in the admin panel → Deposits.</p>`);
+      return c.json({ success: true, depositId: id });
+    }
+
+    // ================= ADMIN =================
+    case "setAdminRole": {
+      // Privilege escalation must require full-admin authority and must be
+      // audited. Previously any `admin` could grant `admin` to anyone here with
+      // no audit row, while /admin/set-role required a full admin AND audited.
+      await requireFullAdminAction(env, uid);
+      const { userId, makeAdmin } = body;
+      if (!userId || typeof userId !== "string") throw httpsError("invalid-argument", "userId is required.");
+      // Never let an admin strip a superadmin through this path.
+      const targetRole = await db
+        .select({ role: schema.users.role })
+        .from(schema.users)
+        .where(eq(schema.users.uid, userId))
+        .get();
+      if (!targetRole) throw httpsError("not-found", "User not found.");
+      if (targetRole.role === "superadmin") {
+        throw httpsError("permission-denied", "A superadmin's role can only be changed by a superadmin via /admin/set-role.");
+      }
+      if (userId === uid) throw httpsError("permission-denied", "You cannot change your own role.");
+      const role = makeAdmin === false ? "user" : "admin";
+      await setCustomClaims(env, userId, { role });
+      await db.update(schema.users).set({ role, updatedAt: now() }).where(eq(schema.users.uid, userId));
+      // Demotion must end the existing sessions: an issued ID token keeps its old
+      // role claim (and admin access) until it expires.
+      if (role === "user" && ["admin", "moderator"].includes(String(targetRole.role))) {
+        await revokeAllSessions(env, userId, "role_changed");
+      }
+      await writeAdminAudit(env, c.get("user"), "user.set-role", "user", userId, {
+        role,
+        previousRole: targetRole.role ?? null,
+        via: "/api",
+      });
+      return c.json({ success: true, role });
+    }
+    case "adminDeletePost": {
+      if (!(await isAdmin(c as any))) throw httpsError("permission-denied", "Admin only.");
+      const { postId } = body;
+      if (!postId) throw httpsError("invalid-argument", "postId is required.");
+      await db.delete(schema.posts).where(eq(schema.posts.id, postId));
+      return c.json({ success: true });
+    }
+    /**
+     * Re-enable an account an ADMIN disabled (`users.isBlocked`).
+     *
+     * Renamed from `unblockUser` when user-level blocking arrived: that name now
+     * belongs to the user-facing action, and having the two share it would have
+     * meant one word covering both "let this account log in again" and "I no
+     * longer want to hide this person". The rename is safe — this action had no
+     * callers at all (the panel re-enables accounts via PATCH /admin/users/:id).
+     */
+    case "adminUnblockUser": {
+      if (!(await isAdmin(c as any))) throw httpsError("permission-denied", "Admin only.");
+      const { userId } = body;
+      if (!userId) throw httpsError("invalid-argument", "userId is required.");
+      const { updateAuthUser } = await import("../lib/firebaseAdmin");
+      await updateAuthUser(env, userId, { disabled: false });
+      await db.update(schema.users).set({ isBlocked: false, status: "active", updatedAt: now() }).where(eq(schema.users.uid, userId));
+      // `isBlocked`/`status` changed — drop any cached auth-state (paid tier) so the
+      // account is usable again on its next request rather than after the TTL.
+      await invalidateAuthState(env, userId);
+      return c.json({ success: true });
+    }
+    case "sendBroadcastNotification": {
+      if (!(await isAdmin(c as any))) throw httpsError("permission-denied", "Admin only.");
+      const { title, body: msg, imageUrl, data } = body;
+      // Queued, not sent inline: fanning out to every user inside this request
+      // blows the Worker's CPU/time budget once the user table is real. Cron
+      // drains it a page at a time. `sentCount` is the ESTIMATED audience; the
+      // delivered figure lands on broadcast_jobs.processed.
+      const { jobId, estimatedRecipients } = await enqueueBroadcast(env, {
+        title,
+        body: msg,
+        image: imageUrl,
+        data: data || {},
+        createdBy: uid,
+      });
+      return c.json({ success: true, jobId, sentCount: estimatedRecipients, queued: true });
+    }
+    case "sendIndividualNotification": {
+      if (!(await isAdmin(c as any))) throw httpsError("permission-denied", "Admin only.");
+      const { userId, title, body: msg, imageUrl, data } = body;
+      if (!userId) throw httpsError("invalid-argument", "User ID is required");
+      await createNotification(env, userId, {
+        title, body: msg, type: "admin", targetId: "individual_msg", image: imageUrl, data: data || {},
+      });
+      return c.json({ success: true });
+    }
+    case "createContestTemplate": {
+      if (!(await isAdmin(c as any))) throw httpsError("permission-denied", "Admin only.");
+      const { values } = validateContestInput(body, true);
+      if (!values.bannerUrl) throw httpsError("failed-precondition", "A banner is required for a new contest.");
+      // Same rule as POST /admin/contests: the advertised prize cannot exceed the
+      // pot the two entry fees fund. This path skipped it, so the same input was
+      // refused on /admin and accepted here (settlement clamps the payout, so the
+      // stored prize simply lied to users about what a win pays).
+      assertPrizeFundedByPot(values.totalEntryFee, values.rewardCoins);
+      const id = newId();
+      const createdAt = now();
+      await db.insert(schema.contests).values({
+        id,
+        title: values.title,
+        type: values.type,
+        status: values.status,
+        totalEntryFee: values.totalEntryFee,
+        rewardCoins: values.rewardCoins,
+        voteDurationDays: values.voteDurationDays,
+        autoCancelHours: values.autoCancelHours,
+        minVotes: values.minVotes,
+        bannerUrl: values.bannerUrl,
+        minLevel: values.minLevel ?? null,
+        maxLevel: values.maxLevel ?? null,
+        extra: createContestExtra(body, values),
+        createdBy: uid,
+        createdAt,
+      });
+      await purgeShared(c, ...contestListCacheKeys(), contestDetailCacheKey(id));
+      try {
+        await db.insert(schema.adminAuditLog).values({
+          id: newId(),
+          adminUid: uid,
+          adminEmail: c.get("user")?.email ?? null,
+          action: "contest.create",
+          targetType: "contest",
+          targetId: id,
+          detail: { ...values, createdBy: uid, createdAt },
+          createdAt: now(),
+        });
+      } catch (e) {
+        console.error("[audit] failed to record contest.create", e);
+      }
+      return c.json({ success: true, contestId: id, id });
+    }
+    case "getAdminStats": {
+      if (!(await isAdmin(c as any))) throw httpsError("permission-denied", "Admin only.");
+      const usersCount = (await db.select({ v: count() }).from(schema.users).get())?.v ?? 0;
+      const activeMatches = (await db.select({ v: count() }).from(schema.contestMatches).where(eq(schema.contestMatches.status, "active")).get())?.v ?? 0;
+      const waitingMatches = (await db.select({ v: count() }).from(schema.contestMatches).where(eq(schema.contestMatches.status, "waiting_for_opponent")).get())?.v ?? 0;
+      const latestTransactions = await db.select().from(schema.coinTransactions).orderBy(desc(schema.coinTransactions.createdAt)).limit(10).all();
+      return c.json({ stats: { usersCount, activeMatches, waitingMatches }, latestTransactions });
+    }
+    case "searchUsers": {
+      if (!(await isAdmin(c as any))) throw httpsError("permission-denied", "Admin only.");
+      const { query } = body;
+      if (!query || query.length < 2) return c.json({ users: [] });
+      const term = query.toLowerCase();
+      const rows = await db
+        .select({ id: schema.users.uid, username: schema.users.username, email: schema.users.email, avatar: schema.users.profileImageUrl })
+        .from(schema.users)
+        .where(like(schema.users.username, `${term}%`))
+        .limit(10)
+        .all();
+      return c.json({ users: rows });
+    }
+
+    // ================= NOTIFICATIONS / TOKENS / BADGE =================
+    case "markNotificationsRead": {
+      // Bounded and typed: an oversized array exceeded D1's bound-parameter limit
+      // and answered 500. The app sends one id at a time.
+      const raw = body.notificationIds ?? [];
+      if (!Array.isArray(raw) || raw.length > 100 || raw.some((x: unknown) => typeof x !== "string" || !x || x.length > 128)) {
+        throw httpsError("invalid-argument", "notificationIds must be up to 100 ids.");
+      }
+      const ids: string[] = raw;
+      if (!ids.length) return c.json({ success: true });
+      await db
+        .update(schema.notifications)
+        .set({ read: true })
+        .where(and(eq(schema.notifications.recipientId, uid), inArray(schema.notifications.id, ids)));
+      return c.json({ success: true });
+    }
+
+    // Mark EVERY unread notification read in a single indexed UPDATE. Preferred
+    // over markNotificationsRead when opening the screen: no large id array on
+    // the wire, and one write bounded by the idx_notif_unread partial index
+    // (SQLite also caps IN(...) params at ~999, which mark-all sidesteps).
+    case "markAllNotificationsRead": {
+      await db
+        .update(schema.notifications)
+        // Also marks them SEEN. Not redundant: the badge counts unseen rows, and
+        // already-installed app builds only ever call this action — without
+        // setting `seen` here their badge would never clear again.
+        .set({ read: true, seen: true })
+        .where(and(eq(schema.notifications.recipientId, uid), eq(schema.notifications.read, false)));
+      return c.json({ success: true });
+    }
+
+    /**
+     * Mark everything the user is looking at as SEEN — this is what clears the
+     * bell badge, and it is what the notifications screen calls on open.
+     *
+     * Deliberately does NOT set `read`. Opening the list used to mark every row
+     * read, including ones the user never looked at, which left `read` carrying
+     * no real signal. Now:
+     *   seen = it was in the list when you last opened it (badge + "new" highlight)
+     *   read = you actually tapped through to the content
+     *
+     * Bounded by the idx_notif_unseen partial index, so this is one small
+     * indexed UPDATE regardless of how much history the user has.
+     */
+    case "markAllNotificationsSeen": {
+      await db
+        .update(schema.notifications)
+        .set({ seen: true })
+        .where(and(eq(schema.notifications.recipientId, uid), eq(schema.notifications.seen, false)));
+      return c.json({ success: true });
+    }
+
+    /**
+     * Snooze an announcement popup after the user closes it with ×.
+     *
+     * Records (announcement, user) -> snoozedUntil = now + snoozeHours. The
+     * read endpoint (/read/announcements/active) hides the popup until that
+     * instant, then serves it again. Stored server-side so the snooze holds
+     * across the user's devices and reinstalls; the app also caches it locally
+     * for an instant dismiss. Idempotent — re-closing just re-arms the window.
+     */
+    case "dismissAnnouncement": {
+      const announcementId = String(body.announcementId || "").trim();
+      if (!announcementId) throw httpsError("invalid-argument", "announcementId is required.");
+      const ann = await db
+        .select({ snoozeHours: schema.announcements.snoozeHours })
+        .from(schema.announcements)
+        .where(eq(schema.announcements.id, announcementId))
+        .get();
+      // A deleted announcement has nothing to snooze — succeed quietly so the
+      // client can drop it without special-casing a 404.
+      if (!ann) return c.json({ success: true });
+      const ts = now();
+      const snoozedUntil = ts + Math.max(1, ann.snoozeHours ?? 24) * 3600_000;
+      await db
+        .insert(schema.announcementDismissals)
+        .values({ announcementId, uid, snoozedUntil, dismissedAt: ts })
+        .onConflictDoUpdate({
+          target: [schema.announcementDismissals.announcementId, schema.announcementDismissals.uid],
+          set: { snoozedUntil, dismissedAt: ts },
+        });
+      return c.json({ success: true, snoozedUntil });
+    }
+
+    case "registerFcmToken": {
+      const token = typeof body.token === "string" ? body.token.trim() : "";
+      // FCM/APNs tokens are a few hundred URL-safe characters. Anything else was
+      // stored as-is, and the list grew without bound (each push fans out to all).
+      if (!token || token.length > 4096 || /\s/.test(token)) throw httpsError("invalid-argument", "A valid token is required.");
+      await rateLimit(env, `fcmreg:${uid}`, 30, 3600);
+      // A device token can previously have belonged to a DIFFERENT account on
+      // this same phone (shared, resold, or just a second login). Detach it from
+      // every other user first, otherwise the previous owner keeps receiving
+      // pushes on a device they no longer control.
+      await detachTokenFromOtherUsers(env, token, uid);
+      const user = await db.select({ fcmTokens: schema.users.fcmTokens }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+      // Most recent last, capped: a phone that reinstalls keeps minting tokens and
+      // the dead ones are only pruned after a failed send.
+      const kept = ((user?.fcmTokens as string[]) || []).filter((t) => t !== token);
+      const tokens = [...kept, token].slice(-MAX_PUSH_TOKENS);
+      await db.update(schema.users).set({ fcmTokens: tokens, updatedAt: now() }).where(eq(schema.users.uid, uid));
+      return c.json({ success: true });
+    }
+
+    /**
+     * Current notification preferences, fully resolved (absent keys filled with
+     * defaults) so the client never has to know the defaults itself.
+     */
+    case "getNotificationPrefs": {
+      const row = await db
+        .select({ prefs: schema.users.notificationPrefs })
+        .from(schema.users)
+        .where(eq(schema.users.uid, uid))
+        .get();
+      return c.json({ prefs: resolvePrefs(row?.prefs) });
+    }
+
+    /**
+     * Merge a partial preferences patch. Only the keys present are changed, so
+     * the client can PATCH a single toggle without re-sending everything.
+     */
+    case "updateNotificationPrefs": {
+      const { prefs: patch } = body;
+      if (!patch || typeof patch !== "object")
+        throw httpsError("invalid-argument", "prefs object is required.");
+      const row = await db
+        .select({ prefs: schema.users.notificationPrefs })
+        .from(schema.users)
+        .where(eq(schema.users.uid, uid))
+        .get();
+      const merged = resolvePrefs({ ...(row?.prefs as object || {}), ...patch });
+      await db
+        .update(schema.users)
+        // Only non-default keys are stored, so rows stay small.
+        .set({ notificationPrefs: serializePrefs(merged), updatedAt: now() })
+        .where(eq(schema.users.uid, uid));
+      return c.json({ success: true, prefs: merged });
+    }
+
+    /**
+     * Detach this device's push token on sign-out.
+     *
+     * Without this the token stayed on the user row forever, so after logout a
+     * shared or resold phone kept receiving the previous account's
+     * notifications — a privacy leak, not just clutter. The client calls this
+     * BEFORE Firebase sign-out, while the token is still authorised.
+     */
+    case "unregisterFcmToken": {
+      const { token } = body;
+      if (!token) throw httpsError("invalid-argument", "token is required.");
+      const user = await db.select({ fcmTokens: schema.users.fcmTokens }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+      const tokens = ((user?.fcmTokens as string[]) || []).filter((t) => t !== token);
+      await db.update(schema.users).set({ fcmTokens: tokens, updatedAt: now() }).where(eq(schema.users.uid, uid));
+      return c.json({ success: true, remaining: tokens.length });
+    }
+
+    case "equipBadge": {
+      // badge can be an object or null (unequip).
+      //
+      // The client-supplied object used to be written as-is. Binding an object
+      // to the TEXT column failed (so claiming a badge always errored), and the
+      // value was never checked: any user could equip a badge they never earned,
+      // shown publicly on their profile. The only badges the app awards are
+      // level badges, so the server now builds the badge itself from a level the
+      // caller has actually reached.
+      let equipped: string | null = null;
+      if (body.badge != null) {
+        const level = Number(body.badge?.level);
+        // The level the caller has actually reached, derived from XP. This read
+        // the frozen `users.level` column, so every badge above the seeded
+        // level 1 was refused.
+        const me = await db.select({ xp: schema.users.xp }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+        if (!me) throw httpsError("not-found", "User not found.");
+        const reached = levelForXp(me.xp ?? 0, await getSettings(env));
+        if (!Number.isInteger(level) || level < 1 || level > reached) {
+          throw httpsError("permission-denied", "You have not unlocked this badge yet.");
+        }
+        equipped = JSON.stringify({ name: `Level ${level} Hero`, icon: "trophy", level });
+      }
+      await db.update(schema.users).set({ equippedBadge: equipped, updatedAt: now() }).where(eq(schema.users.uid, uid));
+      // Reflect the equipped badge on the user's public profile right away.
+      c.executionCtx.waitUntil(purgeShared(c, userCacheKey(uid)));
+      return c.json({ success: true });
+    }
+
+    // ================= CHAT =================
+    case "startChat": {
+      // Creating a chat row writes a "Say hi!" preview into the other person's
+      // inbox, so an unlimited loop here is a DM-bombing primitive. sendMessage
+      // was rate limited; chat CREATION was not.
+      await rateLimit(env, `startchat:${uid}`, 30, 3600);
+      const { otherUserId } = body;
+      if (!otherUserId || typeof otherUserId !== "string")
+        throw httpsError("invalid-argument", "otherUserId is required.");
+      if (otherUserId === uid) throw httpsError("invalid-argument", "You cannot start a chat with yourself.");
+      // Opening a DM is the single most direct way to reach someone, so this is
+      // the guard that matters most.
+      await assertNotBlocked(env, uid, otherUserId);
+      // Find an existing chat containing both users via indexed chat_members
+      // (D1_R2_LOAD_AUDIT.md §4) — the intersection of each user's memberships,
+      // not a double json_each scan of `chats`.
+      const existing = await env.DB.prepare(
+        `SELECT chat_id AS id FROM chat_members
+          WHERE user_id = ?
+            AND chat_id IN (SELECT chat_id FROM chat_members WHERE user_id = ?)
+          LIMIT 1`,
+      ).bind(uid, otherUserId).first<{ id: string }>();
+      if (existing?.id) return c.json({ chatId: existing.id });
+
+      const me = await db.select({ username: schema.users.username, avatar: schema.users.profileImageUrl }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+      // The other member's display snapshot used to be the CLIENT's
+      // `otherUserData`, spread verbatim — so the initiator chose the name and
+      // photo the chat stored for the other person (and could even overwrite its
+      // `uid`). It is now read from the other user's own row, which must exist.
+      const other = await db
+        .select({ username: schema.users.username, avatar: schema.users.profileImageUrl })
+        .from(schema.users)
+        .where(eq(schema.users.uid, otherUserId))
+        .get();
+      if (!other) throw httpsError("not-found", "User not found.");
+      const ts = now();
+      const chatId = newId();
+      // Chat row + both membership edges in ONE batch, so a chat can never exist
+      // without its chat_members rows (which would make it invisible to
+      // /read/chats and unauthorizable on /ws). `chats.users` is still written —
+      // it remains the display source; chat_members is purely the membership index.
+      await db.batch([
+        db.insert(schema.chats).values({
+          id: chatId,
+          users: [uid, otherUserId],
+          usersData: [
+            { uid, displayName: me?.username || null, photoURL: me?.avatar || null },
+            { uid: otherUserId, displayName: other.username || null, photoURL: other.avatar || null },
+          ] as any,
+          lastMessage: { text: "Say hi!", createdAt: ts } as any,
+          createdAt: ts,
+          updatedAt: ts,
+        }),
+        db.insert(schema.chatMembers).values({ userId: uid, chatId }),
+        db.insert(schema.chatMembers).values({ userId: otherUserId, chatId }),
+      ] as any);
+      return c.json({ chatId });
+    }
+
+    case "sendMessage": {
+      const { chatId } = body;
+      const text = typeof body.text === "string" ? body.text : null;
+      const mediaUrl = typeof body.mediaUrl === "string" ? body.mediaUrl.trim() : "";
+      // A message is now EITHER text OR an image (or text captioning an image).
+      // The old contract required `text`; relaxing it to "text OR media" is what
+      // lets an image message through — but an empty message (neither) is still
+      // rejected so a tap of the send button with nothing to say is a no-op.
+      const trimmedText = text && text.trim() ? text.trim() : null;
+      if (!chatId) throw httpsError("invalid-argument", "chatId is required.");
+      // Optional client id, kept across retries of the same message. The message id
+      // is derived from it, so a send whose response was lost (timeout, 5xx after
+      // the write) and is retried does not create a second message.
+      const clientId = body.clientId == null ? null : String(body.clientId);
+      if (clientId != null && !CHAT_CLIENT_ID_RE.test(clientId)) {
+        throw httpsError("invalid-argument", "clientId must be 8-64 letters, digits, '-' or '_'.");
+      }
+      if (!trimmedText && !mediaUrl) {
+        throw httpsError("invalid-argument", "A message needs text or an image.");
+      }
+      // Guard against an arbitrary URL being stored/rendered as our own media: a
+      // media message must point at THIS deployment's chat media, not an external
+      // host (which would be an embed/SSRF-style abuse of every recipient's
+      // client). Uploads land under the `chat/` prefix via POST /upload.
+      if (mediaUrl && !isOwnChatMediaUrl(env, mediaUrl)) {
+        throw httpsError("invalid-argument", "Invalid media URL.");
+      }
+      const type: "text" | "image" = mediaUrl ? "image" : "text";
+      // Only participants may post into a chat.
+      await assertChatMember(env, chatId, uid);
+      // Messages were the one social write with no velocity cap (likes are
+      // 120/60s, comments 30/60s), which made this a free spam/abuse channel.
+      await rateLimit(env, `msg:${uid}`, 60, 60);
+      // Membership is not consent. An existing thread predates any later block,
+      // so the recipients are resolved BEFORE the write (this read was already
+      // happening further down for the realtime fan-out — it is just hoisted)
+      // and the send is refused if a block has appeared since.
+      const chat = await db.select({ users: schema.chats.users }).from(schema.chats).where(eq(schema.chats.id, chatId)).get();
+      const members = ((chat?.users as string[]) || []).filter((u) => u !== uid);
+      await assertNotBlockedAny(env, uid, members);
+      const ts = now();
+      const messageId = clientId ? `${uid}_${clientId}` : newId();
+      // The message BODY lives in the chat's ChatArchive Durable Object, not the
+      // D1 `messages` table — that keeps the unbounded, highest-volume write path
+      // off D1's single writer (see src/chatArchive.ts). The `chats` row below is
+      // the ONE bounded D1 write that stays: it is the inbox preview + sort key,
+      // and /read/chats orders across ALL of a user's chats, which a per-chat DO
+      // cannot answer.
+      const { message: stored, inserted } = await appendMessage(env, chatId, {
+        id: messageId,
+        senderId: uid,
+        text: trimmedText,
+        type,
+        mediaUrl: mediaUrl || null,
+        createdAt: ts,
+      });
+      if (stored.senderId !== uid) throw httpsError("invalid-argument", "clientId already used.");
+      // Inbox preview text: the caption if any, else a "📷 Photo" placeholder for
+      // an image so the conversation list never shows a blank last message.
+      // Guarded on time so a retry of an older message cannot replace a newer
+      // preview; re-applied on a retry in case the first attempt failed after the
+      // append and before this write.
+      const previewText = stored.text || (stored.type === "image" ? "📷 Photo" : "");
+      await db
+        .update(schema.chats)
+        .set({ lastMessage: { text: previewText, createdAt: stored.createdAt, senderId: uid } as any, updatedAt: stored.createdAt })
+        .where(and(eq(schema.chats.id, chatId), lte(schema.chats.updatedAt, stored.createdAt)));
+      // Bump every recipient's unread counter (never the sender's). One bounded
+      // UPDATE — a chat has a fixed, tiny membership — that drives the inbox badge
+      // in /read/chats without a per-chat DO round-trip on the list. Reset in
+      // markChatRead below. Not repeated for a retry: that would count twice.
+      if (inserted) {
+        await env.DB.prepare(
+          `UPDATE chat_members SET unread_count = unread_count + 1 WHERE chat_id = ? AND user_id != ?`,
+        ).bind(chatId, uid).run();
+      }
+      // Instant push: to the chat room + each participant's user channel (chat-list
+      // bump). Re-published on a retry; clients key messages by id, so a repeat
+      // event is a no-op for anyone who already has it.
+      const msg = { ...stored, chatId };
+      await publish(env, `chat:${chatId}`, { type: "message", message: msg });
+      await publishMany(env, members.map((u) => `user:${u}`), { type: "chat_update", chatId, message: msg });
+      return c.json({ success: true, message: msg, duplicate: !inserted });
+    }
+
+    case "markChatRead": {
+      const { chatId } = body;
+      if (!chatId) throw httpsError("invalid-argument", "chatId is required.");
+      await assertChatMember(env, chatId, uid);
+      await rateLimit(env, `chatread:${uid}`, 120, 60);
+      // Clear the inbox badge counter for this member (mirror of the increment in
+      // sendMessage). Own row only — the other member's unread is theirs.
+      //
+      // Counter FIRST, then the read flags. In the old order (flags, then counter)
+      // a message landing between the two had its increment wiped while it was
+      // still unread: an undercount the inbox never recovered from. This order can
+      // only overcount by that one message, which the next markChatRead clears.
+      await env.DB.prepare(
+        `UPDATE chat_members SET unread_count = 0 WHERE chat_id = ? AND user_id = ?`,
+      ).bind(chatId, uid).run();
+      // Read flags live with the message bodies in the chat's Durable Object.
+      await markChatMessagesRead(env, chatId, uid);
+      return c.json({ success: true });
+    }
+
+    case "setTyping": {
+      // Ephemeral "user is typing…" signal. No storage, no `updated_at` bump, no
+      // unread change — it must not disturb inbox ordering or the badge. The
+      // recipient viewing the conversation is subscribed to `chat:<id>`, so that
+      // is where it fans out. Lightly throttled so a fast typist cannot turn
+      // keystrokes into a broadcast flood (the client also debounces its sends).
+      const { chatId } = body;
+      if (!chatId) throw httpsError("invalid-argument", "chatId is required.");
+      await assertChatMember(env, chatId, uid);
+      await rateLimit(env, `typing:${uid}`, 20, 10);
+      // Same consent rule as sendMessage: after a block, no live signal either way.
+      const typingChat = await db.select({ users: schema.chats.users }).from(schema.chats).where(eq(schema.chats.id, chatId)).get();
+      await assertNotBlockedAny(env, uid, ((typingChat?.users as string[]) || []).filter((u) => u !== uid));
+      await publish(env, `chat:${chatId}`, { type: "typing", chatId, uid });
+      return c.json({ success: true });
+    }
+
+    case "deleteChat": {
+      const { chatId } = body;
+      if (!chatId) throw httpsError("invalid-argument", "chatId is required.");
+      await assertChatMember(env, chatId, uid);
+      await rateLimit(env, `chatdelete:${uid}`, 60, 3600);
+      // Delete FOR ME (migration 0066). This used to purge the chat for both
+      // members, so either person deleting a DM erased the other's history without
+      // a word. Now the caller's membership is stamped: their inbox hides the chat
+      // until a newer message, and their history starts after this point.
+      const ts = now();
+      await env.DB.prepare(
+        `UPDATE chat_members SET cleared_at = ?, unread_count = 0 WHERE chat_id = ? AND user_id = ?`,
+      ).bind(ts, chatId, uid).run();
+      // Once EVERY member has cleared past the latest message, nobody can see any
+      // of it, so the old full purge applies: bodies, preview row, memberships.
+      const keptBySomeone = await env.DB.prepare(
+        `SELECT 1 AS k FROM chat_members m JOIN chats c ON c.id = m.chat_id
+          WHERE m.chat_id = ? AND (m.cleared_at IS NULL OR m.cleared_at < c.updated_at) LIMIT 1`,
+      ).bind(chatId).first();
+      if (!keptBySomeone) {
+        await purgeChatMessages(env, chatId);
+        await db.batch([
+          db.delete(schema.messages).where(eq(schema.messages.chatId, chatId)),
+          db.delete(schema.chats).where(eq(schema.chats.id, chatId)),
+          db.delete(schema.chatMembers).where(eq(schema.chatMembers.chatId, chatId)),
+        ] as any);
+      }
+      return c.json({ success: true, purged: !keptBySomeone });
+    }
+
+    // ================= CONTEST-MATCH ENGAGEMENT =================
+    case "likeContest": {
+      const { matchId } = body;
+      if (!matchId) throw httpsError("invalid-argument", "matchId is required.");
+      await rateLimit(env, `like:${uid}`, 120, 60);
+      await assertMatchInteractionAllowed(env, uid, matchId);
+      // Optional explicit target state. Without it this stays a toggle (shipped
+      // clients). With it, a replay is a no-op instead of an undo: the offline
+      // outbox (apps/expo/src/sync/outbox.ts) re-sends the SAME `liked` value
+      // until it gets an answer, and a toggle would flip the like back on the
+      // second delivery.
+      const desired = typeof body.liked === "boolean" ? body.liked : null;
+      const likeWhere = and(eq(schema.matchLikes.matchId, matchId), eq(schema.matchLikes.userId, uid));
+      const existing = await db.select().from(schema.matchLikes).where(likeWhere).get();
+      const wantLiked = desired ?? !existing;
+      if (!wantLiked) {
+        if (!existing) return c.json({ success: true, liked: false });
+        // The counter moves only for the row THIS request removed, so two
+        // concurrent unlikes cannot take the count down twice.
+        const del = await db.delete(schema.matchLikes).where(likeWhere).run();
+        if (Number(del.meta?.changes ?? 0) === 0) return c.json({ success: true, liked: false });
+        // Counter update goes through the per-match DO (batched to D1).
+        const counters = await bumpEngagement(env, matchId, "like", -1);
+        await publish(env, `match:${matchId}`, { type: "like", liked: false, likeCount: counters.like ?? 0 });
+        return c.json({ success: true, liked: false });
+      }
+      if (existing) return c.json({ success: true, liked: true });
+      // Same for the insert: a concurrent like that won the race leaves this one
+      // a no-op, where the plain insert used to fail on the primary key (500).
+      const ins = await db
+        .insert(schema.matchLikes)
+        .values({ matchId, userId: uid, createdAt: now() })
+        .onConflictDoNothing()
+        .run();
+      if (Number(ins.meta?.changes ?? 0) === 0) return c.json({ success: true, liked: true });
+      const counters = await bumpEngagement(env, matchId, "like", 1);
+      await publish(env, `match:${matchId}`, { type: "like", liked: true, likeCount: counters.like ?? 0 });
+      // Notify participants off the request path (fire-and-forget).
+      c.executionCtx.waitUntil(
+        (async () => {
+          const match = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, matchId)).get();
+          const me = await db.select({ username: schema.users.username, avatar: schema.users.profileImageUrl }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+          for (const p of [match?.userA as any, match?.userB as any]) {
+            if (p?.uid && p.uid !== uid) {
+              // `actor` turns repeat likes on the same battle into one grouped
+              // notification instead of one row + one push per liker.
+              await createNotification(env, p.uid, { title: "New Like ❤️", body: `${me?.username || "Someone"} liked your battle "${match?.title}".`, type: "match_like", targetId: matchId, actor: { uid, username: me?.username, avatarUrl: me?.avatar } });
+            }
+          }
+        })(),
+      );
+      return c.json({ success: true, liked: true });
+    }
+
+    case "commentContest": {
+      const { matchId } = body;
+      const raw = typeof body.text === "string" ? body.text.trim() : "";
+      if (!matchId) throw httpsError("invalid-argument", "matchId is required.");
+      if (!raw) throw httpsError("invalid-argument", "Comment cannot be empty.");
+      if (raw.length > MAX_COMMENT_LEN) throw httpsError("invalid-argument", `Comment is too long (max ${MAX_COMMENT_LEN} characters).`);
+      await assertClean(env, raw);
+      await rateLimit(env, `comment:${uid}`, 30, 60);
+      await assertMatchInteractionAllowed(env, uid, matchId);
+      const commentId = newId();
+      const ts = now();
+      await db.insert(schema.matchComments).values({ id: commentId, matchId, userId: uid, text: raw, createdAt: ts });
+      const commentCounters = await bumpEngagement(env, matchId, "comment", 1);
+      await publish(env, `match:${matchId}`, { type: "comment", commentId, commentCount: commentCounters.comment ?? 0 });
+      // Bust the cached comment list so the new comment is visible immediately.
+      c.executionCtx.waitUntil(purgeShared(c, commentsCacheKey("matches", matchId)));
+      c.executionCtx.waitUntil(
+        (async () => {
+          const match = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, matchId)).get();
+          const me = await db.select({ username: schema.users.username, avatar: schema.users.profileImageUrl }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+          for (const p of [match?.userA as any, match?.userB as any]) {
+            if (p?.uid && p.uid !== uid) {
+              await createNotification(env, p.uid, { title: "New Comment 💬", body: `${me?.username || "Someone"} commented on "${match?.title}".`, type: "match_comment", targetId: matchId, actor: { uid, username: me?.username, avatarUrl: me?.avatar } });
+            }
+          }
+        })(),
+      );
+      return c.json({ success: true, commentId });
+    }
+
+    case "shareContest": {
+      const { matchId } = body;
+      if (!matchId) throw httpsError("invalid-argument", "matchId is required.");
+      await rateLimit(env, `share:${uid}`, 60, 3600);
+      await assertMatchInteractionAllowed(env, uid, matchId);
+      const shareTs = now();
+      // The "share" daily task counts distinct battles, and the share counter
+      // should count people: the same user sharing the same battle again within
+      // a day records nothing new.
+      const recent = await env.DB.prepare(
+        `SELECT 1 AS x FROM shares WHERE user_id = ? AND target_type = 'match' AND target_id = ? AND created_at >= ? LIMIT 1`,
+      ).bind(uid, String(matchId), shareTs - SHARE_DEDUPE_MS).first();
+      if (recent) return c.json({ success: true, counted: false });
+      await db.insert(schema.shares).values({ id: newId(), userId: uid, targetType: "match", targetId: matchId, createdAt: shareTs });
+      const counters = await bumpEngagement(env, matchId, "share", 1);
+      await publish(env, `match:${matchId}`, { type: "share", shareCount: counters.share ?? 0 });
+      return c.json({ success: true });
+    }
+
+    case "reactToMatch": {
+      const { matchId, type } = body;
+      if (!matchId || !type) throw httpsError("invalid-argument", "matchId and type are required.");
+      await assertMatchInteractionAllowed(env, uid, matchId);
+      const ins = await db
+        .insert(schema.matchReactions)
+        .values({ matchId, userId: uid, type, createdAt: now() })
+        .onConflictDoNothing()
+        .run();
+      if (ins.meta.changes === 0) return c.json({ success: true, alreadyReacted: true });
+      // Reaction counter goes through the per-match DO (batched to D1 reactions JSON).
+      const counters = await bumpEngagement(env, matchId, `react:${type}`, 1);
+      await publish(env, `match:${matchId}`, { type: "reaction", reactionType: type, count: counters[`react:${type}`] ?? 0 });
+      return c.json({ success: true });
+    }
+
+    case "toggleBookmark": {
+      const { matchId } = body;
+      if (!matchId) throw httpsError("invalid-argument", "matchId is required.");
+      // Optional explicit target state, as in likeContest: replay-safe for the
+      // offline outbox. Absent → the original toggle.
+      const desired = typeof body.bookmarked === "boolean" ? body.bookmarked : null;
+      const where = and(eq(schema.bookmarks.userId, uid), eq(schema.bookmarks.matchId, matchId));
+      const existing = await db.select().from(schema.bookmarks).where(where).get();
+      const wantSaved = desired ?? !existing;
+      if (!wantSaved) {
+        if (existing) await db.delete(schema.bookmarks).where(where);
+        return c.json({ success: true, bookmarked: false });
+      }
+      if (existing) return c.json({ success: true, bookmarked: true });
+      // Guarded on the ADD branch only, so a bookmark saved before a block can
+      // always be removed afterwards.
+      await assertMatchInteractionAllowed(env, uid, matchId);
+      await db.insert(schema.bookmarks).values({ userId: uid, matchId, createdAt: now() }).onConflictDoNothing();
+      return c.json({ success: true, bookmarked: true });
+    }
+
+    // "Not interested" on a feed card (lib/feedDismissals.ts). Explicit target
+    // state (`dismissed`), so a retry or a replay never flips it back.
+    // A short-lived ticket for opening WebSockets without putting the ID token in
+    // the URL (lib/wsTicket.ts). null = tickets are not configured; use the token.
+    case "createWsTicket": {
+      const minted = await mintWsTicket(env, uid, c.get("user")?.authTime);
+      return c.json(minted ?? { ticket: null });
+    }
+
+    case "setFeedDismissal": {
+      await rateLimit(env, `dismiss:${uid}`, 120, 3600);
+      const matchId = requiredId(body.matchId, "matchId", 128);
+      if (typeof body.dismissed !== "boolean") throw httpsError("invalid-argument", "dismissed must be true or false.");
+      if (!body.dismissed) {
+        await removeFeedDismissal(env, uid, matchId);
+        return c.json({ success: true, dismissed: false });
+      }
+      const m = await db
+        .select({ id: schema.contestMatches.id, userA: schema.contestMatches.userA, userB: schema.contestMatches.userB })
+        .from(schema.contestMatches)
+        .where(eq(schema.contestMatches.id, matchId))
+        .get();
+      if (!m) throw httpsError("not-found", "Battle not found.");
+      const a = (m.userA as any)?.uid ?? null;
+      const b = (m.userB as any)?.uid ?? null;
+      // Your own battle is never demoted for you (and there is nothing to learn).
+      if (a === uid || b === uid) throw httpsError("invalid-argument", "This is your own battle.");
+      await recordFeedDismissal(env, uid, { id: m.id, creatorA: a, creatorB: b }, now());
+      return c.json({ success: true, dismissed: true });
+    }
+
+    // ============ GENERIC COMMENTS (posts, matches or blog articles) ============
+    case "addComment": {
+      const { targetType, targetId } = body;
+      const raw = typeof body.text === "string" ? body.text.trim() : "";
+      if (!targetId) throw httpsError("invalid-argument", "targetId is required.");
+      if (!raw) throw httpsError("invalid-argument", "Comment cannot be empty.");
+      if (raw.length > MAX_COMMENT_LEN) throw httpsError("invalid-argument", `Comment is too long (max ${MAX_COMMENT_LEN} characters).`);
+      // Spam guard (parity with commentContest) + banned-word moderation.
+      await rateLimit(env, `comment:${uid}`, 30, 60);
+      await assertClean(env, raw);
+      const isMatch = targetType === "matches" || targetType === "contestMatches";
+      const isBlog = targetType === "blog";
+      // Commenting reaches the owner's notification inbox, so it needs the same
+      // guard as a DM. Both social branches resolve the owner(s) of the thing
+      // being commented on and refuse if a block exists in either direction.
+      if (isMatch) {
+        // The block helper lets a missing match through (it has no owners to
+        // check), so a comment could be stored, counted and published for any
+        // string. Comments need a real battle.
+        const exists = await db.select({ id: schema.contestMatches.id }).from(schema.contestMatches).where(eq(schema.contestMatches.id, targetId)).get();
+        if (!exists) throw httpsError("not-found", "Battle not found.");
+        await assertMatchInteractionAllowed(env, uid, targetId);
+      } else if (isBlog) {
+        // A blog article has no owner uid to block (`blog_posts.author` is free
+        // text), so the guard here is about the TARGET instead: the article must
+        // exist and be published. Without it any string could be used as a
+        // targetId, producing comment rows attached to nothing — invisible on
+        // every read path, so never moderated and never deleted — and a draft
+        // could quietly collect public comments before anyone can see them.
+        const article = await db
+          .select({ id: schema.blogPosts.id, status: schema.blogPosts.status })
+          .from(schema.blogPosts)
+          .where(eq(schema.blogPosts.id, targetId))
+          .get();
+        if (!article || article.status !== "published") throw httpsError("not-found", "Post not found.");
+      } else {
+        const postOwner = await db
+          .select({ userId: schema.posts.userId })
+          .from(schema.posts)
+          .where(eq(schema.posts.id, targetId))
+          .get();
+        if (!postOwner) throw httpsError("not-found", "Post not found.");
+        await assertNotBlockedAny(env, uid, [postOwner.userId]);
+        // A private account's posts are behind the profile header (lib/privateAccount.ts);
+        // so is their comment thread. A non-follower holding a post id could post here.
+        if (await privateContentLocked(env, uid, postOwner.userId)) {
+          throw httpsError("permission-denied", "This account is private.");
+        }
+      }
+      // Idempotency: the client may pass a stable clientId so a retried submit
+      // (flaky network) never posts the same comment twice.
+      const clientId = typeof body.clientId === "string" && body.clientId.trim() ? body.clientId.trim().slice(0, 64) : null;
+      // Becomes the row id, so only id-safe characters (length is capped above).
+      if (clientId != null && !/^[A-Za-z0-9_-]+$/.test(clientId)) {
+        throw httpsError("invalid-argument", "clientId may only use letters, digits, '-' or '_'.");
+      }
+      const commentId = clientId || newId();
+      const ts = now();
+      if (clientId) {
+        const dupe = isMatch
+          ? await db.select({ id: schema.matchComments.id }).from(schema.matchComments).where(eq(schema.matchComments.id, commentId)).get()
+          : isBlog
+            ? await db.select({ id: schema.blogComments.id }).from(schema.blogComments).where(eq(schema.blogComments.id, commentId)).get()
+            : await db.select({ id: schema.postComments.id }).from(schema.postComments).where(eq(schema.postComments.id, commentId)).get();
+        if (dupe) return c.json({ success: true, commentId, duplicate: true });
+      }
+      if (isBlog) {
+        // No counter to bump and no notification to send: nothing renders a
+        // per-article comment count, and `blog_posts.author` is a display string,
+        // not a uid, so there is no inbox this could reach. The cache bust below
+        // is what makes the new comment visible.
+        await db.insert(schema.blogComments).values({ id: commentId, postId: targetId, userId: uid, text: raw, createdAt: ts }).onConflictDoNothing();
+      } else if (isMatch) {
+        const ins = await db.insert(schema.matchComments).values({ id: commentId, matchId: targetId, userId: uid, text: raw, createdAt: ts }).onConflictDoNothing().run();
+        // Two in-flight requests with the same clientId both passed the duplicate
+        // check above; only the one whose insert landed counts and notifies.
+        if (!ins.meta.changes) return c.json({ success: true, commentId, duplicate: true });
+        const cCounters = await bumpEngagement(env, targetId, "comment", 1);
+        // Push so both the open comment sheet and the feed card update instantly.
+        await publish(env, `match:${targetId}`, { type: "comment", commentId, commentCount: cCounters.comment ?? 0 });
+        c.executionCtx.waitUntil(
+          (async () => {
+            const match = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, targetId)).get();
+            const me = await db.select({ username: schema.users.username, avatar: schema.users.profileImageUrl }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+            for (const p of [match?.userA as any, match?.userB as any]) {
+              if (p?.uid && p.uid !== uid) {
+                await createNotification(env, p.uid, { title: "New Comment 💬", body: `${me?.username || "Someone"} commented on "${match?.title}".`, type: "match_comment", targetId, actor: { uid, username: me?.username, avatarUrl: me?.avatar } });
+              }
+            }
+          })(),
+        );
+      } else {
+        const ins = await db.insert(schema.postComments).values({ id: commentId, postId: targetId, userId: uid, text: raw, createdAt: ts }).onConflictDoNothing().run();
+        if (!ins.meta.changes) return c.json({ success: true, commentId, duplicate: true });
+        await db.update(schema.posts).set({ commentCount: sql`${schema.posts.commentCount} + 1` }).where(eq(schema.posts.id, targetId));
+        c.executionCtx.waitUntil(
+          (async () => {
+            const post = await db.select({ userId: schema.posts.userId }).from(schema.posts).where(eq(schema.posts.id, targetId)).get();
+            const me = await db.select({ username: schema.users.username, avatar: schema.users.profileImageUrl }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+            if (post?.userId && post.userId !== uid) {
+              await createNotification(env, post.userId, { title: "New Comment 💬", body: `${me?.username || "Someone"} commented on your post.`, type: "comment", targetId, actor: { uid, username: me?.username, avatarUrl: me?.avatar } });
+            }
+          })(),
+        );
+      }
+      // Bust the cached comment list so the new comment shows immediately.
+      c.executionCtx.waitUntil(purgeShared(c, commentsCacheKey(targetType, targetId)));
+      return c.json({ success: true, commentId });
+    }
+
+    case "deleteComment": {
+      const { targetType, targetId, commentId } = body;
+      if (!commentId) throw httpsError("invalid-argument", "commentId is required.");
+      // The thread to purge comes from the DELETED ROW, not the request body. The
+      // client's `targetId` was trusted here, so a caller that sent a stale or wrong
+      // id deleted the comment but left it visible in the shared first-page cache
+      // for every viewer until the TTL lapsed.
+      let threadId: string = targetId;
+      if (targetType === "blog") {
+        const row = await db.select().from(schema.blogComments).where(eq(schema.blogComments.id, commentId)).get();
+        if (!row) throw httpsError("not-found", "Comment not found.");
+        if (row.userId !== uid && !(await isAdmin(c as any))) throw httpsError("permission-denied", "Not allowed.");
+        const del = await db.delete(schema.blogComments).where(eq(schema.blogComments.id, commentId)).run();
+        if (del.meta.changes) await db.delete(schema.commentLikes).where(eq(schema.commentLikes.commentId, commentId));
+        threadId = row.postId;
+      } else if (targetType === "matches" || targetType === "contestMatches") {
+        const row = await db.select().from(schema.matchComments).where(eq(schema.matchComments.id, commentId)).get();
+        if (!row) throw httpsError("not-found", "Comment not found.");
+        if (row.userId !== uid && !(await isAdmin(c as any))) throw httpsError("permission-denied", "Not allowed.");
+        const del = await db.delete(schema.matchComments).where(eq(schema.matchComments.id, commentId)).run();
+        // Only the request that actually deleted the row decrements (double tap,
+        // owner and admin at once). And tell open sheets and cards the new count,
+        // as addComment does.
+        if (del.meta.changes) {
+          const counters = await bumpEngagement(env, row.matchId, "comment", -1);
+          await publish(env, `match:${row.matchId}`, { type: "comment", commentId, removed: true, commentCount: counters.comment ?? 0 });
+          await db.delete(schema.commentLikes).where(eq(schema.commentLikes.commentId, commentId));
+        }
+        threadId = row.matchId;
+      } else {
+        const row = await db.select().from(schema.postComments).where(eq(schema.postComments.id, commentId)).get();
+        if (!row) throw httpsError("not-found", "Comment not found.");
+        if (row.userId !== uid && !(await isAdmin(c as any))) throw httpsError("permission-denied", "Not allowed.");
+        const del = await db.delete(schema.postComments).where(eq(schema.postComments.id, commentId)).run();
+        if (del.meta.changes) {
+          await db.update(schema.posts).set({ commentCount: sql`MAX(${schema.posts.commentCount} - 1, 0)` }).where(eq(schema.posts.id, row.postId));
+          await db.delete(schema.commentLikes).where(eq(schema.commentLikes.commentId, commentId));
+        }
+        threadId = row.postId;
+      }
+      // Bust the cached comment list so the removal is reflected immediately.
+      c.executionCtx.waitUntil(purgeShared(c, commentsCacheKey(targetType, threadId)));
+      return c.json({ success: true });
+    }
+
+    case "likeComment": {
+      // Toggle a like on a single comment (match, post or blog article). Returns
+      // the new liked state + absolute like count so the client can reconcile
+      // instantly.
+      //
+      // `blog` MUST be handled explicitly, not left to fall through to the post
+      // branch: the shared client service passes targetType straight through, so
+      // without this the `comment_likes` row would be written while the counter
+      // UPDATE matched no row — a like that persists but always reads back as 0.
+      const { commentId, targetType } = body;
+      if (!commentId) throw httpsError("invalid-argument", "commentId is required.");
+      await rateLimit(env, `clike:${uid}`, 120, 60);
+      const isMatch = targetType === "matches" || targetType === "contestMatches";
+      const isBlogComment = targetType === "blog";
+      const existing = await db
+        .select()
+        .from(schema.commentLikes)
+        .where(and(eq(schema.commentLikes.commentId, commentId), eq(schema.commentLikes.userId, uid)))
+        .get();
+      // Optional explicit target state (`liked`), like toggleFollow's intent: a
+      // retried or replayed request then cannot flip the like back. Absent, it is
+      // the original toggle.
+      const liked = typeof body.liked === "boolean" ? body.liked : !existing;
+      // The last engagement write without a block guard. Only the LIKE direction
+      // is checked, so an existing like can always be withdrawn.
+      if (liked && !existing) {
+        const author = isMatch
+          ? await db.select({ userId: schema.matchComments.userId }).from(schema.matchComments).where(eq(schema.matchComments.id, commentId)).get()
+          : isBlogComment
+            ? await db.select({ userId: schema.blogComments.userId }).from(schema.blogComments).where(eq(schema.blogComments.id, commentId)).get()
+            : await db.select({ userId: schema.postComments.userId }).from(schema.postComments).where(eq(schema.postComments.id, commentId)).get();
+        // A like on a comment that does not exist was stored and never cleaned up.
+        if (!author) throw httpsError("not-found", "Comment not found.");
+        await assertNotBlockedAny(env, uid, [author.userId]);
+      }
+      // The counter moves only when THIS request changed the like row. Two
+      // concurrent likes both read "not liked"; one insert lands, and the count
+      // used to go up by two.
+      let changed = 0;
+      if (!liked && existing) {
+        changed = (await db.delete(schema.commentLikes).where(and(eq(schema.commentLikes.commentId, commentId), eq(schema.commentLikes.userId, uid))).run()).meta.changes;
+      } else if (liked && !existing) {
+        changed = (await db.insert(schema.commentLikes).values({ commentId, userId: uid, createdAt: now() }).onConflictDoNothing().run()).meta.changes;
+      }
+      const delta = changed ? (liked ? 1 : -1) : 0;
+      let likeCount = 0;
+      if (isBlogComment) {
+        await db.update(schema.blogComments)
+          .set({ likeCount: sql`MAX(COALESCE(${schema.blogComments.likeCount}, 0) + ${delta}, 0)` })
+          .where(eq(schema.blogComments.id, commentId));
+        const row = await db.select({ likeCount: schema.blogComments.likeCount }).from(schema.blogComments).where(eq(schema.blogComments.id, commentId)).get();
+        likeCount = row?.likeCount ?? 0;
+      } else if (isMatch) {
+        await db.update(schema.matchComments)
+          .set({ likeCount: sql`MAX(COALESCE(${schema.matchComments.likeCount}, 0) + ${delta}, 0)` })
+          .where(eq(schema.matchComments.id, commentId));
+        const row = await db.select({ likeCount: schema.matchComments.likeCount }).from(schema.matchComments).where(eq(schema.matchComments.id, commentId)).get();
+        likeCount = row?.likeCount ?? 0;
+      } else {
+        await db.update(schema.postComments)
+          .set({ likeCount: sql`MAX(COALESCE(${schema.postComments.likeCount}, 0) + ${delta}, 0)` })
+          .where(eq(schema.postComments.id, commentId));
+        const row = await db.select({ likeCount: schema.postComments.likeCount }).from(schema.postComments).where(eq(schema.postComments.id, commentId)).get();
+        likeCount = row?.likeCount ?? 0;
+      }
+      return c.json({ success: true, liked, likeCount });
+    }
+
+    // ================= SECURITY =================
+    //
+    // Fired by the client right after Firebase confirms an in-app password
+    // change (src/services/auth/changePassword.ts). Firebase owns the password,
+    // so the server never sees the change itself — this is the client telling us
+    // it happened so we can send the "your password was changed" tripwire email,
+    // the one alert whose absence lets an account takeover go unnoticed. Auth is
+    // already enforced by this route, so it can only ever email the caller's own
+    // address; there is nothing to spoof. Best-effort and never fatal — a mail
+    // blip must not make a completed password change look failed to the client.
+    case "notifyPasswordChanged": {
+      /**
+       * End every OTHER session, keeping the device that just did this.
+       *
+       * The point people expect a password change to have: the device left at a
+       * friend's house, or whoever prompted the change, stops being signed in. Until
+       * now a password change evicted precisely nobody — the old sessions kept
+       * working indefinitely, which makes "change your password" useless as a response
+       * to "someone is in my account".
+       *
+       * `revokeOtherSessions` and not `revokeAllSessions`: this caller reauthenticated
+       * with their current password seconds ago (see the client's `changePassword.ts`),
+       * so they are demonstrably in control, and signing them out of the phone in their
+       * hand is a worse experience than the change is worth. Someone who wants
+       * everything gone has `logoutAllDevices` below, which says so plainly.
+       *
+       * Awaited, unlike the email. The email is a courtesy and a mail blip must not
+       * make a completed password change look failed; this is the security effect the
+       * user is asking for, and reporting success without it would be a lie.
+       *
+       * Falls back to a FULL revocation when the caller's `auth_time` is not actually
+       * fresh. `revokeOtherSessions` identifies the surviving session by that claim, so a
+       * stale one would put the cutoff in the past and evict nobody. The client
+       * reauthenticates and force-refreshes before calling this, so the fresh path is the
+       * normal one — but a silent no-op is the wrong way to handle a client that did not,
+       * and this is the same guard `afterIdentifierChange` needs for the same reason.
+       */
+      const passwordChanger = c.get("user");
+      if (hasFreshSession(passwordChanger)) {
+        await revokeOtherSessions(env, passwordChanger, "password_changed");
+      } else {
+        await revokeAllSessions(env, uid, "password_changed");
+      }
+      c.executionCtx.waitUntil(sendUserEmail(env, uid, passwordChangedEmail()));
+      return c.json({ success: true });
+    }
+
+    /**
+     * "Log out of all devices" — the answer to "I think someone is in my account".
+     *
+     * Ends EVERY session including this one, which is the whole value of it: a control
+     * that left some sessions alive would not settle the question it is being pressed to
+     * settle, and the user cannot enumerate their own sessions to check. The client
+     * warns that they will have to sign in again here too.
+     *
+     * Deliberately NOT behind `assertRecentAuth`. The reauth gate exists for actions
+     * that are irreversible or that move credentials, and it costs an OTP round trip.
+     * This action destroys nothing, moves nothing, and its worst-case abuse — someone
+     * with a stolen session signing everyone out — is strictly less harmful than the
+     * takeover they already have, and is loud rather than quiet. Putting a challenge in
+     * front of the panic button would mean the people most in need of it are the ones
+     * most likely to be unable to use it.
+     */
+    case "logoutAllDevices": {
+      // Each call costs an Identity Toolkit write and a fan-out to every open socket.
+      // Generous enough that a worried user retrying is never blocked, tight enough that
+      // a loop cannot use it as an amplifier.
+      await rateLimit(env, `logoutall:${uid}`, 10, 3600);
+      await revokeAllSessions(env, uid, "user_logout_all");
+      return c.json({ success: true });
+    }
+
+    // ================= PROFILE =================
+    case "updateProfile":
+    case "completeSignup": {
+      // Block banned words in user-visible profile fields.
+      if (action === "updateProfile") await assertClean(env, body.username, body.fullName, body.bio);
+      // `completeSignup` writes no profile fields: the row and its
+      // `signupCompleted` flag are created by `createProfile` / `create`
+      // (routes/auth.ts createUserProfile). It only runs the referral step below.
+      const fields = action === "completeSignup" ? {} : body;
+      const set: Record<string, any> = { updatedAt: now() };
+      const extraPatch: Record<string, any> = {};
+      const COLUMN_KEYS = new Set([
+        "fullName", "username", "dob", "occupation", "gender", "coordinates",
+        // `equippedBadge` is deliberately NOT here: it is set only through the
+        // validated `equipBadge` action, never as a free-form profile field.
+        // `signupCompleted` and `authProvider` are NOT here either: they are
+        // server facts (set by createUserProfile), and a client that could set
+        // `signupCompleted` could skip onboarding — and its age check — entirely.
+        "bio", "isPrivate", "platform",
+      ]);
+      for (const [k, v] of Object.entries(fields)) {
+        if (k === "action" || k === "uid" || v === undefined) continue;
+        // `phone` used to be in COLUMN_KEYS, which made this endpoint a
+        // credential-change endpoint by accident. Rejected loudly rather than
+        // dropped: if a client believes it just changed the user's phone number
+        // and we say nothing, the user believes it too.
+        if (IDENTIFIER_KEYS.has(k)) {
+          throw httpsError(
+            "invalid-argument",
+            `${k === "email" ? "Email" : "Phone number"} cannot be changed here. ` +
+              `Use the verification flow — it sends a code to the new ${k === "email" ? "address" : "number"}.`,
+          );
+        }
+        // Canonicalised at the source: `users.profile_image_url` is the row every
+        // avatar snapshot elsewhere is copied FROM, so normalising it here stops
+        // one legacy url seeding many. Third-party avatars (Google/Apple sign-in)
+        // are not ours and pass through untouched.
+        if (k === "avatarUrl" || k === "profileImageUrl") set.profileImageUrl = canonicalMediaUrl(env, v as string);
+        // The full username policy — length, charset, reserved names — not just a
+        // lowercase. Editing the username must be held to the same rules signup
+        // is, or the profile-edit path is a way around them.
+        else if (k === "username") set.username = validateUsername(String(v));
+        else if (COLUMN_KEYS.has(k)) set[k] = v;
+        // Any OTHER real column name is dropped, not stored in `extra`.
+        //
+        // `extra` is merged over the top level by GET /read/users/:id, so an
+        // unrecognised key that happened to share a column's name SHADOWED that
+        // column in the response. A user could send `{verified: true}` here and
+        // read back a verified badge — likewise `dpcoin`, `role`, `followersCount`
+        // or `status`. None of it changed the database, which is why it went
+        // unnoticed, but the API served the account's own claims about itself as
+        // fact. Dropped silently rather than rejected because clients legitimately
+        // echo back whole profile objects, and failing those is a worse trade than
+        // ignoring fields they were never allowed to set.
+        else if (USER_COLUMN_KEYS.has(k)) continue;
+        else extraPatch[k] = v;
+      }
+      // Enforce identifier uniqueness on edits too (createUserProfile already
+      // does this at signup). Without it, two users could take the same username
+      // via profile edit — a duplicate-account bug that would otherwise only
+      // surface as a raw UNIQUE-constraint 500.
+      if (set.username) {
+        await assertIdentifiersAvailable(env, uid, { username: set.username });
+      }
+      /**
+       * The handle being given up, captured BEFORE the write.
+       *
+       * Needed because the public profile url is `/@username`: releasing a handle
+       * has to be recorded, or (a) every link to the old one dies and (b) the name
+       * becomes instantly claimable by someone who then inherits that traffic. See
+       * migration 0043.
+       *
+       * One indexed lookup by primary key, and only when a username is actually part
+       * of the patch — this is a profile-edit path, not a hot read.
+       */
+      let previousUsername: string | null = null;
+      if (set.username) {
+        const cur = await db
+          .select({ username: schema.users.username })
+          .from(schema.users)
+          .where(eq(schema.users.uid, uid))
+          .get();
+        previousUsername = cur?.username ?? null;
+      }
+      if (Object.keys(extraPatch).length) {
+        const cur = await db.select({ extra: schema.users.extra }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+        set.extra = { ...((cur?.extra as any) || {}), ...extraPatch };
+      }
+
+      // BEFORE the users row is written, deliberately. Publishing the hold after the
+      // handle goes free leaves a window in which another account can claim it, which
+      // is the exact attack the hold exists to stop. Safe in the failure direction: a
+      // history row naming a handle this uid still holds is inert, because the live
+      // owner outranks history and the hold exempts the uid on the row. See
+      // `recordUsernameTransition`.
+      if (set.username) {
+        await recordUsernameTransition(env, uid, previousUsername, set.username);
+      }
+
+      const upd = await db.update(schema.users).set(set).where(eq(schema.users.uid, uid)).run();
+      if (upd.meta.changes === 0) {
+        // No profile row. This used to INSERT one, which made "edit profile" a
+        // second, unguarded signup path: the client's useProfile hook called it
+        // with made-up defaults whenever a signed-in user had no row, so leaving
+        // onboarding with Back produced a full account with no age check, no
+        // welcome bonus and no verification enrolment. Accounts are created ONLY
+        // by createProfile / create (routes/auth.ts createUserProfile).
+        // (Normally unreachable: the onboarding gate in requireApiAuth refuses a
+        // caller without a completed row before this handler runs.)
+        throw httpsError("failed-precondition", `${PROFILE_INCOMPLETE_CODE}: Finish creating your profile to continue.`);
+      }
+
+      // Everyone gets a shareable referral code. On `completeSignup`, an inbound
+      // code is APPLIED — a pending referral that pays both sides only once the
+      // new user completes the admin's qualifying action (lib/referralProgram.ts).
+      // A bad code never fails signup: the outcome is reported instead.
+      await ensureReferralCode(env, uid);
+      let referral: Record<string, unknown> | undefined;
+      const refCode = String(body.referralCode || body.referredByCode || "").trim();
+      if (action === "completeSignup") {
+        if (body.deviceId) {
+          await db.update(schema.users).set({ deviceId: String(body.deviceId).slice(0, 128) }).where(eq(schema.users.uid, uid));
+        }
+        if (refCode) {
+          try {
+            referral = await applyReferralCode(env, uid, refCode, { deviceId: body.deviceId ?? null, ip: clientIp(c.req.raw.headers) });
+          } catch (e: any) {
+            referral = { status: "refused", message: e?.message || "Referral code could not be applied." };
+          }
+        }
+      }
+      const privacyChanged = !!fields && Object.prototype.hasOwnProperty.call(fields, "isPrivate");
+      // Going PUBLIC approves every pending follow request (Instagram does the
+      // same): with nothing left to protect, a pending request would only be a
+      // follow the owner can no longer act on. After the write above, so a
+      // request arriving concurrently sees a public account and follows directly.
+      let approved: string[] = [];
+      if (privacyChanged && !(fields as any).isPrivate) {
+        approved = await approveAllFollowRequests(env, uid, now());
+      }
+      // Invalidate the cached public profile so the user sees their edits
+      // immediately (GET /users/:id serves a short-lived shared copy).
+      c.executionCtx.waitUntil(
+        purgeShared(
+          c,
+          userCacheKey(uid),
+          // Going private (or public) changes who may see this account's Stories;
+          // the shared stories-bar base carries that fact (lib/storyAudience.ts).
+          // The connections lists are locked/unlocked by the same switch.
+          ...(privacyChanged ? [STORIES_FEED_CACHE_KEY, followersCacheKey(uid), followingCacheKey(uid)] : []),
+          // Bounded: these are the requesters whose following lists just grew.
+          ...approved.slice(0, 50).flatMap((r) => [followingCacheKey(r), userCacheKey(r)]),
+        ),
+      );
+      return c.json({
+        success: true,
+        ...(privacyChanged ? { approvedRequests: approved.length } : {}),
+        ...(referral ? { referral } : {}),
+      });
+    }
+
+    // Apply a friend's referral code after signup (within the program's apply
+    // window). Same rules and fraud checks as the signup path.
+    case "applyReferralCode": {
+      await rateLimit(env, `refapply:${uid}`, 10, 3600, { failClosed: true });
+      const result = await applyReferralCode(env, uid, body.code, { deviceId: body.deviceId ?? null, ip: clientIp(c.req.raw.headers) });
+      return c.json({ success: true, ...result });
+    }
+
+    // ================= STORIES (views / reactions / highlights) =================
+    case "viewStory": {
+      const { storyId } = body;
+      if (!storyId) throw httpsError("invalid-argument", "storyId is required.");
+      // A view writes the viewer into the author's viewer list, which is a
+      // notification of presence even though it sends no push.
+      await assertStoryInteractionAllowed(env, uid, storyId);
+      await db.insert(schema.storyViews).values({ storyId, viewerId: uid, createdAt: now() }).onConflictDoNothing();
+      return c.json({ success: true });
+    }
+    case "reactToStory": {
+      const { storyId, emoji } = body;
+      if (!storyId) throw httpsError("invalid-argument", "storyId is required.");
+      await assertStoryInteractionAllowed(env, uid, storyId);
+      await db
+        .insert(schema.storyViews)
+        .values({ storyId, viewerId: uid, reaction: emoji, createdAt: now() })
+        .onConflictDoUpdate({ target: [schema.storyViews.storyId, schema.storyViews.viewerId], set: { reaction: emoji } });
+      return c.json({ success: true });
+    }
+    /**
+     * Create a highlight — a permanent, publicly readable shelf of the OWNER'S
+     * OWN stories.
+     *
+     * Every field was previously stored verbatim, `storyIds` included, and nothing
+     * checked whose stories those were. Combined with the read endpoint (which only
+     * checked the highlight owner's visibility — i.e. the attacker's own), that made
+     * this a cross-account disclosure primitive: harvest a victim's story ids from
+     * the public `GET /read/users/:id/stories`, name them here, and
+     * `GET /read/highlights/:id/stories` served the victim's full story rows to
+     * anyone, unauthenticated, attributed to the attacker's profile — including
+     * stories long past the 24h window and ones whose `visibility` is not public.
+     *
+     * So ownership is asserted on the way IN (here) and enforced again on the way
+     * OUT (routes/read.ts). One check would be enough for correctness; two mean a
+     * highlight that predates this fix cannot leak either.
+     */
+    case "createHighlight": {
+      const { name, coverImageUrl, storyIds } = body;
+      const highlightName = name == null ? null : requiredId(name, "name", 120);
+      // Constrained like `setMatchVsImage` does: a highlight cover is rendered on a
+      // public profile, so an arbitrary off-domain url here is a way to log the IP
+      // and user-agent of everyone who views that profile.
+      const cover = coverImageUrl == null ? null : requiredId(coverImageUrl, "coverImageUrl", 2048);
+      const ownedStoryIds = await assertOwnedStoryIds(db, uid, storyIds);
+      const id = newId();
+      await db.insert(schema.highlights).values({
+        id,
+        userId: uid,
+        name: highlightName,
+        coverImageUrl: cover,
+        storyIds: ownedStoryIds,
+        createdAt: now(),
+      });
+      return c.json({ success: true, highlightId: id });
+    }
+    case "addStoryToHighlight": {
+      const { highlightId, storyId } = body;
+      if (!highlightId || !storyId) throw httpsError("invalid-argument", "highlightId and storyId are required.");
+      const h = await db.select().from(schema.highlights).where(eq(schema.highlights.id, highlightId)).get();
+      if (!h) throw httpsError("not-found", "Highlight not found.");
+      if (h.userId !== uid) throw httpsError("permission-denied", "Not allowed.");
+      // Two DIFFERENT ownership questions, and only the first was ever asked.
+      // Owning the highlight does not make someone the author of the story being
+      // pinned into it — see `createHighlight` above for what that allowed.
+      const [ownedStoryId] = await assertOwnedStoryIds(db, uid, [storyId]);
+      const ids = new Set<string>((h.storyIds as string[]) || []);
+      ids.add(ownedStoryId);
+      if (ids.size > MAX_HIGHLIGHT_STORIES) {
+        throw httpsError(
+          "failed-precondition",
+          `A highlight can hold at most ${MAX_HIGHLIGHT_STORIES} stories.`,
+        );
+      }
+      await db.update(schema.highlights).set({ storyIds: [...ids] }).where(eq(schema.highlights.id, highlightId));
+      return c.json({ success: true });
+    }
+
+    case "profileVisit": {
+      // Record that `uid` viewed `targetId`'s profile — powers the feed's
+      // visit-affinity signal. One row per (viewer, target); revisits refresh
+      // the timestamp. Self-visits are ignored.
+      const { targetId } = body;
+      if (!targetId || targetId === uid) return c.json({ success: true });
+      await rateLimit(env, `pvisit:${uid}`, 120, 60);
+      // Silently dropped rather than refused. This is passive telemetry the
+      // client fires on navigation, so an error would surface as a spurious
+      // failure on a screen the user simply opened — and recording the visit
+      // would feed a blocked account back into the feed's affinity signal.
+      if (await isBlockedBetween(env, uid, targetId)) return c.json({ success: true });
+      await db
+        .insert(schema.profileVisits)
+        .values({ userId: targetId, visitorId: uid, createdAt: now() })
+        .onConflictDoUpdate({
+          target: [schema.profileVisits.userId, schema.profileVisits.visitorId],
+          set: { createdAt: now() },
+        });
+      return c.json({ success: true });
+    }
+
+    // ================= REPORTS / SUPPORT (also feed admin panel) =================
+    case "createReport": {
+      // Reports raise admin notifications; unbounded reporting is a way to bury
+      // the moderation queue.
+      await rateLimit(env, `report:${uid}`, 20, 3600);
+      // One canonical type per kind. Free text (40 chars) let one reporter report
+      // the same thing once per alias ("match", "contestMatch", ...) or invented
+      // type, each a new queue row and admin notification.
+      const targetType = REPORT_TYPE_ALIASES[String(body.targetType ?? "")];
+      if (!targetType) throw httpsError("invalid-argument", "Unknown report type.");
+      const targetId = requiredId(body.targetId, "targetId", 128);
+      await assertReportableTarget(db, uid, targetType, targetId);
+      // Bounded free text: this lands in the admin queue verbatim.
+      const reason = typeof body.reason === "string" ? body.reason.slice(0, 300) : null;
+      const id = newId();
+      const ts = now();
+      // One report per reporter per target (unique index, migration 0060): a
+      // repeat tap is acknowledged, not stacked.
+      const inserted = await db
+        .insert(schema.reports)
+        .values({ id, reporterId: uid, targetType: targetType || null, targetId: targetId || null, reason, status: "open", createdAt: ts })
+        .onConflictDoNothing()
+        .run();
+      if (!(inserted.meta?.changes ?? 0)) return c.json({ success: true, duplicate: true });
+
+      const isMatch = targetType === "match";
+      let held = false;
+      if (isMatch && targetId) held = await maybeHoldReportedMatch(env, String(targetId), ts);
+      // The held battle's VS stories leave the shared stories feed now in this
+      // colo; elsewhere within the feed's edge TTL.
+      if (held) c.executionCtx.waitUntil(purgeShared(c, STORIES_FEED_CACHE_KEY).catch(() => {}));
+      await db.insert(schema.adminNotifications).values({
+        id: newId(),
+        title: held ? "Battle auto-hidden after reports" : "New Report",
+        message: held
+          ? `A battle reached ${MATCH_REPORT_HOLD_THRESHOLD} reports from different users and was hidden from feeds pending review.`
+          : `A ${targetType || "content"} was reported.`,
+        link: "/reports",
+        scope: "moderation",
+        isRead: false,
+        createdAt: ts,
+      });
+      return c.json({ success: true, reportId: id });
+    }
+    case "createSupportTicket": {
+      await rateLimit(env, `support:${uid}`, 10, 3600);
+      const { subject, message } = body;
+      if (!subject) throw httpsError("invalid-argument", "subject is required.");
+      const id = newId();
+      const ts = now();
+      const me = await db.select({ username: schema.users.username }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+      await db.insert(schema.supportTickets).values({ id, userId: uid, subject, message: message || null, status: "open", createdAt: ts, updatedAt: ts });
+      await db.insert(schema.adminNotifications).values({ id: newId(), title: "New Support Ticket", message: `${me?.username || "A user"}: ${subject}`, link: "/support", scope: "moderation", isRead: false, createdAt: ts });
+      return c.json({ success: true, ticketId: id });
+    }
+
+    // ================= ACCOUNT DELETION =================
+    /**
+     * What deleting the account would do right now: how many coins would be
+     * forfeited, what is still in flight, how long the grace period is, and
+     * whether a request already exists.
+     *
+     * The client shows this BEFORE asking for confirmation, so the user is never
+     * surprised by a forfeited balance or an unexplained delay. `deletable` is
+     * always true — see the note on DeletionEligibility for why that field still
+     * exists at all.
+     */
+    case "accountDeletionStatus": {
+      const eligibility = await checkDeletionEligibility(env, uid);
+      return c.json(eligibility);
+    }
+
+    /**
+     * Ask for the account to be deleted. Required by both app stores.
+     *
+     * Always ACCEPTED. The account is taken out of service immediately and the
+     * data is purged once the grace period lapses (and once anything in flight
+     * has settled). Nothing is destroyed by this call, which is what makes
+     * `cancelAccountDeletion` able to mean something.
+     */
+    case "requestAccountDeletion": {
+      // Deliberately strict. Not because the call is destructive — it no longer
+      // is — but because it takes an account out of service, and a stolen token
+      // should not be able to do that repeatedly.
+      await rateLimit(env, `deleteaccount:${uid}`, 5, 3600, { failClosed: true });
+      // An explicit confirmation flag, so a mis-sent request cannot disable an
+      // account on its own.
+      if (body.confirm !== true) {
+        throw httpsError("invalid-argument", "Account deletion must be confirmed.");
+      }
+      // Prove it is still the account holder. Typing DELETE proves intent about
+      // the word and the confirm dialog proves intent about the moment; neither
+      // proves anything about WHO. Without this the requirement for destroying an
+      // account was a session of any age — a stolen token, or a phone left
+      // unlocked. Firebase's own recent-login rule does not apply here, because
+      // this path never touches the client SDK.
+      await assertRecentAuthForDeletion(env, c.get("user"));
+      const result = await requestAccountDeletion(
+        env,
+        uid,
+        { reason: body.reason, source: body.source === "web" ? "web" : "app" },
+        c,
+      );
+      return c.json({ success: true, ...result });
+    }
+
+    /**
+     * Send a security code to the identifier already on the account, to prove the
+     * caller is still its owner before a destructive or credential-level action.
+     *
+     * Goes to the CURRENT email or phone, never to one the request supplied — a
+     * caller who picks the destination has proved nothing.
+     */
+    case "sendReauthOtp": {
+      const challenge = await sendReauthChallenge(env, uid, clientIp(c.req.raw.headers));
+      return c.json({ success: true, ...challenge });
+    }
+
+    /** Verify that code and open a short window in which the action may proceed. */
+    case "verifyReauthOtp": {
+      const result = await confirmReauthChallenge(env, uid, body.otp);
+      return c.json({ success: true, ...result });
+    }
+
+    /**
+     * Change of mind, during the grace period. Puts the account back in service.
+     *
+     * Deliberately NOT behind re-authentication. Cancelling is the non-destructive
+     * direction, and it is the only way back from a deletion someone did not mean
+     * to start — putting a code in front of it would make the recovery path harder
+     * than the destructive one, which is how a grace period stops being a safety
+     * net.
+     */
+    case "cancelAccountDeletion": {
+      await rateLimit(env, `canceldeletion:${uid}`, 10, 3600);
+      const result = await cancelAccountDeletion(env, uid, c);
+      return c.json({ success: true, ...result });
+    }
+
+    /**
+     * A copy of everything we hold about the caller, as JSON.
+     *
+     * Deliberately sits next to deletion rather than somewhere in settings: the
+     * moment someone is about to erase their account is exactly when they want
+     * their data out, and GDPR Article 15 gives them the right to have it. The
+     * delete screen links straight to this.
+     */
+    case "exportMyData": {
+      // An export returned in the RESPONSE (no email on file) hands the whole
+      // account (address, payout details, UTRs) to whoever holds this session, so it
+      // needs a recent sign-in or a passed challenge. Checked before the quota, so a
+      // re-verify and retry does not spend one of the three daily exports.
+      const emailOnFile = (
+        (await db.select({ email: schema.users.email }).from(schema.users).where(eq(schema.users.uid, uid)).get())?.email || ""
+      ).trim();
+      if (!emailOnFile) await assertRecentAuth(env, c.get("user"));
+      // One export is a lot of reads across a dozen tables.
+      await rateLimit(env, `exportdata:${uid}`, 3, 86400, { failClosed: true });
+      const bundle = await exportUserData(env, uid);
+      const json = JSON.stringify(bundle, null, 2);
+
+      /**
+       * Deliver by EMAIL, not a device download.
+       *
+       * A data export is personal information, and mailing it to the address on the
+       * account keeps the copy tied to something only the owner controls rather than
+       * whatever device happened to tap the button. It rides as a JSON attachment.
+       *
+       * Two fallbacks return the bundle inline for the client to save instead, so no
+       * one is ever left with no way to get their data:
+       *  - the account is phone-only (no email on file), or
+       *  - the export is too large to attach safely (base64 inflates ~33%, and every
+       *    provider caps total message size).
+       * A provider send-failure falls back the same way.
+       */
+      const row = await db
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.uid, uid))
+        .get();
+      const email = (row?.email || "").trim();
+      const MAX_ATTACH_BYTES = 6 * 1024 * 1024;
+
+      if (email && json.length <= MAX_ATTACH_BYTES) {
+        // UTF-8-safe base64, chunked so a multi-MB export cannot overflow the call
+        // stack via String.fromCharCode(...bigArray).
+        const bytes = new TextEncoder().encode(json);
+        let binary = "";
+        const CHUNK = 0x8000;
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+        }
+        const base64 = btoa(binary);
+        const filename = `tophunt-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+        const rendered = dataExportEmail();
+        const sent = await sendEmail(env, {
+          to: email,
+          subject: rendered.subject,
+          html: rendered.html,
+          text: rendered.text,
+          attachments: [{ filename, content: base64, contentType: "application/json" }],
+        });
+        if (sent) {
+          const masked = email.replace(/^(.)[^@]*(@.*)$/, "$1***$2");
+          return c.json({ emailed: true, email: masked });
+        }
+        // Send failed — do not strand the user; fall through to returning the data.
+      }
+      // Too large to email, or the send failed: same rule as a phone-only account.
+      await assertRecentAuth(env, c.get("user"));
+      return c.json({ emailed: false, data: bundle });
+    }
+
+    /**
+     * Supply the delivery details for a physical prize this caller won.
+     *
+     * Fail-CLOSED rate limit: this writes a postal address, and an unlimited burst
+     * would let someone rewrite a shipping destination repeatedly to time an
+     * operator's read — an address-swap window. It is also simply not an action a
+     * real person performs more than a handful of times.
+     */
+    case "submitPrizeClaim": {
+      await rateLimit(env, `prizeclaim:${uid}`, 10, 3600, { failClosed: true });
+      const claimId = typeof body.claimId === "string" && body.claimId
+        ? body.claimId
+        : typeof body.matchId === "string" && body.matchId
+          ? `prize_claim:${body.matchId}`
+          : "";
+      if (!claimId) throw httpsError("invalid-argument", "claimId or matchId is required.");
+
+      const address = parseDeliveryAddress(body.delivery ?? body.address ?? body);
+      const ts = now();
+
+      // One conditional UPDATE rather than read-then-write. The `uid` term is the
+      // authorisation — a claim belonging to somebody else matches nothing, and
+      // reports the same "not found" as a claim that does not exist, so this cannot
+      // be used to discover who won what. The status term makes it idempotent-ish:
+      // an address can be supplied while a claim is `unclaimed` or corrected while
+      // it is still only `submitted`, but NOT once an operator has approved or
+      // shipped it — by then the parcel is addressed and a silent change would send
+      // it to the wrong place.
+      const updated = await db
+        .update(schema.prizeClaims)
+        .set({
+          status: "submitted",
+          recipientName: address.recipientName,
+          phone: address.phone,
+          addressLine1: address.addressLine1,
+          addressLine2: address.addressLine2,
+          landmark: address.landmark,
+          city: address.city,
+          state: address.state,
+          postalCode: address.postalCode,
+          country: address.country,
+          notes: address.notes,
+          submittedAt: ts,
+          updatedAt: ts,
+        })
+        .where(and(
+          eq(schema.prizeClaims.id, claimId),
+          eq(schema.prizeClaims.uid, uid),
+          inArray(schema.prizeClaims.status, ["unclaimed", "submitted"]),
+        ))
+        .run();
+
+      if (updated.meta.changes === 0) {
+        // Distinguish the two reasons, but only for a claim this caller owns.
+        const existing = await db
+          .select({ status: schema.prizeClaims.status })
+          .from(schema.prizeClaims)
+          .where(and(eq(schema.prizeClaims.id, claimId), eq(schema.prizeClaims.uid, uid)))
+          .get();
+        if (!existing) throw httpsError("not-found", "Prize claim not found.");
+        throw httpsError(
+          "failed-precondition",
+          "This prize is already being processed, so its address can no longer be changed. Contact support if it is wrong.",
+        );
+      }
+
+      return c.json({ success: true, status: "submitted" });
+    }
+
+    /**
+     * Legacy alias for `requestAccountDeletion`, kept for shipped app builds.
+     *
+     * Older clients call this, announce "your account has been deleted" and sign
+     * out. That remains truthful: the account is out of service and invisible
+     * from this point on, exactly as those builds tell the user, and the erasure
+     * itself completes after the grace period. `deletedAt` is kept in the
+     * response shape those builds expect.
+     */
+    case "deleteAccount": {
+      await rateLimit(env, `deleteaccount:${uid}`, 5, 3600, { failClosed: true });
+      if (body.confirm !== true) {
+        throw httpsError("invalid-argument", "Account deletion must be confirmed.");
+      }
+      await assertRecentAuthForDeletion(env, c.get("user"));
+      const result = await requestAccountDeletion(env, uid, { reason: body.reason }, c);
+      return c.json({
+        success: true,
+        deletedAt: result.scheduledFor,
+        scheduledFor: result.scheduledFor,
+        gracePeriodDays: result.gracePeriodDays,
+        forfeitedCoins: result.forfeitedCoins,
+      });
+    }
+
+    // ================= WALLET (ADMIN) =================
+    case "adminManageWallet": {
+      // Full admins only. A plain `admin` used to be able to move any balance
+      // here with no audit trail, while the equivalent /admin route required a
+      // full admin — the two paths are now identical in authority and both are
+      // audited.
+      await requireFullAdminAction(env, uid);
+      const { userId, amount, type } = body;
+      // Same choice as the /admin route: Diamond (locked_coins) or DP coin.
+      const locked = body?.locked === true;
+      if (!userId || typeof userId !== "string" || !["add", "subtract"].includes(type))
+        throw httpsError("invalid-argument", "userId and a type of add or subtract are required.");
+      const amt = assertCoinAmount(amount, "amount");
+      // Same shared implementation the /admin route uses: validated amount,
+      // balance + ledger in one transaction, loud failure instead of a silent
+      // clamp, optional replay claim.
+      try {
+        const { newBalance } = await adjustUserWallet(env, {
+          uid: userId,
+          amount: amt,
+          direction: type,
+          type: "admin_adjustment",
+          description: `Admin ${type} ${amt} ${locked ? "Diamond" : "DP coin"}`,
+          claimKey: body.idempotencyKey ? `admin_wallet:${userId}:${body.idempotencyKey}` : undefined,
+          locked,
+          ts: now(),
+        });
+        await writeAdminAudit(env, c.get("user"), "wallet.adjust", "user", userId, {
+          amount: amt,
+          type,
+          locked,
+          newBalance,
+          via: "/api",
+        });
+        return c.json({ success: true, message: "Wallet updated successfully", newBalance });
+      } catch (e) {
+        if (e instanceof WalletReplay) {
+          const current = await db
+            .select({ balance: schema.users.dpcoin })
+            .from(schema.users)
+            .where(eq(schema.users.uid, userId))
+            .get();
+          return c.json({
+            success: true,
+            replayed: true,
+            message: "Wallet already updated for this request (no change applied).",
+            newBalance: current?.balance ?? 0,
+          });
+        }
+        throw e;
+      }
+    }
+    case "join":
+    case "vote":
+      return notPorted(action, "contests/contestHandler.ts (legacy entries/battles matchmaking)");
+
+    // ================= GAMIFICATION (lib/gamificationApi.ts) =================
+    case "getProgression":
+    case "getAchievements":
+    case "getInventory":
+    case "equipCosmetic":
+    case "pinAchievements":
+    case "getQuests":
+    case "claimQuest":
+    case "getXpHistory":
+    case "claimRewardGrant":
+    case "getCreatorInsights":
+    case "getXpRank":
+      return c.json(
+        await handleGamificationAction(action, {
+          env,
+          uid,
+          body,
+          waitUntil: (p) => c.executionCtx.waitUntil(p),
+          purgeProfile: () => c.executionCtx.waitUntil(purgeShared(c, userCacheKey(uid))),
+        }),
+      );
+
+    default:
+      throw httpsError("invalid-argument", `Action '${action}' nahi mila.`);
+  }
+  } catch (e) {
+    // The guarded action failed and committed nothing — free the idempotency
+    // key so a legitimate retry isn't rejected for the next 24h.
+    if (body.idempotencyKey) await releaseIdempotency(env, uid, String(body.idempotencyKey));
+    throw e;
+  }
+});

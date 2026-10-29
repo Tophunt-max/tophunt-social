@@ -1,0 +1,288 @@
+/**
+ * /upload — authenticated media upload proxy.
+ *
+ * The browser (web build) can't PUT directly to the R2 S3 endpoint because R2
+ * has no CORS policy for our origin ("Network error during S3 upload. Check
+ * CORS settings."). So instead the client uploads the file to the Worker (same
+ * origin as the API — CORS is handled by our own middleware) and we stream it
+ * into R2 via the MEDIA binding. Works identically on web, Android and iOS and
+ * needs no external R2 CORS configuration.
+ *
+ * Because the bytes pass through us, this is also the only place they can be
+ * inspected — which is the reason the presigned-PUT alternative was removed
+ * rather than kept as a fallback. See `lib/mediaTypes.ts` for what is enforced.
+ *
+ * IMAGES ONLY, once Qencode is live. Video goes to `POST /upload/video` (below)
+ * after the `createVideoUpload` action, and is encoded before anyone sees it;
+ * `POST /upload` refuses it so a stale build cannot publish a raw MP4. Until
+ * Qencode is provisioned the legacy video path stays open — `lib/mediaRouting.ts`
+ * owns that decision and explains why it is a setting rather than a deletion.
+ *
+ * POST /upload?folder=<folder>&fileType=<mime>
+ *   body: raw file bytes
+ *   auth: Firebase Bearer token
+ *   -> { success, publicUrl, fileKey, contentType }
+ *
+ * `fileType` is a hint. The stored content type and the key's extension come
+ * from the file's magic bytes, so `?fileType=image/png` with a ZIP body is a 400,
+ * and an iOS `.mov` declared as `video/mp4` is stored correctly as
+ * `video/quicktime`.
+ *
+ * POST /upload/video?videoId=<id>&fileType=<mime>
+ *   body: raw video bytes; `videoId` from `createVideoUpload`
+ *   -> { success, publicUrl (the HLS playlist, not yet playable), videoId, status }
+ */
+import { Hono, type Context } from "hono";
+import type { Env, Variables } from "../types";
+import { requireAuth } from "../middleware/auth";
+import { appControlGate } from "../lib/appControl";
+import { getAppControlConfig } from "../lib/settings";
+import {
+  uploadToR2,
+  USER_UPLOAD_FOLDERS,
+  sanitizeMediaFolder,
+  isUserUploadFolder,
+} from "../lib/r2";
+import { allowedMimesForUpload, assertR2AcceptsKind, mediaRouting } from "../lib/mediaRouting";
+import {
+  ALLOWED_MEDIA_MIME_TYPES,
+  MAX_IMAGE_BYTES,
+  MAX_VIDEO_BYTES,
+  VIDEO_MIME_TYPES,
+  describe,
+  extensionForMime,
+  kindOf,
+  verifyMediaBytes,
+} from "../lib/mediaTypes";
+import { httpsError } from "../lib/http";
+import { clientIp, rateLimitAll } from "../lib/rateLimit";
+import { and, eq, isNull } from "drizzle-orm";
+import { getDb, schema } from "../db";
+import { now } from "../lib/ids";
+import { isVideoId, newSourceKey, playbackUrlFor, startEncode } from "../lib/qencode";
+
+/**
+ * Upload budget.
+ *
+ * This endpoint had NO rate limit while accepting 80 MB per request, so a single
+ * authenticated account could drive unbounded R2 storage + egress cost. The
+ * limits below are far above any legitimate session (a user posting a story,
+ * an avatar and a contest entry) but bound the bill.
+ *
+ * Fail-closed: an outage of the counter store must not reopen an unmetered
+ * write path into our own bucket.
+ */
+const UPLOADS_PER_HOUR = 60;
+const UPLOADS_PER_DAY = 300;
+/** Per-IP ceiling, so one device cycling accounts is still bounded. */
+const UPLOADS_PER_IP_PER_HOUR = 120;
+
+export const uploadRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+uploadRoute.use("*", requireAuth);
+// Uploads are writes: closed during maintenance and on too-old native builds.
+uploadRoute.use("*", async (c, next) => {
+  appControlGate(await getAppControlConfig(c.env), {
+    action: "upload",
+    role: c.get("user")?.role ?? null,
+    uid: c.get("user")?.uid ?? null,
+    platform: c.req.header("X-App-Platform") ?? null,
+    appVersion: c.req.header("X-App-Version") ?? null,
+  });
+  await next();
+});
+
+uploadRoute.post("/", async (c) => {
+  // Lower-cased because MIME types are case-insensitive and the admin routes
+  // already normalised: `IMAGE/JPEG` used to be rejected here and accepted there.
+  const declaredType = (c.req.query("fileType") || c.req.header("Content-Type") || "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  const requestedFolder = c.req.query("folder") || "misc";
+
+  if (!ALLOWED_MEDIA_MIME_TYPES.includes(declaredType as any)) {
+    throw httpsError("invalid-argument", "Invalid or missing file type.");
+  }
+  // Constrain the destination prefix to the folders a user may write to. Without
+  // this a caller chose their own key prefix, including deployment-owned ones
+  // like `contest-banners/`.
+  const folder = sanitizeMediaFolder(requestedFolder);
+  if (!isUserUploadFolder(folder)) {
+    throw httpsError("invalid-argument", `folder must be one of: ${USER_UPLOAD_FOLDERS.join(", ")}.`);
+  }
+
+  // Raw video is not stored here once Qencode owns video: this rejects it outright,
+  // with a message naming `createVideoUpload` — checked BEFORE the generic
+  // per-folder message below, because "use the other action" is actionable and
+  // "contests accepts JPEG, PNG, WebP, GIF only" sends the reader to look at
+  // their file. See lib/mediaRouting.ts for why this is a switch, not a deletion.
+  const kind = kindOf(declaredType);
+  if (!kind) throw httpsError("invalid-argument", "Invalid or missing file type.");
+  await assertR2AcceptsKind(c.env, kind, folder);
+
+  // What this destination accepts right now — the storage rule for the prefix,
+  // narrowed by the live video provider. An image-only folder rejects a video
+  // here, before we spend memory buffering it.
+  const allowed = await allowedMimesForUpload(c.env, folder);
+  if (!allowed.includes(declaredType as any)) {
+    throw httpsError(
+      "invalid-argument",
+      `${folder} accepts ${allowed.map(describe).join(", ")} only.`,
+    );
+  }
+
+  // Per-family cap instead of one 80 MB limit for everything: an avatar has no
+  // business being video-sized. Keyed off what is ACTUALLY allowed, so a video
+  // that will be refused anyway is bounded by the image cap rather than being
+  // buffered up to 80 MB first.
+  const videoAllowed = allowed.some((mime) => kindOf(mime) === "video");
+  const maxBytes = videoAllowed && kind === "video" ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+  const maxLabel = `${Math.round(maxBytes / (1024 * 1024))}MB`;
+
+  // Reject on the declared length first. Reading 200 MB into a Worker only to
+  // throw afterwards costs us the bandwidth and the memory either way, and the
+  // isolate can be killed before our own check ever runs.
+  const contentLength = c.req.header("Content-Length");
+  if (contentLength !== undefined) {
+    const declaredBytes = Number(contentLength);
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0) {
+      throw httpsError("invalid-argument", "Invalid Content-Length.");
+    }
+    if (declaredBytes > maxBytes) throw httpsError("invalid-argument", `File too large (max ${maxLabel}).`);
+  }
+
+  const uid = c.get("user").uid;
+  await chargeUploadBudget(c, uid);
+
+  const buf = await c.req.arrayBuffer();
+  if (!buf || buf.byteLength === 0) throw httpsError("invalid-argument", "Empty upload.");
+  if (buf.byteLength > maxBytes) throw httpsError("invalid-argument", `File too large (max ${maxLabel}).`);
+
+  // `uploadToR2` sniffs the magic bytes and stores the type it detects, so the
+  // declared type above is only a hint — what actually lands in R2 is decided by
+  // the file's own header. A renamed ZIP/HTML/SVG/APK is rejected here.
+  // Provenance: who uploaded this object. Contest entries are checked against it
+  // (lib/vsPublication.ts, api.ts startMatch/joinMatch) so one account cannot
+  // submit — and get published as a VS Story — another account's upload.
+  const { publicUrl, fileKey, contentType } = await uploadToR2(c.env, declaredType, folder, buf, allowed, { uploader: uid });
+  // `uploadUrl` mirrored for backward-compat with older callers.
+  return c.json({ success: true, publicUrl, fileKey, uploadUrl: publicUrl, contentType });
+});
+
+/**
+ * The shared upload budget, charged by both routes.
+ *
+ * One batched call instead of three sequential ones. The two per-user caps share
+ * the uploader's limiter actor and cost a single Durable Object request; the
+ * per-IP cap is a different subject and so is a second. Order is preserved, so
+ * which cap trips first is unchanged.
+ */
+async function chargeUploadBudget(c: Context<{ Bindings: Env; Variables: Variables }>, uid: string): Promise<void> {
+  await rateLimitAll(
+    c.env,
+    [
+      { key: `upload:${uid}`, max: UPLOADS_PER_HOUR, windowSec: 3600 },
+      { key: `upload_day:${uid}`, max: UPLOADS_PER_DAY, windowSec: 86_400 },
+      { key: `upload_ip:${clientIp(c.req.raw.headers)}`, max: UPLOADS_PER_IP_PER_HOUR, windowSec: 3600 },
+    ],
+    { failClosed: true },
+  );
+}
+
+/**
+ * Receive the raw bytes for a video created by `createVideoUpload`, store them
+ * at `video-src/<random>.<ext>` (see `newSourceKey`), and start the Qencode job.
+ *
+ * Why through the Worker and not straight to Qencode: see lib/qencode.ts. In
+ * short, Qencode's upload credential can also START jobs, and this is the only
+ * place the bytes can be checked to be a real video before we pay to encode.
+ *
+ * Idempotent per video: once the source is stored and the job started, a retry
+ * (the response was lost on a bad connection) is answered from the row without
+ * reading the body again. If the encode cannot be started right now (Qencode
+ * unreachable), the upload still succeeds and the row stays `uploading` with
+ * its source stored; the reconcile cron starts it within minutes.
+ */
+uploadRoute.post("/video", async (c) => {
+  const uid = c.get("user").uid;
+  const videoId = c.req.query("videoId") || "";
+  if (!isVideoId(videoId)) throw httpsError("invalid-argument", "videoId is required.");
+
+  const routing = await mediaRouting(c.env);
+  if (routing.videoProvider !== "qencode") {
+    throw httpsError("failed-precondition", "Video uploads are not configured.");
+  }
+
+  const db = getDb(c.env);
+  const row = await db
+    .select()
+    .from(schema.videos)
+    .where(and(eq(schema.videos.id, videoId), eq(schema.videos.ownerUid, uid)))
+    .get();
+  // Not found rather than forbidden for someone else's id: the answer must not
+  // confirm that the id exists.
+  if (!row) throw httpsError("not-found", "Video not found. Start the upload again.");
+
+  const publicUrl = playbackUrlFor(c.env, videoId);
+  if (row.status !== "uploading" || row.jobId) {
+    if (row.status === "failed") throw httpsError("failed-precondition", "This upload expired. Please try again.");
+    return c.json({ success: true, publicUrl, uploadUrl: publicUrl, videoId, status: row.status });
+  }
+
+  const declaredType = (c.req.query("fileType") || c.req.header("Content-Type") || "video/mp4")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  const maxLabel = `${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))}MB`;
+  const contentLength = c.req.header("Content-Length");
+  if (contentLength !== undefined) {
+    const declaredBytes = Number(contentLength);
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0) {
+      throw httpsError("invalid-argument", "Invalid Content-Length.");
+    }
+    if (declaredBytes > MAX_VIDEO_BYTES) throw httpsError("invalid-argument", `File too large (max ${maxLabel}).`);
+  }
+
+  await chargeUploadBudget(c, uid);
+
+  const buf = await c.req.arrayBuffer();
+  if (!buf || buf.byteLength === 0) throw httpsError("invalid-argument", "Empty upload.");
+  if (buf.byteLength > MAX_VIDEO_BYTES) throw httpsError("invalid-argument", `File too large (max ${maxLabel}).`);
+
+  // Magic bytes decide, as on every other upload: a renamed image, ZIP or HTML
+  // is refused before it costs an encode.
+  const contentType = verifyMediaBytes(buf, declaredType, VIDEO_MIME_TYPES);
+  const sourceKey = newSourceKey(extensionForMime(contentType));
+  await c.env.MEDIA.put(sourceKey, buf, {
+    httpMetadata: { contentType },
+    customMetadata: { uploader: uid, videoId },
+  });
+
+  await db
+    .update(schema.videos)
+    .set({ sourceKey, updatedAt: now() })
+    .where(and(eq(schema.videos.id, videoId), eq(schema.videos.status, "uploading"), isNull(schema.videos.jobId)))
+    .run();
+
+  let status: "uploading" | "processing" = "uploading";
+  try {
+    const jobId = await startEncode(c.env, {
+      videoId,
+      sourceKey,
+      callbackOrigin: new URL(c.req.url).origin,
+    });
+    const claim = await db
+      .update(schema.videos)
+      .set({ jobId, status: "processing", updatedAt: now() })
+      .where(and(eq(schema.videos.id, videoId), eq(schema.videos.status, "uploading"), isNull(schema.videos.jobId)))
+      .run();
+    if (claim.meta.changes > 0) status = "processing";
+  } catch (e) {
+    // The bytes are safe in R2; the reconcile cron retries the start. Failing
+    // the request here would make the app re-send the whole file for nothing.
+    console.error("[upload/video] encode start failed; left for the reconcile cron", videoId, e);
+  }
+
+  return c.json({ success: true, publicUrl, uploadUrl: publicUrl, videoId, status });
+});

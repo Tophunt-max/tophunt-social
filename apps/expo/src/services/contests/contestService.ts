@@ -1,0 +1,132 @@
+import { Contest } from '@/src/types/contest';
+import { callApi, readApi } from '../api';
+import { getDeviceId } from '@/src/lib/deviceId';
+
+/**
+ * All reads now hit the Cloudflare Worker /read endpoints (D1) instead of
+ * Firestore; all mutations go through the Worker /api (callApi).
+ */
+export const contestService = {
+  /** Fetch all available contest templates (admin created). */
+  getAvailableContests: async (type?: 'photo' | 'video'): Promise<Contest[]> => {
+    try {
+      return (await readApi('/read/contests', { type })) as Contest[];
+    } catch (error) { console.error(error); throw error; }
+  },
+
+  /** Fetch "Waiting for Opponent" matches. */
+  getWaitingMatches: async (type?: 'photo' | 'video'): Promise<any[]> => {
+    try {
+      return (await readApi('/read/matches', { status: 'waiting_for_opponent', type })) as any[];
+    } catch (error) { console.error(error); throw error; }
+  },
+
+  /**
+   * Fetch a page of home-feed battles, ranked by the personalized algorithm.
+   *  - sort 'foryou'    → freshness + engagement velocity + closing-soon +
+   *                       affinity (follows/votes/visits) − fatigue.
+   *  - sort 'following' → only battles featuring creators you follow.
+   * Returns { items, nextCursor }; pass nextCursor back for the next page
+   * (infinite scroll). Signed-out users get content ranking server-side.
+   */
+  getActiveMatches: async (
+    opts: { sort?: 'foryou' | 'following'; cursor?: number | string | null; limit?: number } = {},
+  ): Promise<{ items: any[]; nextCursor: number | string | null }> => {
+    const { sort = 'foryou', cursor = null, limit = 8 } = opts;
+    try {
+      const res: any = await readApi('/read/matches', {
+        status: 'active',
+        sort,
+        cursor: cursor ?? undefined,
+        limit,
+      });
+      // Tolerate both the paginated shape and a legacy bare array.
+      if (Array.isArray(res)) return { items: res, nextCursor: null };
+      return { items: res?.items || [], nextCursor: res?.nextCursor ?? null };
+    } catch (error) {
+      console.error("Error fetching active matches:", error);
+      throw error;
+    }
+  },
+
+  startMatch: async (data: any) => callApi('startMatch', data),
+
+  joinMatch: async (data: any) => callApi('joinMatch', data),
+
+  /** Vote on a participant in a match using this installation's stable ID. */
+  voteOnMatch: async (matchId: string, votedForUid: string) => {
+    try {
+      // Device identity is owned here so UI callers cannot accidentally send a
+      // shared placeholder that locks every other voter out of the match.
+      const deviceId = await getDeviceId();
+      return await callApi('submitVote', { matchId, votedForUid, deviceId });
+    } catch (error) { console.error("Error submitting vote:", error); throw error; }
+  },
+
+  /**
+   * Like or unlike. With `liked` the server SETS that state (a repeat is a
+   * no-op), so a double tap or a lost response cannot flip it back. Without it
+   * the server toggles, as before.
+   */
+  likeMatch: async (matchId: string, liked?: boolean) => {
+    try { return await callApi('likeContest', typeof liked === 'boolean' ? { matchId, liked } : { matchId }); }
+    catch (error) { console.error("Error liking match:", error); throw error; }
+  },
+
+  commentOnMatch: async (matchId: string, text: string) => {
+    try { return await callApi('commentContest', { matchId, text }); }
+    catch (error) { console.error("Error commenting on match:", error); throw error; }
+  },
+
+  shareMatch: async (matchId: string) => {
+    try { return await callApi('shareContest', { matchId }); }
+    catch (error) { console.error("Error sharing match:", error); throw error; }
+  },
+
+  /**
+   * Report a battle (spam, QR / payment scam, not a real photo, inappropriate).
+   * One report per user per battle; enough distinct reports hide it from feeds
+   * pending admin review (Worker migration 0060).
+   */
+  reportMatch: async (matchId: string, reason: string) =>
+    callApi('createReport', { targetType: 'match', targetId: matchId, reason }),
+
+  /**
+   * "Not interested" on a feed card. Explicit target state, so a retry is safe.
+   * The Worker drops the battle from this viewer's For You / Following and ranks
+   * the same creators lower (lib/feedDismissals.ts).
+   */
+  setFeedDismissal: async (matchId: string, dismissed: boolean) =>
+    callApi('setFeedDismissal', { matchId, dismissed }),
+
+  /** The viewer's "Not interested" list, newest first (Settings › Privacy › Not interested). */
+  listFeedDismissals: async (
+    cursor?: number | null,
+  ): Promise<{ items: { matchId: string; dismissedAt: number; match: any | null }[]; nextCursor: number | null }> => {
+    const res: any = await readApi('/read/me/feed-dismissals', { cursor: cursor ?? undefined, limit: 30 });
+    return { items: res?.items || [], nextCursor: res?.nextCursor ?? null };
+  },
+
+  getContestById: async (id: string) => readApi(`/read/contests/${id}`),
+
+  getMatchById: async (id: string) => readApi(`/read/matches/${id}`),
+
+  /**
+   * Server-confirmed VS Story state for one of the caller's own battles. Safe to
+   * call repeatedly: it only reads (and nudges a due server-side retry); it never
+   * re-submits an entry or re-charges a fee.
+   */
+  /**
+   * The battle's canonical share image (server-rendered VS card), verified to
+   * exist and regenerated server-side if it was swept. See src/lib/vsShareAsset.ts.
+   */
+  // A public read, so a GUEST sharing a public battle gets the same VS image
+  // (an authenticated /api action would 401 and leave guests link-only).
+  getMatchShareImage: async (matchId: string): Promise<import('@/src/lib/vsShareAsset').ShareImageResponse> =>
+    readApi(`/read/matches/${encodeURIComponent(matchId)}/share-image`) as any,
+
+  getMatchStoryStatus: async (
+    matchId: string,
+  ): Promise<{ storyStatus: 'waiting_for_opponent' | 'preparing' | 'live' | 'failed' | 'unavailable'; storyId?: string | null; vsImageUrl?: string | null }> =>
+    callApi('getMatchStoryStatus', { matchId }) as any,
+};

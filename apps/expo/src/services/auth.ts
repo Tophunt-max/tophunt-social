@@ -1,0 +1,145 @@
+import { createUserWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import { auth } from './firebase/initFirebase';
+import { beginDeliberateSignOut, callApi, endDeliberateSignOut } from './api';
+import { notificationService } from './notifications/notificationService';
+import { clearCachedIdentity } from '@/src/lib/cachedIdentity';
+
+// Single source of truth for auth state. Previously this module had its own
+// duplicate `useAuth` implementation (a second onAuthStateChanged listener),
+// which could drift from `hooks/useAuth`. Re-export the hook so every caller
+// shares one implementation regardless of import path.
+export { useAuth } from '../hooks/useAuth';
+
+export const signupWithEmail = async (email: string, password: string) => {
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    return userCredential.user;
+  } catch (error: any) {
+    throw new Error(error.message);
+  }
+};
+
+export interface SignOutOptions {
+  /**
+   * Skip the authenticated call that detaches this device's push token.
+   *
+   * Set this when the account is already gone or out of service — after a
+   * deletion request, or after the server has deleted the Firebase login. The
+   * detach call cannot succeed in that state, and its failure is not harmless:
+   * if the cached ID token is close to expiry the request goes out unauthorised,
+   * the API layer reads the 401 as an expired session, and the user is shown
+   * "Your session expired. Please sign in again." — an error toast, fired
+   * immediately before the success toast for the thing they just did on purpose.
+   *
+   * There is nothing lost by skipping it. The server clears `fcmTokens` as part
+   * of both the deletion request and the purge, which is the same end state this
+   * call exists to reach.
+   */
+  skipPushTokenUnregister?: boolean;
+}
+
+/**
+ * Wipe on-device data that belongs to the account that just signed out.
+ *
+ * app/_layout.tsx also clears the Story cache and Home snapshot when the uid
+ * changes, but that is a post-render effect: if the app is killed between the
+ * sign-out and the effect, or the effect's clear fails, the previous account's
+ * followers-only Stories and personalised feed stay on disk for the next person.
+ * Doing it here, before sign-out resolves, closes that window. Recent searches
+ * are device-wide and were never cleared at all.
+ *
+ * Every step is best-effort and isolated: a failed wipe must never block
+ * logout. Dynamic imports keep WatermelonDB out of this module's import graph.
+ */
+export async function clearAccountScopedCaches(): Promise<void> {
+  const steps: [string, () => Promise<unknown>][] = [
+    ['stories', () => import('@/src/services/stories/offlineStoryService').then((m) => m.clearLocalStories())],
+    ['feed', () => import('@/src/lib/feedSnapshot').then((m) => m.clearFeedSnapshots())],
+    ['feed position', () => import('@/src/lib/feedSession').then((m) => m.clearFeedSessions())],
+    ['recent-searches', () => import('@/src/services/explore').then((m) => m.clearRecentSearches())],
+    // Saved screens, notifications and the inbox list (src/lib/offlineStore.ts).
+    ['offline-snapshots', () => import('@/src/lib/offlineStore').then((m) => m.clearOffline())],
+    // Web: images the service worker kept for offline use (public/sw.js MEDIA_CACHE).
+    ['offline-media', () => import('@/src/lib/serviceWorker').then((m) => m.clearOfflineMedia())],
+    // The previous account's unread count stayed on the app icon, and its
+    // delivered alerts in the notification shade, after sign-out.
+    ['badge', () => import('@/src/services/notifications/notificationService').then((m) => m.notificationService.syncBadgeCount(0))],
+    ['delivered-notifications', () => import('@/src/services/notifications/notificationService').then((m) => m.notificationService.clearDeliveredNotifications())],
+  ];
+  await Promise.all(
+    steps.map(([name, run]) =>
+      run().catch((e) => console.warn(`[AuthService] clearing ${name} on sign-out failed`, e)),
+    ),
+  );
+  // Web keeps writes in memory for up to 500 ms before saving to IndexedDB; a
+  // tab closed right after sign-out would otherwise reload the wiped data.
+  await import('@/src/database')
+    .then((m) => m.flushLocalDatabase())
+    .catch(() => undefined);
+}
+
+export const signOut = async (options: SignOutOptions = {}) => {
+  console.log("[AuthService] signOut called");
+
+  if (!options.skipPushTokenUnregister) {
+    // Detach this device's push token FIRST, while the ID token is still valid —
+    // the Worker call needs auth. Skipping this left the token on the user row
+    // forever, so a shared or resold phone kept receiving the previous account's
+    // notifications. Best-effort: never block logout on it.
+    await notificationService.unregisterPushToken();
+  } else {
+    // Still drop the local copy, so the next account on this device registers a
+    // fresh token instead of reusing one the server has already forgotten.
+    await notificationService.forgetLocalPushToken();
+  }
+
+  try {
+    const uid = auth.currentUser?.uid;
+    await firebaseSignOut(auth);
+    // Basic identity is cached only to stabilise cold-start UI. Explicit sign-out
+    // removes it so the next person using this device never sees the old avatar.
+    await clearCachedIdentity(uid);
+    await clearAccountScopedCaches();
+    console.log("[AuthService] firebaseSignOut successful");
+  } catch (error: any) {
+    console.error("[AuthService] firebaseSignOut error:", error);
+    throw new Error(error.message);
+  }
+};
+
+/**
+ * Sign out of EVERY device, not just this one.
+ *
+ * The control for "I think someone else is in my account". Ordinary sign-out only ends
+ * the session on the handset in your hand; until the server gained a revocation cutoff
+ * there was no way to end the others at all, so a session someone else had obtained
+ * stayed alive indefinitely and the only remedy was asking support to block the whole
+ * account.
+ *
+ * Order matters, and both steps are needed:
+ *
+ *  1. The server call first, while this device still holds a working token. It writes
+ *     the cutoff that invalidates every session and drops every push token.
+ *  2. Then sign out locally. `skipPushTokenUnregister` because the server has already
+ *     cleared the tokens — and because our own session is dead by now, so the detach
+ *     call would go out unauthorised and be reported to the user as "signed out for
+ *     security" a moment before the toast for the thing they just did deliberately.
+ *     See `SignOutOptions`, which documents that exact collision.
+ *
+ * Throws if the server call fails, deliberately: the caller must not tell the user their
+ * other devices are gone when they are not. Local sign-out is not attempted in that case
+ * either — being signed out here while the intruder is still signed in there is the worst
+ * of both outcomes, and leaving the session intact means they can simply retry.
+ */
+export const logoutAllDevices = async () => {
+  // Silences the automatic "you were signed out for security" handler for the duration.
+  // This session is about to be revoked on purpose, and any request already in flight
+  // would otherwise report that as an error next to the success toast.
+  beginDeliberateSignOut();
+  try {
+    await callApi('logoutAllDevices', {});
+    await signOut({ skipPushTokenUnregister: true });
+  } finally {
+    endDeliberateSignOut();
+  }
+};

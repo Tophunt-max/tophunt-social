@@ -1,0 +1,453 @@
+# Production Domains — cutover runbook
+
+**Code side ab ho gaya hai.** Ye file batati hai (a) code me kya-kya badla, aur
+(b) Cloudflare / Firebase / app-store side par kya karna **baaki** hai. Jo cheezein
+sirf dashboard se hoti hain, wo yahan checklist me hain — kyunki unhe koi deploy
+verify nahi kar sakta.
+
+> **Isse pehle ye file ek plan thi ("kya-kya badalna padega").** Ab wo saara code
+> change merge ho chuka hai, to ye ek **runbook** hai. Purane "abhi kahan hai"
+> table ko jaan-boojh kar hataya gaya hai: repo me do jagah "current state" likha
+> ho to ek purani ho jaati hai, aur galat wali par bharosa kar liya jaata hai.
+
+---
+
+## 1. Domain plan (final)
+
+| Role | Production domain | Kaun serve karta hai |
+|------|-------------------|----------------------|
+| **User web app** (Expo web) | `https://tophunt.in` (apex) | Cloudflare Pages `tophuntdpcontest` |
+| **Admin panel** | `https://admin.tophunt.in` | Cloudflare Pages `tophunt-admin-panel` |
+| **Backend API** (Worker) | `https://api.tophunt.in` | Worker `tophunt-api` |
+| **Media / R2 public** | `https://media.tophunt.in` | R2 bucket `tophunt-media` |
+| **Email "from"** | `no-reply@tophunt.in` | Resend / Brevo |
+
+Do baatein jo aage har jagah maayne rakhti hain:
+
+- **User app apex par hai** — `app.tophunt.in` naam ka koi host **nahi** hai.
+  App links / deep links se `app.tophunt.in` hata diya gaya hai; agar wo kahin
+  wapas dikhe to wo galti hai.
+- **Media ab R2 ke apne domain se aata hai, Worker se nahi.** Isse per-image
+  Worker invocation khatam, video ki ranged requests CDN par, aur Transformations
+  possible ho jaate hain. Worker ka `/media/*` route **phir bhi rehta hai** —
+  kyunki purane D1 rows aur pehle se shipped mobile builds usi par hain.
+
+> ### ⚠️ `workers_dev = true` ko mat hataao
+>
+> `wrangler.toml` me `routes` add karne se wrangler workers.dev route publish
+> karna **band** kar deta hai. Ye ek baar ho chuka hai: custom domain wale deploy
+> ne `tophunt-api.weadown-in.workers.dev` ko poora band kar diya (har path par
+> Cloudflare `error code: 1042`), aur uska nateeja tha —
+>
+> 1. **Poore app ka media blank.** Har media url D1 me absolute hai aur backfill
+>    (§5) chalne tak usi host par hai — avatars, posts, stories, contest banners,
+>    deposit screenshots, payment QR, blog covers.
+> 2. **Har installed mobile build offline.** Un builds me `EXPO_PUBLIC_API_URL`
+>    wahi purana host baked hai. Wo config dobara nahi padhte — user ke
+>    `eas update` lene tak API tak pahunch hi nahi sakte. Ye zyada gambhir hai
+>    aur browser se **dikhta bhi nahi**.
+>
+> Isliye ab wo line explicitly likhi hui hai, default par bharosa nahi hai.
+> Hatane se pehle dono cheezein sach honi chahiye: backfill chal gaya ho, **aur**
+> itne purane app builds use me na hon.
+
+---
+
+## 2. Code me kya ho chuka hai (reference)
+
+### Worker — `apps/worker/wrangler.toml`
+| Setting | Value | Note |
+|---|---|---|
+| `routes` | `[{ pattern = "api.tophunt.in", custom_domain = true }]` | Cloudflare hi DNS + cert banata hai |
+| `routes` (staging) | `[]` | **zaroori** — `routes` inheritable key hai; iske bina `--env staging` deploy production hostname hijack kar leta |
+| `workers_dev` | `true` — **explicitly likha hua** | niche warning padho |
+| `preview_urls` | `false` | `workers_dev` ki value follow karta hai; production DB par extra hostname nahi chahiye |
+| `R2_PUBLIC_BASE_URL` | `https://media.tophunt.in` | |
+| `R2_LEGACY_BASE_URLS` | purana `<worker>/media` base | delete path ke liye, §5 |
+| `MEDIA_TRANSFORMATIONS` | `"false"` | **jaan-boojh kar** — §6 |
+| `ALLOWED_ORIGINS` | `tophunt.in`, `admin.tophunt.in` | purane `*.pages.dev` origins hata diye; koi `www` nahi |
+
+### Clients
+| File | Change |
+|---|---|
+| `apps/expo/eas.json` | teeno profiles me `EXPO_PUBLIC_API_URL` + `EXPO_PUBLIC_SHARE_ORIGIN` |
+| `apps/expo/src/services/api.ts` | `FALLBACK_API_URL = https://api.tophunt.in` |
+| `apps/expo/public/_worker.js` | `DEFAULT_API_BASE = https://api.tophunt.in` (+ security headers, §4) |
+| `apps/expo/app.json` | `app.tophunt.in` hataya (applinks + Android intent filter) |
+| `apps/admin-panel/.env.production` | `VITE_API_URL = https://api.tophunt.in` |
+| `apps/admin-panel/vite.config.ts` | fallback bhi wahi |
+| dono `public/_headers` | CSP me exact hosts, `*.workers.dev` wildcard gaya, `wss://api.tophunt.in` aaya |
+
+`EXPO_PUBLIC_SHARE_ORIGIN` naya hai aur **native builds ke liye zaroori** hai. Web
+par `window.location.origin` use hota hai, par native me browser location nahi
+hota — pehle fallback API origin tha, jo ab `https://api.tophunt.in/battle/<id>`
+banata (wo host JSON deta hai, app nahi). Pehle api aur web ek hi host par the, to
+ye fallback theek lagta tha.
+
+---
+
+## 3. Cutover order — isi kram me karo
+
+Kram ki wajah hai: har step ka client tabhi switch hota hai jab uska server side
+pehle se live ho.
+
+1. **Zone**: `tophunt.in` Cloudflare par add karo, registrar par nameservers point karo.
+2. **`api.tophunt.in`** — Worker `tophunt-api` → Settings → Domains & Routes → Add
+   Custom Domain. (`wrangler.toml` me already hai, to pehla `wrangler deploy` bhi
+   ise bana dega. Zone pehle exist karna chahiye, warna deploy "Could not find
+   zone" se fail hoga.)
+3. **`media.tophunt.in`** — R2 → bucket `tophunt-media` → Settings → Public access
+   → Custom Domains.
+4. **Worker deploy** — `cd apps/worker && npx wrangler deploy`
+   Uske baad `GET https://api.tophunt.in/health/deep` 200 dena chahiye.
+5. **Media verify** — `curl -I https://media.tophunt.in/<koi-existing-key>` → 200.
+   Ye §5 ke backfill se **pehle** hona zaroori hai.
+6. **Media backfill** — §5.
+7. **Transformations enable + flag flip** — §6.
+8. **`tophunt.in`** (apex) — Pages project `tophuntdpcontest` → Custom domains.
+   **Koi `www` nahi.** `www.tophunt.in` ka DNS record nahi hai (NXDOMAIN) aur
+   jaan-boojh kar nahi banaya gaya — site sirf apex par hai. Iska matlab hai ki
+   agar koi `www.tophunt.in` type kare to use DNS error milega. Agar aage kabhi
+   www chahiye, to teen cheezein ek saath karni hongi: DNS record, apex par
+   Redirect Rule, **aur** `ALLOWED_ORIGINS` me `https://www.tophunt.in` — kyunki
+   redirect `fetch()` ko nahi bachata, jo request www par shuru hoti hai wo wahi
+   Origin bhejti hai.
+9. **`admin.tophunt.in`** — Pages project `tophunt-admin-panel` → Custom domains.
+10. **Firebase** → Authentication → Settings → Authorized domains me `tophunt.in`
+    aur `admin.tophunt.in` add karo. Iske bina in hosts par login/OTP block ho
+    jaayega — aur error Firebase se aata hai, Worker tak request pahunchti bhi nahi.
+11. **Clients rebuild + deploy** — §7.
+12. **Email domain** — §8.
+13. **Deep links** — §9. (Ye app-store release ke saath jaata hai.)
+14. **Search Console** — §10.
+
+---
+
+## 4. Web app ke security headers — ek zaroori baat
+
+> ### ⚠️ SEO worker `public/` me hi rehna chahiye
+>
+> Pehle ye `seo/worker.js` me tha aur ek alag post-build script use `dist/_worker.js`
+> par copy karti thi. **Do jagah wo script chalti hi nahi thi** — Cloudflare Pages ka
+> build command (`npx expo export --platform web`) aur `ci.yml` (`npx expo export -p web`).
+> Nateeja: production har crawler ko khaali SPA shell deta tha — koi per-post title
+> ya description nahi, koi canonical nahi, aur `/sitemap.xml` + `/robots.txt` XML/text
+> ki jagah HTML. **Ek bhi job fail nahi hui.**
+>
+> Ab worker `public/_worker.js` me hai, jise `expo export` khud copy karta hai
+> (jaise `public/_headers` aur `public/_redirects`). Install karna ab ek skip-hone-wala
+> step nahi hai. `scripts/verify-web-build.mjs` output me uski maujoodgi assert karta hai.
+
+Expo web Pages **advanced mode** me chalta hai (`dist/_worker.js`). Cloudflare
+`_headers` ko **static asset responses** par lagata hai, aur advanced mode me HTML
+document ek Function-generated response hota hai — to `public/_headers` ka CSP /
+HSTS / framing **document tak pahunchta hi nahi tha**. Ye chup-chaap fail hone
+wali cheez hai: file maujood hai, deploy green hai, bas header nahi aata.
+
+Isliye document policy ab `apps/expo/public/_worker.js` me hai
+(`CONTENT_SECURITY_POLICY` + `withSecurityHeaders`), aur wahi actually browser tak
+jaati hai. `public/_headers` static assets ke liye bana hua hai.
+
+Dono copies same rehni chahiye — `scripts/verify-web-build.mjs` drift par **build
+fail** kar deta hai, to ek jagah badalke doosri bhoolna deploy nahi ho paayega.
+
+Verify (cutover ke baad):
+```bash
+curl -sI https://tophunt.in/ | grep -i "content-security-policy\|strict-transport"
+```
+
+---
+
+## 5. Media backfill (R2 domain par purane urls laana)
+
+Media urls D1 me **absolute** store hote hain, to domain badalne se purane rows
+apne aap nahi badalte.
+
+**Iske bina kya hoga — ye ab badal gaya hai.** Pehle purane rows Worker `/media/*`
+route se serve hote the, har request ek invocation, koi resized variant nahi. Ab
+`routes/read.ts` response banate waqt in urls ko current media base par
+**canonicalise** kar deta hai (`lib/media.ts#cdnUrl`, `lib/r2.ts#canonicalMediaUrl`),
+kyunki key aur bucket dono same hain. To delivery, cost aur optimisation ke liye
+backfill ka **intezaar nahi** karna padta.
+
+Backfill phir bhi karna chahiye, teen wajah se:
+
+1. Ye rewrite har response par hota hai — stored value canonical ho to ye code
+   aage chalkar hataya ja sakta hai.
+2. Jo cheez in columns ko **seedha** padhti hai (D1 query, export, admin tool,
+   purana shipped app build) usko abhi bhi purana host dikhta hai.
+3. `R2_LEGACY_BASE_URLS` tabhi hataya ja sakta hai jab stored data saaf ho.
+
+Yaani ye pehle cost + performance ka issue tha; **ab sirf data hygiene ka hai.**
+`seoAudit` ka `image.legacy_host` isi wajah se `medium` se `low` kar diya gaya hai.
+
+**Delete ka issue already fix hai:** `R2_LEGACY_BASE_URLS` ki wajah se
+`deleteByPublicUrl`, `contestBannerKeyFromPublicUrl` aur `vsImageKeyFromPublicUrl`
+dono hosts ko pehchante hain. Pehle purane host ke banners **kabhi delete nahi
+hote the** aur story media ka delete galat key par jaata tha — dono silently.
+
+```bash
+cd apps/worker
+
+# 1. Domain sach me bytes de raha hai? (backfill se PEHLE — ye gate hai)
+curl -I https://media.tophunt.in/<koi-existing-key>
+
+# 2. Kitna badlega (read-only)
+npx wrangler d1 execute tophunt-db --remote --file=scripts/media-domain-report.sql
+
+# 3. Backfill
+npx wrangler d1 execute tophunt-db --remote --file=scripts/media-domain-backfill.sql
+
+# 4. Sab counts 0 hone chahiye
+npx wrangler d1 execute tophunt-db --remote --file=scripts/media-domain-report.sql
+```
+
+Script 24 columns cover karta hai — plain url columns **aur** JSON blobs
+(`contest_matches.user_a/user_b` = feed ka saara media, `chats.users_data`,
+`settings.data` ka payment QR) **aur** `blog_posts.content` ka embedded HTML.
+Idempotent hai; rollback ke liye D1 Time Travel (`wrangler d1 time-travel`).
+
+Ye migration folder me **nahi** hai jaan-boojh kar: `migrations/*.sql` runtime par
+auto-apply hote hain, aur ye rewrite tabhi sahi hai jab domain live ho. Migration
+banate to deploy ke saath chal jaata — aur domain ready na ho to poore product ka
+media ek dead host par point kar deta.
+
+---
+
+## 6. Transformations (image resizing) — ✅ ENABLED
+
+`MEDIA_TRANSFORMATIONS = "true"`. Dono halves ho chuke hain:
+
+- **Code:** `media.tophunt.in` real zone host hai, path prefix nahi — `lib/media.ts`
+  `transformationsAvailable()` ki teeno condition poori.
+- **Dashboard:** zone `tophunt.in` par Transformations enabled hai. Ye **verify**
+  kiya gaya tha, maana nahi gaya:
+
+```bash
+curl -sI "https://media.tophunt.in/cdn-cgi/image/width=320,quality=70,format=auto/<key>"
+# HTTP/2 200
+# cf-resized: internal=ok/h ... l=5999 f=true     ← ye header hi proof hai
+# content-length: 5999                            (original 13875)
+```
+
+`cf-resized` header sirf tab aata hai jab resizing pipeline sach me chala. Flag par
+dobara bharosa karne se pehle yahi curl repeat karo.
+
+**Kram ulta mat karo (agar future me phir se chhua jaaye).** Transformations
+disabled zone par `/cdn-cgi/image/...` original par fall back nahi karta — **error**
+deta hai. Flag pehle `true` kiya to product ke saare thumbnails, feed images aur
+avatars deploy ke saath hi tut jaayenge.
+
+**Rollback:** `"false"` + deploy. Bas. Har helper phir original url return karta
+hai aur `mediaUrlThumb === mediaUrl`. Client release kisi bhi direction me nahi
+chahiye — Expo har variant field ko `|| mediaUrl` fallback ke saath padhta hai.
+
+**Cost:** free monthly allowance ke baad per-transformation billing. Yahan bounded
+hai — keys content-hashed/UUID hain aur sirf 3 variants (320/1080/128), to unique
+count distinct images ke saath badhta hai, requests ke saath nahi. Deploy ke baad
+Cloudflare → Images → Transformations me usage dekh lena.
+
+**`fit=scale-down`, `cover` nahi** (`lib/media.ts`). Height diye bina `cover` aur
+`scale-down` me sirf ek farak hai: source target se **patla** ho to `cover`
+**upscale** kar deta hai. Real 645x1440 portrait entry par naapa gaya:
+
+| 1080 preset | Size |
+|---|---|
+| `fit=cover` | 84,436 B (1080 tak upscale, koi naya detail nahi) |
+| `fit=scale-down` | **50,638 B** (645 par hi, WebP me re-encode) |
+
+DP contest me portrait entry normal hai, exception nahi — to purana default common
+case me 67% bada aur blurry image bhej raha tha.
+
+Verify:
+```bash
+curl -s "https://api.tophunt.in/read/matches?limit=1" | grep -o 'cdn-cgi/image[^"]*' | head -3
+# cdn-cgi/image wale urls dikhne chahiye
+```
+
+---
+
+## 6a. R2 bucket par CORS — **abhi PENDING, karna zaroori hai**
+
+`media.tophunt.in` par koi CORS policy set nahi hai. Verify:
+
+```bash
+curl -sI -H "Origin: https://tophunt.in" https://media.tophunt.in/<key> | grep -i access-control
+# ABHI: kuch nahi aata
+
+curl -sI -H "Origin: https://tophunt.in" \
+  https://tophunt-api.weadown-in.workers.dev/media/<key> | grep -i access-control
+# access-control-allow-origin: *      ← Worker route ye khud add karta hai (lib/mediaCors.ts)
+```
+
+**Kya tootta hai:** sirf **web** par VS-card capture. `apps/expo/src/lib/vsNativeModules.web.ts`
+`html-to-image` se canvas par battle frame draw karta hai; jo image CORS headers ke
+bina aati hai wo canvas ko **taint** kar deti hai aur export throw karta hai. Code
+gracefully degrade karta hai (story live render hoti rehti hai, share text link par
+gir jaata hai) — to crash nahi, par web par feature chup-chaap band.
+
+**Ye naya issue nahi hai.** `uploadToR2` naye media ko pehle se `R2_PUBLIC_BASE_URL`
+par likhta hai, to jo matches abhi ban rahe hain (yaani jo actually capture hote
+hain) unke liye ye already toota hua tha. Read-path canonicalisation isko purane
+matches tak bhi extend kar deti hai. Native (Android/iOS) par koi asar nahi —
+`react-native-view-shot` painted pixels copy karta hai, CORS lagu nahi hota.
+
+**Fix** — R2 → bucket `tophunt-media` → Settings → CORS policy:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://tophunt.in", "https://admin.tophunt.in"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["Content-Length", "Content-Range", "Accept-Ranges", "ETag"],
+    "MaxAgeSeconds": 86400
+  }
+]
+```
+
+`ExposeHeaders` `/media/*` route se match karta hai (`lib/mediaCors.ts`) — video
+player ko ranged responses ke liye `Content-Range` aur `Accept-Ranges` chahiye.
+
+Iske baad verify:
+```bash
+curl -sI -H "Origin: https://tophunt.in" https://media.tophunt.in/<key> | grep -i access-control
+# access-control-allow-origin: https://tophunt.in
+```
+
+---
+
+## 7. Rebuild + redeploy
+
+```bash
+# Worker (order me sabse pehle — §3 step 4)
+cd apps/worker && npx wrangler deploy
+
+# Admin panel
+cd apps/admin-panel
+npm run build && npx wrangler pages deploy dist --project-name tophunt-admin-panel --branch main
+
+# Expo web. SEO worker `public/_worker.js` me hai, to `expo export` use khud
+# copy kar leta hai — bare export se bhi deployment sahi banta hai.
+# `npm run build` isliye behtar hai ki wo verify bhi karta hai (§4).
+cd apps/expo
+npm run build
+npx wrangler pages deploy dist --project-name tophuntdpcontest --branch main
+
+# Expo mobile (eas.json env badla hai)
+cd apps/expo && npx eas update --branch production
+```
+
+### Pages env vars (Production)
+`apps/expo/public/_worker.js` ke defaults ab production values hain, to Pages par
+**kuch set karna zaroori nahi**. Staging/preview Pages project par override karo,
+warna uska sitemap aur canonical tags production origin advertise karenge:
+
+| Var | Default | Staging par |
+|-----|---------|-------------|
+| `SEO_SITE_ORIGIN` | `https://tophunt.in` | preview host |
+| `SEO_API_BASE` | `https://api.tophunt.in` | staging Worker |
+
+---
+
+## 8. Email
+
+`lib/email.ts` ka fallback `TopHunt <no-reply@tophunt.in>` hai, aur From address
+admin panel (Integrations) se bhi set ho sakta hai — deploy ki zaroorat nahi.
+
+Bhejne ke liye `tophunt.in` par ye chahiye:
+- provider (Resend/Brevo) me domain verify
+- **SPF** record
+- **DKIM** record
+- (recommended) **DMARC** record
+
+Iske bina mail bhejni "kaam karegi" par inbox me nahi, spam me jaayegi — aur ye OTP
+aur withdrawal notifications hain.
+
+---
+
+## 9. Deep links / App Links — abhi **incomplete**
+
+`app.json` me `tophunt.in` ke liye iOS `associatedDomains` aur Android
+`intentFilters` (autoVerify) set hain. Par verification ke liye do file
+`https://tophunt.in` par serve honi chahiye, aur wo repo me **nahi** hain:
+
+| File | Kya chahiye |
+|---|---|
+| `apps/expo/public/.well-known/apple-app-site-association` | Apple Team ID + `in.tophunt.app` |
+| `apps/expo/public/.well-known/assetlinks.json` | Android signing cert ka SHA-256 fingerprint |
+
+Values kahan se milengi:
+```bash
+# Android — jo key se Play par sign hota hai (Play App Signing ka fingerprint lo,
+# upload key ka nahi, warna verification production me fail hogi)
+npx eas credentials    # → Android → keystore, ya Play Console → App integrity
+
+# iOS Team ID
+npx eas credentials    # → iOS → distribution certificate
+```
+
+Yahan placeholder file commit nahi ki gayi hai jaan-boojh kar: galat fingerprint
+wali `assetlinks.json` bhi verification fail karti hai, par uske hone se aisa
+lagta hai ki kaam ho gaya. **Tab tak link browser me khulega, app me nahi** — app
+ka baaki kuch nahi tootega.
+
+`public/` ki files `expo export` se `dist/` me chali jaati hain, aur SEO worker
+non-HTML requests `env.ASSETS` par bhej deta hai — to file daalne ke baad kuch aur
+karna nahi hai.
+
+---
+
+## 10. Search Console (one-time)
+
+1. `https://tophunt.in` property add + verify (DNS TXT ya HTML tag).
+2. **Sitemaps** → `https://tophunt.in/sitemap.xml` submit.
+3. Kuch important posts ka **URL Inspection → Request indexing**.
+4. Verify: `robots.txt` khule aur sitemap line dikhe; `sitemap.xml` me saare post
+   URLs; `view-source:` me sahi `<title>` + `description` + `og:*` + JSON-LD;
+   [Rich Results Test](https://search.google.com/test/rich-results) Article pass kare.
+
+Blog SEO edge layer ka detail: [`.kiro/steering/blog.md`](.kiro/steering/blog.md).
+Canonical policy: imported posts ka `canonicalUrl` original tophunt.in permalink
+hota hai; worker canonical isi site par ho to usi ko rakhta hai, warna current
+path par self-canonical — isse `/blog/<slug>` aur root `/<slug>` ka duplicate
+content resolve ho jaata hai.
+
+---
+
+## 11. Cutover checklist
+
+**Cloudflare**
+- [ ] `tophunt.in` zone add, nameservers pointed
+- [ ] `api.tophunt.in` → Worker `tophunt-api` custom domain
+- [ ] `media.tophunt.in` → R2 bucket `tophunt-media` custom domain
+- [ ] `tophunt.in` (apex) → Pages `tophuntdpcontest`
+- [x] ~~`www.tophunt.in`~~ — jaan-boojh kar nahi banaya, site apex-only hai
+- [ ] `admin.tophunt.in` → Pages `tophunt-admin-panel`
+- [x] Zone par Transformations enable (§6) — verified via `cf-resized` header
+- [ ] **R2 bucket `tophunt-media` par CORS policy (§6a)** — web VS-card capture
+      iske bina chup-chaap band rehta hai
+
+**Deploy**
+- [ ] Worker deploy, `GET https://api.tophunt.in/health/deep` = 200
+- [x] `curl -I https://media.tophunt.in/<key>` = 200 — verified
+- [x] `MEDIA_TRANSFORMATIONS = "true"` (§6) — deploy ke saath live hoga
+- [ ] Media backfill chalao, report ke saare counts 0 (§5) — **delivery block nahi
+      karta** (read path canonicalise karta hai), data hygiene ke liye hai
+- [ ] Admin panel build + deploy
+- [ ] Expo web `npm run build` + deploy
+- [ ] `eas update --branch production`
+
+**Baahar ke systems**
+- [ ] Firebase authorized domains: `tophunt.in`, `admin.tophunt.in`
+- [ ] Email: domain verify + SPF + DKIM (+ DMARC) on `tophunt.in` (§8)
+- [ ] `.well-known/` app-link files (§9)
+- [ ] Search Console: property, sitemap, indexing (§10)
+
+**Verify**
+- [ ] `curl -sI https://tophunt.in/ | grep -i content-security-policy` — CSP aa rahi hai
+- [ ] Web app se login, ek vote, ek chat message — realtime chal raha hai
+      (`wss://api.tophunt.in`, dev tools → Network → WS)
+- [ ] `admin.tophunt.in` par login + ek deposit screenshot khulti hai
+- [ ] Share sheet se battle link `https://tophunt.in/battle/<id>` banta hai
+- [ ] Ek story delete karke R2 me object gaya ya nahi check karo (§5 delete path)

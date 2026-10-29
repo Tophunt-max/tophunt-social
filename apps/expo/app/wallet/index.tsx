@@ -1,0 +1,709 @@
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Modal,
+  ActivityIndicator,
+} from "react-native";
+import { Alert } from '@/src/lib/appAlert';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@/src/lib/icons';
+import { BackButton } from '@/src/components/ui/BackButton';
+import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
+import { CoinIcon } from '@/src/components/ui/CoinIcon';
+import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
+import { balancesOf, hasLiveBalance, splitTransaction } from '@/src/lib/balances';
+import { WalletSkeleton } from '@/src/components/skeletons/WalletSkeleton';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
+import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
+
+import { useAuth } from '@/src/services/auth';
+import { Colors } from '@/constants/theme';
+import { useProfile } from '@/src/hooks/useProfileData';
+import { useAppConfig } from '@/src/services/appSettings';
+import { coinRate, coinsInInr } from '@/src/lib/coinValue';
+import { walletService } from '@/src/services/wallet/walletService';
+import { useFeature } from '@/src/services/appSettings';
+import { readApi } from '@/src/services/api';
+import { useQuery } from '@tanstack/react-query';
+import { useDesignWindow } from '@/src/lib/layout';
+import { StreakMilestoneBanner } from '@/src/components/gamification/MotionBits';
+
+
+const FILTERS = ['All', 'Income', 'Expense'];
+
+// The server refuses daily/ads/tasks coins once the admin's free rewards
+// budget runs out (worker FREE_REWARDS_EXHAUSTED); its message says so.
+const freeRewardsOut = (e: any) => typeof e?.message === 'string' && e.message.toLowerCase().includes('free rewards khatam');
+const FREE_REWARDS_OUT_MSG = 'Aaj ke free rewards khatam ho gaye hain. Thodi der baad try karo.';
+
+const taskIcon = (type: string) =>
+  type === 'vote' ? 'stats-chart' : type === 'share' ? 'share-social' : type === 'contest' ? 'trophy' : 'videocam';
+
+/** One slot of the check-in track, as the Worker's `getDailyReward` returns it. */
+type DailySlot = { day: number; amount: number; status: 'claimed' | 'ready' | 'upcoming' };
+
+/** Free rewards may be play-only (locked): spendable on contests, never withdrawable. */
+// A reward credited as Diamonds (play-only) or as DP coins (withdrawable).
+const rewardUnit = (res: any) => (Number(res?.lockedCoins || 0) > 0 ? 'Diamond' : 'DP coin');
+const playOnly = (res: any) =>
+  Number(res?.lockedCoins || 0) > 0 ? '\nDiamond se contest khelo. Jeet kar DP coin milenge, jo withdraw hote hain.' : '';
+
+export default function WalletScreen() {
+  // Seven day slots across the design width (the phone column on desktop).
+  const { width: designW } = useDesignWindow();
+  const daySlot = (designW - 40) / 7;
+  const router = useRouter();
+  const { user } = useAuth();
+  const { data: profile, refetch: refetchProfile, isLoading: profileLoading } = useProfile(user?.uid || '');
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const topupsEnabled = useFeature('topups'); // admin feature flag
+  const withdrawalsEnabled = useFeature('withdrawals'); // admin feature flag
+  // Top-up always starts at the store, whatever the gateway mode. This used to
+  // jump straight to /wallet/deposit for manual/both, which skipped the package
+  // list — the user never got to see what they were buying. The store is now
+  // mode-aware itself and hands a chosen package off to the QR screen.
+
+  // Theme Colors
+  const backgroundColor = isDark ? Colors.dark.background : '#F8F9FA';
+  const cardBg = isDark ? '#1F222A' : '#FFFFFF';
+  const textColor = isDark ? Colors.dark.text : '#121212';
+  const subTextColor = isDark ? '#A0A0A0' : '#757575';
+  const primaryColor = '#FF4D67';
+
+  // State
+  const [streakCelebration, setStreakCelebration] = useState<number | null>(null);
+  const [activeFilter, setActiveFilter] = useState('All');
+
+  // The check-in track comes from the server (`getDailyReward`): the amounts,
+  // the day reset time and the streak are exactly what `claimDailyReward` pays,
+  // so the app never shows an amount of its own.
+  const { data: daily, refetch: refetchDaily } = useQuery({
+    queryKey: ['daily-reward', user?.uid],
+    queryFn: () => walletService.getDailyReward(),
+    enabled: !!user?.uid,
+  });
+  const dailyTrack: DailySlot[] = (daily as any)?.track ?? [];
+  const dailyEnabled = (daily as any)?.enabled !== false;
+  const claimedToday = (daily as any)?.claimedToday === true;
+  const dailyStreak = Number((daily as any)?.streak ?? 0);
+  
+  // Ad Simulation State
+  const [isWatchingAd, setIsWatchingAd] = useState(false);
+
+  // Real transaction history from the coin ledger (signed amounts).
+  const { data: txnData } = useQuery({
+    queryKey: ['transactions', user?.uid],
+    queryFn: async () => {
+      const res: any = await readApi('/read/transactions', { limit: 50 });
+      return (res?.transactions || []).map((t: any) => ({
+        id: t.id,
+        type: t.type,
+        amount: t.amount,
+        // > 0 = these coins arrived play-only (promo bonus / free reward).
+        lockedDelta: Number(t.lockedDelta || 0),
+        description: t.description || t.type,
+        date: t.createdAt ? new Date(Number(t.createdAt)).toLocaleDateString() : '',
+      }));
+    },
+    enabled: !!user?.uid,
+  });
+
+  const { config: appConfig } = useAppConfig();
+
+  // Real daily tasks (progress + claim state from the server).
+  const { data: tasksResp, refetch: refetchTasks } = useQuery({
+    queryKey: ['daily-tasks', user?.uid],
+    queryFn: () => walletService.getDailyTasks(),
+    enabled: !!user?.uid,
+  });
+  // Rewarded ads are OFF unless an admin enables them, and the server refuses
+  // `claimAdReward` in that state. Hiding the task keeps the UI honest instead of
+  // offering a reward the backend will reject.
+  const adsEnabled = (appConfig as any)?.ads?.enabled === true;
+  const tasks = ((tasksResp as any)?.tasks || [])
+    .filter((t: any) => t.type !== 'ad' || adsEnabled)
+    .map((t: any) => ({ ...t, maxProgress: t.target, icon: taskIcon(t.type) }));
+
+  const claimTask = async (taskId: string) => {
+    try {
+      const r: any = await walletService.claimDailyTask(taskId);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Reward earned!', `You got ${r.reward} ${rewardUnit(r)}!${playOnly(r)}`);
+      refetchProfile();
+      refetchTasks();
+    } catch (e: any) {
+      Alert.alert('Cannot claim', e?.message || 'Task not completed yet.');
+    }
+  };
+
+  // Filter Logic
+  const filteredTransactions = (txnData || []).filter((t: any) => {
+    if (activeFilter === 'All') return true;
+    if (activeFilter === 'Income') return t.amount > 0;
+    if (activeFilter === 'Expense') return t.amount < 0;
+    return true;
+  });
+
+  const handleClaimBonus = async () => {
+    if (claimedToday) {
+        Alert.alert("Come back tomorrow", "You have already claimed your daily reward.");
+        return;
+    }
+    if (!user) return;
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    try {
+        // The Worker returns { success, coinsEarned, xpEarned, streak } — read the
+        // coin amount off the object instead of stringifying the whole response.
+        const res: any = await walletService.claimDailyBonus();
+        const earned = res?.coinsEarned ?? 0;
+        // A 7/30/100-day milestone, from the server's streak after this claim.
+        setStreakCelebration(Number(res?.streak) || null);
+        Alert.alert("Bonus Claimed!", `You received ${earned} ${rewardUnit(res)}.${playOnly(res)}`);
+        refetchDaily();
+        refetchProfile();
+    } catch (error: any) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        const alreadyClaimed = typeof error?.message === 'string' && error.message.toLowerCase().includes('already');
+        refetchDaily();
+        Alert.alert(
+          "Error",
+          alreadyClaimed
+            ? "You have already claimed your daily reward today."
+            : freeRewardsOut(error)
+              ? FREE_REWARDS_OUT_MSG
+              : "Could not claim bonus.",
+        );
+    }
+  };
+
+  const referralCode = (profile as any)?.referralCode || '';
+
+  /**
+   * Start a rewarded ad.
+   *
+   * This used to be a five-second `setInterval` that then called
+   * `claimAdReward` — i.e. a client-side timer minting withdrawable currency with
+   * no ad involved and nothing to verify. There is no ad SDK in this app, so the
+   * only honest options were to remove the feature or gate it; it is gated.
+   *
+   * When an admin enables rewarded ads, the server still requires an explicit
+   * decision to trust an unverified client (see `ads.trustClient`). Wiring a real
+   * SDK later means replacing the body of this function with the SDK's
+   * show-ad call and letting its server-side verification callback do the
+   * crediting — `finishAd` stays as the success path.
+   */
+  const startRewardedAd = () => {
+    if (!adsEnabled) {
+      Alert.alert('Not available', 'Rewarded ads are not available right now. Please check back later.');
+      return;
+    }
+    setIsWatchingAd(true);
+  };
+
+  const finishAd = async () => {
+    setIsWatchingAd(false);
+    try {
+      // Server credits the reward (with a daily cap) and returns the amount.
+      const res: any = await walletService.claimAdReward();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert("Reward Earned!", `You earned ${res?.coinsEarned ?? 0} ${rewardUnit(res)} for watching the ad!${playOnly(res)}`);
+      refetchProfile();
+      refetchTasks();
+    } catch (error: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const limitHit = typeof error?.message === 'string' && error.message.toLowerCase().includes('limit');
+      Alert.alert(
+        'Reward',
+        freeRewardsOut(error)
+          ? FREE_REWARDS_OUT_MSG
+          : limitHit
+            ? "You've reached today's ad reward limit. Come back tomorrow!"
+            : "Couldn't credit your reward right now. Please try again.",
+      );
+    }
+  };
+
+  const handleTaskAction = (task: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (task.claimed) return;
+    if (task.claimable) { claimTask(task.id); return; }
+    // The share task counts battles shared from a battle's share button, so it
+    // sends the user to the battles; sharing the invite link does not count.
+    if (task.type === 'share' || task.type === 'contest') router.push('/explore/battles' as any);
+    else if (task.type === 'vote') router.push('/');
+    else if (task.type === 'ad') startRewardedAd();
+  };
+
+  const renderFilter = (filter: string) => {
+    const isActive = activeFilter === filter;
+    return (
+      <TouchableOpacity
+        key={filter}
+        onPress={() => {
+            Haptics.selectionAsync();
+            setActiveFilter(filter);
+        }}
+        style={[
+          styles.filterChip,
+          isActive && { backgroundColor: primaryColor },
+          !isActive && { backgroundColor: isDark ? '#2A2D35' : '#ECECEC' }
+        ]}
+      >
+        <Text style={[
+          styles.filterText,
+          { color: isActive ? '#FFF' : subTextColor, fontFamily: isActive ? 'Urbanist-Bold' : 'Urbanist-Medium' }
+        ]}>
+          {filter}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderDailyItem = (slot: DailySlot, index: number) => {
+    const isReady = slot.status === 'ready';
+    const isClaimed = slot.status === 'claimed';
+    const next = dailyTrack[index + 1];
+
+    return (
+        <View key={slot.day} style={[styles.dayWrapper, { width: daySlot }]}>
+            {/* Connecting Line */}
+            {index < dailyTrack.length - 1 && (
+                <View style={[
+                    styles.connectorLine, 
+                    { right: -(daySlot / 2), width: daySlot },
+                    { backgroundColor: next?.status === 'claimed' ? '#4CAF50' : (isDark ? '#333' : '#E0E0E0') } 
+                ]} />
+            )}
+            
+            <TouchableOpacity 
+                style={[
+                    styles.dayCard, 
+                    { backgroundColor: isDark ? '#2A2D35' : '#FFF' },
+                    isReady && { borderColor: primaryColor, borderWidth: 1.5, shadowColor: primaryColor, shadowOpacity: 0.3, elevation: 4 },
+                    isClaimed && { borderColor: '#4CAF50', borderWidth: 1 }
+                ]}
+                onPress={isReady ? handleClaimBonus : undefined}
+                disabled={!isReady}
+                activeOpacity={0.7}
+            >
+                <Text style={[styles.dayText, { color: subTextColor }]}>Day {slot.day}</Text>
+                {isClaimed ? (
+                    <View style={styles.checkCircle}>
+                        <Ionicons name="checkmark" size={12} color="white" />
+                    </View>
+                ) : (
+                    <View style={styles.coinIconWrapper}>
+                        <Ionicons name="gift" size={20} color={isReady ? primaryColor : (isDark ? '#555' : '#CCC')} />
+                    </View>
+                )}
+                <View style={styles.transAmountRow}>
+                    <Text style={[
+                        styles.dayAmount, 
+                        { color: isReady ? primaryColor : (isClaimed ? '#4CAF50' : textColor) }
+                    ]}>+{slot.amount}</Text>
+                    <DiamondIcon size={11} />
+                </View>
+            </TouchableOpacity>
+        </View>
+    );
+  };
+
+  const renderTaskItem = ({ item, index }: { item: any, index: number }) => {
+    const progressPercent = Math.min((item.progress / item.maxProgress) * 100, 100);
+    const label = item.claimed
+      ? 'Done'
+      : item.claimable
+        ? 'Claim'
+        : item.type === 'vote' ? 'Vote' : item.type === 'share' ? 'Share' : item.type === 'contest' ? 'Join' : 'Watch';
+    return (
+        <Animated.View entering={FadeInRight.delay(index * 100).duration(500)} style={[styles.taskCard, { backgroundColor: cardBg }]}>
+            <View style={[styles.taskIconBox, { backgroundColor: isDark ? '#2A2D35' : '#F5F5F5' }]}>
+                <Ionicons name={item.icon as any} size={24} color={primaryColor} />
+            </View>
+            <View style={{ flex: 1, paddingHorizontal: 12 }}>
+                <Text style={[styles.taskTitle, { color: textColor }]}>{item.title}</Text>
+                <View style={styles.progressBarBg}>
+                    <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
+                </View>
+                <Text style={styles.taskProgressText}>{item.progress}/{item.maxProgress} completed</Text>
+            </View>
+            <TouchableOpacity 
+                style={[styles.taskButton, item.claimed && { backgroundColor: isDark ? '#2A2D35' : '#EEE' }, item.claimable && { backgroundColor: '#4CAF50' }]}
+                onPress={() => handleTaskAction(item)}
+                disabled={item.claimed}
+                activeOpacity={0.8}
+            >
+                <Text style={[styles.taskButtonText, item.claimable && { color: '#FFF' }, item.claimed && { color: 'gray' }]}>{label}</Text>
+                {!item.claimed && (
+                  <View style={styles.taskRewardBadge}>
+                      <Text style={styles.taskRewardText}>+{item.reward}</Text>
+                      <DiamondIcon size={11} />
+                  </View>
+                )}
+            </TouchableOpacity>
+        </Animated.View>
+    );
+  };
+
+  const renderTransaction = ({ item, index }: { item: any, index: number }) => (
+    <Animated.View entering={FadeInDown.delay(index * 100).duration(400)}>
+        <View style={[styles.transactionItem, { backgroundColor: cardBg }]}>
+        <View style={[styles.iconBox, { backgroundColor: item.amount > 0 ? 'rgba(76, 175, 80, 0.1)' : 'rgba(255, 77, 103, 0.1)' }]}>
+            <Ionicons 
+                name={item.amount > 0 ? "arrow-down" : "arrow-up"} 
+                size={20} 
+                color={item.amount > 0 ? "#4CAF50" : "#FF4D67"} 
+            />
+        </View>
+        <View style={{ flex: 1, marginLeft: 14 }}>
+            <Text style={[styles.transTitle, { color: textColor }]}>{item.description}</Text>
+            <Text style={[styles.transDate, { color: subTextColor }]}>{item.date} • {item.type.replace('_', ' ').toUpperCase()}</Text>
+        </View>
+        {/* Each row split into its Diamond and DP coin parts (src/lib/balances.ts). */}
+        <View style={styles.transAmounts}>
+            {(() => {
+                const part = splitTransaction(item.amount, item.lockedDelta);
+                const rows: React.ReactNode[] = [];
+                if (part.diamonds) rows.push(
+                    <View key="d" style={styles.transAmountRow}>
+                        <Text style={[styles.transAmount, { color: part.diamonds > 0 ? "#4CAF50" : "#FF4D67" }]}>{part.diamonds > 0 ? '+' : ''}{part.diamonds}</Text>
+                        <DiamondIcon size={14} />
+                    </View>,
+                );
+                if (part.dpcoin || !part.diamonds) rows.push(
+                    <View key="c" style={styles.transAmountRow}>
+                        <Text style={[styles.transAmount, { color: part.dpcoin > 0 ? "#4CAF50" : "#FF4D67" }]}>{part.dpcoin > 0 ? '+' : ''}{part.dpcoin}</Text>
+                        <CoinIcon size={14} />
+                    </View>,
+                );
+                return rows;
+            })()}
+        </View>
+        </View>
+    </Animated.View>
+  );
+
+  // Shared by the loaded list and the skeleton, so the header never moves.
+  const walletHeader = (
+    <View style={styles.header}>
+      <BackButton size={26} color={textColor} style={styles.backButton} />
+      <Text style={[styles.title, { color: textColor }]}>My Wallet</Text>
+      <TouchableOpacity onPress={() => router.push('/wallet/store')}>
+        <Ionicons name="scan-outline" size={24} color={textColor} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  // An offline-restored profile has no balance: keep the loading state until the server answers.
+  if (profileLoading || (profile && !hasLiveBalance(profile))) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor }]}>
+        {walletHeader}
+        <WalletSkeleton />
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor }]}>
+      <StreakMilestoneBanner streak={streakCelebration} onDone={() => setStreakCelebration(null)} />
+      <FlatList
+        data={filteredTransactions}
+        keyExtractor={item => item.id}
+        renderItem={renderTransaction}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+            <View>
+                {walletHeader}
+
+                {/* Balance Card */}
+                <Animated.View entering={FadeInDown.duration(600)} style={styles.balanceContainer}>
+                    <LinearGradient
+                        colors={['#FF4D67', '#FF8A9B']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.gradient}
+                    >
+                        {/* Background Decoration */}
+                        <View style={styles.cardCircle1} />
+                        <View style={styles.cardCircle2} />
+
+                        {/* Two balances: DP coins (prizes, withdrawable, ₹ value) and
+                            Diamonds (packages + free rewards, entry fees only). */}
+                        {(() => {
+                            const bal = balancesOf(profile);
+                            const value = coinsInInr(bal.dpcoin, coinRate(appConfig));
+                            return (
+                                <View style={styles.balanceSplit}>
+                                    <View style={{ flex: 1 }}>
+                                        <View style={[styles.coinBadge, styles.balancePill]}>
+                                            <CoinIcon size={14} color="#FFF" />
+                                            <Text style={styles.coinBadgeText}>DP coin</Text>
+                                        </View>
+                                        <Text style={styles.balanceValue}>{bal.dpcoin}</Text>
+                                        <Text style={[styles.balanceLabel, { fontSize: 12 }]}>{value ? `Withdraw · ${value}` : 'Withdraw ho sakte'}</Text>
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <View style={[styles.coinBadge, styles.balancePill]}>
+                                            <DiamondIcon size={14} color="#FFF" />
+                                            <Text style={styles.coinBadgeText}>Diamond</Text>
+                                        </View>
+                                        <Text style={styles.balanceValue}>{bal.diamonds}</Text>
+                                        <Text style={[styles.balanceLabel, { fontSize: 12 }]}>Contest entry ke liye</Text>
+                                    </View>
+                                </View>
+                            );
+                        })()}
+                        
+                        {topupsEnabled && (
+                        <TouchableOpacity 
+                            style={styles.topUpButton}
+                            onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                router.push('/wallet/store');
+                            }}
+                            activeOpacity={0.9}
+                        >
+                            <Ionicons name="add" size={20} color="#FF4D67" />
+                            <Text style={styles.topUpText}>Diamond lo</Text>
+                        </TouchableOpacity>
+                        )}
+                        {withdrawalsEnabled && (
+                        <TouchableOpacity
+                            style={styles.withdrawButton}
+                            onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                router.push('/wallet/withdraw');
+                            }}
+                            activeOpacity={0.9}
+                        >
+                            <Ionicons name="cash-outline" size={18} color="#FFF" />
+                            <Text style={styles.withdrawText}>Withdraw</Text>
+                        </TouchableOpacity>
+                        )}
+                    </LinearGradient>
+                </Animated.View>
+
+                {/* Daily Bonus Section (hidden while an admin has it switched off) */}
+                {dailyEnabled && dailyTrack.length > 0 && (
+                <>
+                <View style={styles.sectionHeader}>
+                    <View>
+                        <Text style={[styles.sectionTitle, { color: textColor }]}>Daily Check-in</Text>
+                        <Text style={[styles.sectionSubtitle, { color: subTextColor }]}>
+                            {dailyStreak > 0 ? `${dailyStreak} din ki streak 🔥` : 'Earn rewards everyday!'}
+                        </Text>
+                    </View>
+                </View>
+                <View style={styles.dailyScrollWrapper}>
+                    <View style={styles.dailyContainer}>
+                        {dailyTrack.map((slot, index) => renderDailyItem(slot, index))}
+                    </View>
+                </View>
+                </>
+                )}
+
+                {/* Daily Tasks Section */}
+                <View style={[styles.sectionHeader, { marginTop: 25 }]}>
+                    <View>
+                        <Text style={[styles.sectionTitle, { color: textColor }]}>Daily Tasks</Text>
+                        <Text style={[styles.sectionSubtitle, { color: subTextColor }]}>Complete tasks to earn more!</Text>
+                    </View>
+                </View>
+                <View style={{ paddingHorizontal: 20 }}>
+                    {tasks.length === 0 ? (
+                      <Text style={{ color: subTextColor, fontFamily: 'Urbanist-Medium', paddingHorizontal: 4 }}>No tasks right now. Check back later!</Text>
+                    ) : (
+                      tasks.map((item: any, index: number) => renderTaskItem({ item, index }))
+                    )}
+                </View>
+
+                {/* Refer & Earn Banner */}
+                <Animated.View entering={FadeInRight.delay(200).duration(500)}>
+                    <TouchableOpacity 
+                        onPress={() => { Haptics.selectionAsync(); router.push('/referral' as any); }} 
+                        style={[styles.referContainer, { backgroundColor: isDark ? '#2A2D35' : '#FFF' }]}
+                        activeOpacity={0.9}
+                    >
+                        <LinearGradient
+                            colors={isDark ? ['#2A2D35', '#2A2D35'] : ['#E8F5E9', '#FFFFFF']}
+                            start={{x: 0, y: 0}} end={{x: 1, y: 0}}
+                            style={[StyleSheet.absoluteFill, { borderRadius: 20 }]} 
+                        />
+                        <View style={styles.referContent}>
+                            <View style={styles.referIconBox}>
+                                <Ionicons name="gift-outline" size={28} color="#FF4D67" />
+                            </View>
+                            <View style={{ flex: 1, marginLeft: 12 }}>
+                                <Text style={[styles.referTitle, { color: isDark ? '#fff' : '#101010' }]}>Refer & Earn</Text>
+                                <Text style={styles.referDesc}>
+                                    {appConfig?.referral?.enabled && Number(appConfig.referral.referrerReward) > 0
+                                        ? `Har dost par ${appConfig.referral.referrerReward} ${appConfig.referral.rewardUnit ?? 'Diamond'} — dost ko bhi ${appConfig.referral.refereeReward}!`
+                                        : `Invite friends & earn bonus ${appConfig?.referral?.rewardUnit ?? 'Diamond'}s!`}
+                                </Text>
+                                {referralCode ? <Text style={styles.referDesc}>Your code: <Text style={{fontWeight: '800', color: '#FF4D67'}}>{referralCode}</Text></Text> : null}
+                            </View>
+                            <ArrowIcon size={18} direction="right" color={subTextColor} />
+                        </View>
+                    </TouchableOpacity>
+                </Animated.View>
+
+                {/* Transactions Header & Filter */}
+                <View style={[styles.sectionHeader, { marginTop: 25, marginBottom: 10 }]}>
+                    <Text style={[styles.sectionTitle, { color: textColor }]}>Transactions</Text>
+                </View>
+                
+                <View style={styles.filterContainer}>
+                    {FILTERS.map(renderFilter)}
+                </View>
+            </View>
+        }
+        ListEmptyComponent={
+            <View style={styles.emptyState}>
+                <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#2A2D35' : '#F5F5F5' }]}>
+                    <Ionicons name="receipt-outline" size={40} color={subTextColor} />
+                </View>
+                <Text style={[styles.emptyText, { color: subTextColor }]}>No transactions found</Text>
+            </View>
+        }
+      />
+
+      {/* Rewarded ad. No ad SDK is integrated yet, so this states that plainly
+          rather than running a countdown and pretending an ad was shown. */}
+      <Modal visible={isWatchingAd} transparent animationType="fade" onRequestClose={() => setIsWatchingAd(false)}>
+        <View style={styles.adModalContainer}>
+            <View style={[styles.adModalContent, { backgroundColor: isDark ? '#1F222A' : '#FFF' }]}>
+                <Text style={[styles.adTitle, { color: textColor }]}>Rewarded ads coming soon</Text>
+                <Text style={[styles.adSubtitle, { color: subTextColor }]}>
+                  We&apos;re finishing the ad integration. You&apos;ll be able to earn Diamonds here shortly —
+                  meanwhile the daily tasks above still pay out.
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setIsWatchingAd(false)}
+                  style={{ marginTop: 20, paddingVertical: 12, paddingHorizontal: 28, borderRadius: 100, backgroundColor: primaryColor }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                >
+                  <Text style={{ color: '#fff', fontFamily: 'Urbanist-Bold', fontSize: 15 }}>Got it</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+      </Modal>
+
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 10, marginBottom: 10 },
+  backButton: { padding: 4 },
+  title: { fontSize: 20, fontFamily: 'Urbanist-Bold' },
+  
+  // Balance Card
+  balanceContainer: { marginHorizontal: 20, marginBottom: 25, borderRadius: 28, overflow: 'hidden', elevation: 10, shadowColor: '#FF4D67', shadowOpacity: 0.4, shadowRadius: 15, shadowOffset: { width: 0, height: 8 } },
+  gradient: { padding: 25, position: 'relative' },
+  cardCircle1: { position: 'absolute', top: -50, right: -50, width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(255,255,255,0.1)' },
+  cardCircle2: { position: 'absolute', bottom: -30, left: -30, width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255,255,255,0.1)' },
+  
+  balanceHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  balanceLabel: { color: 'rgba(255,255,255,0.9)', fontSize: 16, fontFamily: 'Urbanist-Medium' },
+  coinBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  coinBadgeText: { color: '#FFF', fontSize: 12, fontFamily: 'Urbanist-Bold', marginLeft: 4 },
+  
+  row: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 25 },
+  balanceValue: { color: 'white', fontSize: 42, fontFamily: 'Urbanist-Bold', letterSpacing: -1 },
+  
+  topUpButton: { backgroundColor: 'white', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: 'black', shadowOpacity: 0.1, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
+  topUpText: { color: '#FF4D67', fontFamily: 'Urbanist-Bold', fontSize: 16, marginLeft: 6 },
+  withdrawButton: { marginTop: 10, paddingVertical: 12, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.6)' },
+  withdrawText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 15, marginLeft: 6 },
+  
+  // Section Headers
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 15 },
+  sectionTitle: { fontSize: 18, fontFamily: 'Urbanist-Bold' },
+  sectionSubtitle: { fontSize: 13, fontFamily: 'Urbanist-Medium', marginTop: 2 },
+  
+  // Daily Bonus
+  dailyScrollWrapper: { paddingHorizontal: 20, marginBottom: 5 },
+  dailyContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  // width (and the connector's right / width) are inline from the day slot size.
+  dayWrapper: { alignItems: 'center' },
+  connectorLine: { position: 'absolute', top: 25, height: 3, zIndex: -1 },
+  dayCard: { width: 44, height: 60, borderRadius: 22, alignItems: 'center', justifyContent: 'center', elevation: 2, paddingVertical: 5, marginBottom: 5, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 3, shadowOffset: {width: 0, height: 2} },
+  dayText: { fontSize: 9, fontFamily: 'Urbanist-Bold', marginBottom: 4 },
+  dayAmount: { fontSize: 11, fontFamily: 'Urbanist-Bold' },
+  checkCircle: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#4CAF50', justifyContent: 'center', alignItems: 'center', marginBottom: 2 },
+  coinIconWrapper: { marginBottom: 2 },
+
+  // Tasks
+  taskCard: { flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 12, borderRadius: 20, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 1 },
+  taskIconBox: { width: 48, height: 48, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  taskTitle: { fontSize: 16, fontFamily: 'Urbanist-Bold', marginBottom: 6 },
+  progressBarBg: { height: 6, backgroundColor: '#E0E0E0', borderRadius: 3, marginBottom: 6, overflow: 'hidden' },
+  progressBarFill: { height: '100%', backgroundColor: '#FF4D67', borderRadius: 3 },
+  taskProgressText: { fontSize: 12, fontFamily: 'Urbanist-Medium', color: 'gray' },
+  taskButton: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF0F3', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12 },
+  taskButtonText: { color: '#FF4D67', fontFamily: 'Urbanist-Bold', fontSize: 14 },
+  taskRewardBadge: { position: 'absolute', top: -8, right: -8, backgroundColor: '#FFD700', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, flexDirection: 'row', alignItems: 'center', gap: 2 },
+  taskRewardText: { fontSize: 10, fontFamily: 'Urbanist-Bold', color: '#000' },
+
+  // Refer Banner
+  referContainer: { marginHorizontal: 20, marginTop: 20, borderRadius: 20, padding: 16, overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
+  referContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
+  referIconBox: { width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(255, 77, 103, 0.1)', justifyContent: 'center', alignItems: 'center' },
+  referTitle: { fontSize: 16, fontFamily: 'Urbanist-Bold', marginBottom: 2 },
+  referDesc: { fontSize: 13, fontFamily: 'Urbanist-Medium', color: 'gray', lineHeight: 18 },
+
+  // Filters
+  filterContainer: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 15, gap: 10 },
+  filterChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  filterText: { fontSize: 14 },
+
+  // Transactions
+  transactionItem: { flexDirection: 'row', alignItems: 'center', padding: 16, marginBottom: 12, borderRadius: 20, marginHorizontal: 20 },
+  iconBox: { width: 48, height: 48, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  transTitle: { fontSize: 16, fontFamily: 'Urbanist-Bold', marginBottom: 4 },
+  transDate: { fontSize: 12, fontFamily: 'Urbanist-Medium' },
+  lockedTag: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255, 152, 0, 0.15)',
+    color: '#E65100',
+    fontSize: 11,
+    fontFamily: 'Urbanist-SemiBold',
+  },
+  transAmount: { fontSize: 16, fontFamily: 'Urbanist-Bold' },
+  transAmounts: { alignItems: 'flex-end', gap: 2 },
+  transAmountRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  balanceSplit: { flexDirection: 'row', gap: 16, marginBottom: 22 },
+  balancePill: { alignSelf: 'flex-start', marginBottom: 6 },
+
+  // Empty State
+  emptyState: { alignItems: 'center', marginTop: 40, paddingBottom: 50 },
+  emptyIconCircle: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
+  emptyText: { fontFamily: 'Urbanist-Medium', fontSize: 16 },
+
+  // Ad Modal
+  adModalContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' },
+  adModalContent: { width: '80%', maxWidth: 360, padding: 25, borderRadius: 24, alignItems: 'center' },
+  adTitle: { fontSize: 20, fontFamily: 'Urbanist-Bold', marginBottom: 8 },
+  adSubtitle: { fontSize: 14, fontFamily: 'Urbanist-Medium', textAlign: 'center' },
+  adProgressBar: { width: '100%', height: 6, backgroundColor: '#E0E0E0', borderRadius: 3, marginTop: 10, overflow: 'hidden' },
+  adProgressFill: { height: '100%', backgroundColor: '#FF4D67' },
+});

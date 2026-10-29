@@ -1,0 +1,99 @@
+import { Timestamp } from 'firebase/firestore';
+
+export interface Badge {
+  name: string;
+  icon: string;
+  level: number;
+}
+
+export interface UserProfile {
+  uid: string;
+  username: string;
+  fullName: string;
+  email: string;
+  bio?: string;
+  profileImageUrl?: string;
+  /**
+   * Lighter avatar variant from the Worker. Equal to profileImageUrl until
+   * Cloudflare Transformations is enabled (see worker lib/media.ts), so it is
+   * always safe to prefer this in lists.
+   */
+  profileImageUrlThumb?: string | null;
+  website?: string;
+  isPrivate?: boolean;
+  occupation?: string;
+  gender?: string;
+  phone?: string;
+  facebook?: string;
+  twitter?: string;
+  instagram?: string;
+  
+  // Array of user IDs this user is following
+  following?: string[];
+
+  // Contest Platform Fields
+  Dpcoin: number;
+  /** The Diamond part of `Dpcoin` (users.locked_coins): entry fees only, never withdrawable. Use balancesOf(). */
+  lockedCoins?: number;
+  /** Unused legacy field; not a balance. Use balancesOf() from src/lib/balances.ts. */
+  coins?: number;
+  isAdmin: boolean;
+  /**
+   * Admin-granted blue check (`users.verified`), set from the admin panel.
+   *
+   * Distinct from `emailVerified`/`phoneVerified`, which record that a contact
+   * detail was proven. This one is editorial and only an admin can set it.
+   */
+  verified?: boolean;
+  /** Owner-only: the email / mobile on file has been proven by a code (server-set). */
+  emailVerified?: boolean;
+  phoneVerified?: boolean;
+  xp?: number;
+  level?: number;
+  badges?: Badge[];
+  equippedBadge?: Badge;
+  
+  stats: {
+    contestsJoined: number;
+    wins: number;
+    totalVotesReceived: number;
+  };
+  createdAt: Timestamp;
+}
+
+export interface UserStats {
+  postsCount: number;
+  followersCount: number;
+  followingCount: number;
+  likesCount?: number; 
+}
+
+export interface Post {
+  id: string;
+  userId: string;
+  mediaUrl: string;
+  thumbnailUrl?: string; 
+  mediaType: 'image' | 'video';
+  caption?: string;
+  createdAt: any; 
+  likesCount: number;
+  commentsCount: number;
+}
+
+export interface Highlight {
+  id: string;
+  title: string;
+  coverUrl: string;
+  stories: string[]; 
+}
+
+export interface CoinTransaction {
+  id: string;
+  userId: string;
+  amount: number; 
+  type: 'entry_fee' | 'win_reward' | 'bonus' | 'purchase';
+  contestId?: string;
+  battleId?: string;
+  description: string;
+  createdAt: Timestamp;
+}

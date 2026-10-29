@@ -1,0 +1,6257 @@
+/**
+ * /admin — admin CRUD that used to live in the admin panel's Next.js API routes
+ * (which talked directly to Firestore via the Firebase Admin SDK). Now backed
+ * by D1.
+ *
+ * Auth: either a valid Firebase admin ID token OR the shared server-to-server
+ * secret (X-Admin-Secret) used by the Next.js routes when proxying. This lets
+ * the admin panel keep its existing route URLs while the data moves to D1.
+ */
+import { Hono } from "hono";
+import { and, eq, desc, sql, count, ne, like, gt, gte, lt, lte, inArray, notInArray, or, isNull, isNotNull } from "drizzle-orm";
+import { DELETED_STATUS, PENDING_DELETION_STATUS } from "../lib/accountStatus";
+import { invalidateUserCaches, executeAccountDeletion, cancelAccountDeletion } from "../lib/accountDeletion";
+import { recentChatMessages, deleteChatMessage } from "../lib/chatArchive";
+import { alias } from "drizzle-orm/sqlite-core";
+import type { Env, Variables } from "../types";
+import { getDb, schema } from "../db";
+import { requeueVsPublication, runVsPublication } from "../lib/vsPublication";
+import { isContestStoryType, teardownVsStories } from "../lib/matchStories";
+import { STORIES_FEED_CACHE_KEY } from "../lib/storyAudience";
+import { httpsError, ApiError } from "../lib/http";
+import { timingSafeEqualSecret } from "../lib/timingSafe";
+import { verifyIdToken, bearerToken } from "../lib/firebaseAuth";
+import { REAUTH_REQUIRED_CODE } from "../lib/reauth";
+import { redactPaymentDetails } from "../lib/redact";
+import type { AuthUser } from "../types";
+import { resolveAuthMethods, validateAuthMethods } from "../lib/authMethods";
+import {
+  FEED_DEFAULT_WEIGHTS,
+  FEED_RANKING_ALGORITHM,
+  FEED_WEIGHT_BOUNDS,
+  INTEGER_WEIGHTS,
+  rankingVersion,
+  sanitizeFeedWeights,
+  validateFeedWeightsPatch,
+} from "../lib/feedWeights";
+import { AUDITED_SECTIONS, appConfigChannels, publicAppConfig, validateAppControlPatch } from "../lib/appControl";
+import { publishMany } from "../lib/publish";
+import { publishCoinCatalog } from "../lib/coinCatalog";
+import {
+  assertPackagesSafe,
+  buyRateFromConfig,
+  coinValueFromConfig,
+  hasExplicitBuyRate,
+  minSafeBuyRate,
+  packagePriceInr,
+  pricePackage,
+  ratesFromConfig,
+} from "../lib/coinPricing";
+import { assertSessionUsable } from "../middleware/auth";
+import { getAppConfig, getGamificationSettings, getSeoAudit, invalidateSetting } from "../lib/settings";
+import { awardXp } from "../lib/xpService";
+import { getDailyTaskDefs, getSettings as getGamification, levelForXp, rewardDayNumber, rewardDayStart, validateGamificationCoinLists } from "../lib/gamification";
+import { legalDocsForAdmin, LEGAL_DOC_KEYS, LEGAL_LAST_UPDATED } from "../content/legal";
+import { deleteAuthUser, updateAuthUser, setCustomClaims, getUserByEmail } from "../lib/firebaseAdmin";
+import { createNotification, createNotificationsBulk } from "../lib/notify";
+import { sendUserEmail } from "../lib/email";
+import {
+  withdrawalDecisionEmail,
+  coinsAddedEmail,
+  contestWinEmail,
+  prizeClaimEmail,
+  contestRefundEmail,
+} from "../lib/emailTemplates";
+import { enqueueBroadcast } from "../lib/broadcast";
+import { bumpEngagement, finalizeVotes, getLiveTally } from "../lib/voteCounter";
+import { deleteMediaByUrl } from "../lib/mediaDelete";
+import { vsImageKeyFromPublicUrl } from "../lib/r2";
+import { settleRefund, settleWinner } from "../lib/contestSettlement";
+import { refundRejectedWithdrawal } from "../lib/payouts";
+import { closeRealtimeSessions, publish } from "../lib/publish";
+import { resolveContests, monthlyHallOfFame, seoAuditJob } from "../cron";
+import { newId, now } from "../lib/ids";
+import { memoGet, memoPut } from "../lib/memo";
+import { fetchUsageSummary, type UsageSummaryRow } from "../lib/usageEvents";
+import { computeCapacity } from "../lib/capacity";
+import { discoverUrls, processBatch, readImportProgress, writeImportProgress } from "../lib/importerTask";
+import { runVideoBackfillBatch } from "../lib/videoBackfill";
+import { blogListCacheKey, blogPostCacheKey, commentsCacheKey, invalidateAuthState, userCacheKey } from "../lib/cache";
+import { edgePurgeUrl, invalidateContestCaches, purgeShared } from "../lib/edgeCache";
+import {
+  assertContestWindow,
+  contestBannerUrl,
+  cleanContestExtra,
+  createContestExtra,
+  hasOwn,
+  isRecord,
+  validateContestInput,
+} from "../lib/contestAdmin";
+import { normalizePrizeType, publicPrize, resolveMatchPrize } from "../lib/prizes";
+import { EXPLORE_BANNER_PREFIX, ONBOARDING_IMAGE_PREFIX, PRODUCT_IMAGE_PREFIX } from "../lib/mediaCategories";
+import { sanitizeOnboardingSlides } from "../lib/onboardingConfig";
+import { formatDeliveryAddress, summariseDeliveryAddress } from "../lib/deliveryAddress";
+import {
+  contestBannerKeyFromPublicUrl,
+  deleteContestBannerByPublicUrl,
+  productImageKeyFromPublicUrl,
+  deleteProductImageByPublicUrl,
+  putVerifiedImage,
+  sanitizeMediaFolder,
+  uploadToR2,
+} from "../lib/r2";
+import {
+  adjustUserWallet,
+  assertCoinAmount,
+  assertPrizeFundedByPot,
+  matchPot,
+  matchPrizeCeiling,
+  assertProductCostFunded,
+  perPlayerEntryFee,
+  roundFiat,
+  toPaise,
+  validateCoinPackage,
+  WalletReplay,
+} from "../lib/money";
+import { fetchExternalImage } from "../lib/safeFetch";
+import { enforceAdminIdempotency } from "../lib/idempotency";
+import { registerIntegrationRoutes } from "./integrations";
+import { registerGamificationRoutes } from "./adminGamification";
+import { assertIdentifiersAvailable, recordUsernameTransition, validateUsername } from "../lib/userIdentifiers";
+import { revokeAllSessions } from "../lib/sessionRevocation";
+import {
+  getVerificationRewardConfig,
+  validateVerificationRewardConfig,
+  verificationRewardStats,
+} from "../lib/verificationReward";
+import { computeDeepHealth } from "../lib/health";
+import { computeMoneyHealth } from "../lib/moneyHealth";
+import {
+  approvalPasswordStatus,
+  assertApproval,
+  confirmApprovalReset,
+  requestApprovalReset,
+  setApprovalPassword,
+  withoutApproval,
+} from "../lib/approvalPassword";
+import {
+  assertLinkableBudget,
+  depositReservationId,
+  getBudget,
+  matchReservationId,
+  platformLedgerStatement,
+  listBudgets,
+  promoBonusCreditStatements,
+  releaseStatement,
+  requireReason,
+  validateBudgetInput,
+} from "../lib/promoBudget";
+import { budgetActivity, coinEconomyOverview, contestPnl, packagePnl, userStatement } from "../lib/coinEconomy";
+import { buildCoinReport, runCoinAlerts } from "../lib/coinAlerts";
+import { sendEmail } from "../lib/email";
+import { cronHealth } from "../lib/ops";
+import { decideReferral, parseReferralConfig, qualifyReferral, reconcileReferrals, referralLinks, referralMonthStart, reverseReferral } from "../lib/referralProgram";
+
+/**
+ * Record a sensitive admin action in the audit trail. Best-effort — never
+ * throws (a failed audit write must not break the action itself). The acting
+ * admin identity comes from the verified Firebase token when present; requests
+ * that use the shared server secret are recorded as "server".
+ */
+async function logAudit(
+  c: any,
+  action: string,
+  targetType: string,
+  targetId: string | null,
+  detail?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const db = getDb(c.env);
+    const user = c.get("user");
+    await db.insert(schema.adminAuditLog).values({
+      id: newId(),
+      adminUid: user?.uid ?? null,
+      adminEmail: user?.email ?? (user ? null : "server"),
+      action,
+      targetType,
+      targetId: targetId ?? null,
+      detail: detail ?? null,
+      createdAt: now(),
+    });
+  } catch (e) {
+    console.error("[audit] failed to record", action, e);
+  }
+}
+
+export const adminRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// Roles allowed through the /admin gate. "moderator" is limited (content
+// moderation only) and is blocked from money/user-lifecycle actions by
+// requireFullAdmin below.
+const ADMIN_ROLES = ["superadmin", "admin", "moderator"];
+
+// Closing realtime sockets used to live here as a private helper. It moved to
+// lib/publish.ts as `closeRealtimeSessions` because lib/sessionRevocation.ts needs it
+// too — every full revocation closes sockets now, not just the two admin paths — and two
+// copies is how they would drift on which channels count.
+
+/**
+ * Resolve the caller's effective admin role from claim or the D1 users row.
+ *
+ * Superadmin is never granted through the API (`/set-role` refuses it); it is
+ * set directly on the D1 row. The token claim can still say "admin" from an
+ * earlier `/set-role`, so a D1 superadmin outranks the claim. Nothing else
+ * changes: without a staff claim the D1 role is used as before, and a demotion
+ * through `/set-role` rewrites both the claim and the row.
+ */
+async function resolveAdminRole(c: any): Promise<string | null> {
+  const user = c.get("user");
+  if (!user?.uid) return null;
+  const claim = user.role && ADMIN_ROLES.includes(user.role) ? (user.role as string) : null;
+  if (claim === "superadmin") return claim;
+  const db = getDb(c.env);
+  const row = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.uid, user.uid)).get();
+  const stored = row?.role && ADMIN_ROLES.includes(row.role) ? row.role : null;
+  if (stored === "superadmin") return stored;
+  return claim ?? stored;
+}
+
+// Gate: shared secret (server-to-server, treated as superadmin) OR an admin/
+// moderator Firebase token.
+adminRoute.use("*", async (c, next) => {
+  const secret = c.req.header("X-Admin-Secret");
+  // Constant-time compare: this secret grants full superadmin access, so a
+  // short-circuiting `===` would hand out a timing oracle for guessing it
+  // byte by byte.
+  if (
+    secret &&
+    c.env.ADMIN_PROXY_SECRET &&
+    (await timingSafeEqualSecret(secret, c.env.ADMIN_PROXY_SECRET))
+  ) {
+    c.set("adminRole", "superadmin");
+    return next();
+  }
+  const token = bearerToken(c.req.header("Authorization"));
+  if (token) {
+    try {
+      const user = await verifyIdToken(token, c.env);
+      await assertSessionUsable(c.env, user);
+      c.set("user", user);
+      const role = await resolveAdminRole(c);
+      if (role) {
+        c.set("adminRole", role);
+        return next();
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  throw httpsError("permission-denied", "Admin access required.");
+});
+
+/**
+ * Sensitive admin actions need a RECENT sign-in ("sudo mode").
+ *
+ * Any admin ID token up to an hour old could delete users, change roles, move
+ * coins, approve payouts or change integration secrets, so a stolen or left-open
+ * panel session was full power. These routes now need `auth_time` within
+ * ADMIN_REAUTH_WINDOW_SEC; the panel then asks for the password again
+ * (reauthenticateWithCredential) and retries. Token refreshes keep the original
+ * sign-in time, so they do not count. Server-to-server calls with the shared
+ * secret carry no user and are exempt.
+ */
+export const ADMIN_REAUTH_WINDOW_SEC = 15 * 60;
+const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
+  ["DELETE", /^\/users\/[^/]+$/],
+  ["PATCH", /^\/users\/[^/]+$/], // block / unblock
+  ["POST", /^\/users\/[^/]+\/logout-all$/],
+  ["POST", /^\/users\/[^/]+\/wallet$/],
+  ["POST", /^\/set-role$/],
+  ["PATCH", /^\/withdrawals\/[^/]+$/],
+  ["PATCH", /^\/deposits\/[^/]+$/],
+  ["POST", /^\/account-deletions\/[^/]+\/purge$/],
+  ["POST", /^\/broadcast$/],
+  ["POST", /^\/app-settings$/],
+  ["POST", /^\/rewards$/],
+  ["*", /^\/coin-packages(\/.*)?$/],
+  // Promo budgets make the platform pay coins nobody paid for; they also need
+  // the separate approval password (lib/approvalPassword.ts).
+  ["*", /^\/promo-budgets(\/.*)?$/],
+  ["*", /^\/approval-password(\/.*)?$/],
+  ["*", /^\/integrations(\/.*)?$/],
+  // Gamification writes that move XP, coins or the configuration.
+  ["POST", /^\/gamification\/config$/],
+  ["POST", /^\/gamification\/users\/[^/]+\/xp$/],
+  ["POST", /^\/gamification\/events\/[^/]+\/reverse$/],
+  ["POST", /^\/gamification\/seasons(\/[^/]+\/(finalize|cancel))?$/],
+  ["PATCH", /^\/gamification\/seasons\/[^/]+$/],
+  ["POST", /^\/gamification\/users\/[^/]+\/achievements\/[^/]+$/],
+  ["POST", /^\/gamification\/users\/[^/]+\/inventory\/[^/]+\/(revoke|restore)$/],
+  ["PUT", /^\/gamification\/(achievements|catalog)\/[^/]+$/],
+];
+export function isSensitiveAdminRoute(method: string, path: string): boolean {
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
+  return SENSITIVE_ADMIN_ROUTES.some(([m, re]) => (m === "*" || m === method) && re.test(path));
+}
+adminRoute.use("*", async (c, next) => {
+  const path = new URL(c.req.url).pathname.replace(/^\/admin/, "") || "/";
+  if (!isSensitiveAdminRoute(c.req.method, path)) return next();
+  const user = c.get("user") as AuthUser | undefined;
+  if (!user) return next(); // X-Admin-Secret (server-to-server)
+  // A moderator is refused by the route itself (403); asking them for their
+  // password first would only hide that.
+  if (c.get("adminRole") === "moderator") return next();
+  const age = Date.now() / 1000 - Number(user.authTime ?? 0);
+  if (typeof user.authTime === "number" && age >= -60 && age <= ADMIN_REAUTH_WINDOW_SEC) return next();
+  throw httpsError(
+    "failed-precondition",
+    `${REAUTH_REQUIRED_CODE}: Enter your password again to confirm this action.`,
+    REAUTH_REQUIRED_CODE,
+  );
+});
+
+/**
+ * Parse an integer query parameter, clamped to [min, max].
+ *
+ * The admin list endpoints used `Math.min(parseInt(q), MAX)`, which has no lower
+ * bound and no NaN guard: `?limit=-1` became `LIMIT -1`, which SQLite treats as
+ * NO limit (a full-table read), and `?limit=abc` bound NaN. Same contract as
+ * `pageLimit()` in routes/read.ts.
+ */
+export function boundedQueryInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const n = parseInt(raw ?? "", 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
+}
+
+const ROLE_RANK: Record<string, number> = { superadmin: 3, admin: 2, moderator: 1 };
+
+/** True when `to` grants strictly less admin authority than `from`. */
+function isDemotion(from: string | null | undefined, to: string): boolean {
+  return (ROLE_RANK[from ?? ""] ?? 0) > (ROLE_RANK[to] ?? 0);
+}
+
+/** Block moderators from privileged (money / user-lifecycle / config) actions. */
+function requireFullAdmin(c: any): void {
+  if (!isFullAdmin(c)) {
+    throw httpsError("permission-denied", "This action requires full admin access.");
+  }
+}
+
+/**
+ * True for superadmin/admin, false for moderator.
+ *
+ * Used where the right answer is to FILTER what a moderator sees rather than
+ * reject the request outright (e.g. the notification bell in the panel layout,
+ * which would otherwise error on every page for a moderator).
+ */
+function isFullAdmin(c: any): boolean {
+  return c.get("adminRole") !== "moderator";
+}
+
+// ---- third-party integrations (SMS gateway, email, payments, video CDN) ----
+// Config + encrypted credentials, all manageable from the panel. See
+// routes/integrations.ts for why credential values are write-only.
+registerIntegrationRoutes(adminRoute, requireFullAdmin);
+
+// ---- gamification (routes/adminGamification.ts) ----
+registerGamificationRoutes(adminRoute, requireFullAdmin, isFullAdmin, logAudit);
+
+// ---- app settings (settings/appConfig) ----
+
+/**
+ * Merge an app-settings patch into the stored config, one nesting level at a time.
+ *
+ * This used to be `{ ...existing, ...body }`, which is only correct for a patch
+ * whose values are all scalars. `appConfig` is not that shape — `legalContent`,
+ * `withdrawal`, `announcement`, `features` and `ads` are all nested objects, and a
+ * spread REPLACES a nested object rather than merging into it.
+ *
+ * The consequence was data loss on any partial write. Posting
+ * `{ legalContent: { termsOfService: "..." } }` — which is exactly what
+ * `scripts/update-legal-content.mjs` did — silently deleted the privacy policy,
+ * refund policy and community guidelines. Nothing surfaced it: the request
+ * returned 200 and the documents were simply gone until someone opened the app.
+ *
+ * Plain objects merge recursively. Everything else replaces, which matters for
+ * arrays: index-wise merging an array would leave the tail of the old value
+ * behind, so removing an item would be impossible. `null` replaces too, so a
+ * caller can still clear a value deliberately.
+ */
+function mergeSettings(existing: any, patch: any): any {
+  const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v);
+  if (!isPlainObject(existing) || !isPlainObject(patch)) return patch;
+  const out: Record<string, unknown> = { ...existing };
+  for (const [key, value] of Object.entries(patch)) {
+    out[key] = isPlainObject(value) && isPlainObject(existing[key])
+      ? mergeSettings(existing[key], value)
+      : value;
+  }
+  return out;
+}
+
+/**
+ * Coin-valued keys inside `appConfig.rewardSettings`. These are credited straight
+ * to `users.dpcoin` (signup grant, referral welcome), so — exactly like the
+ * gamification reward keys — a fractional value would break the whole-number coin
+ * invariant and a negative one would DEBIT a new user. Validated here at the point
+ * of entry; getRewardSettings() floors again as a second line of defence.
+ */
+const REWARD_SETTINGS_COIN_KEYS = ["referralBonus"] as const;
+
+adminRoute.get("/app-settings", async (c) => c.json((await getAppConfig(c.env)) || {}));
+
+/**
+ * For You ranking weights for the Feed Ranking page: defaults, ranges, what is
+ * stored, what the feed actually uses (stored values clamped, defaults filled in)
+ * and the version the feed sends as `X-Feed-Ranking`. Saving goes through
+ * `POST /app-settings` with `feedWeights` (validated and audited there); `null`
+ * restores the defaults.
+ */
+adminRoute.get("/feed-weights", async (c) => {
+  requireFullAdmin(c);
+  const stored = ((await getAppConfig(c.env)) as any)?.feedWeights ?? null;
+  const effective = sanitizeFeedWeights(stored);
+  return c.json({
+    algorithm: FEED_RANKING_ALGORITHM,
+    defaults: FEED_DEFAULT_WEIGHTS,
+    bounds: FEED_WEIGHT_BOUNDS,
+    integerKeys: [...INTEGER_WEIGHTS],
+    stored,
+    effective,
+    version: rankingVersion(effective),
+    defaultVersion: rankingVersion(FEED_DEFAULT_WEIGHTS),
+  });
+});
+
+/**
+ * Sign-in / sign-up switches, resolved (legacy flags applied), plus how many
+ * accounts each method brought in over the last 30 days. `auth_provider` is
+ * recorded at signup from the verified token (routes/auth.ts createUserProfile);
+ * accounts created before that read as "unknown".
+ */
+adminRoute.get("/auth-methods", async (c) => {
+  const cfg = await getAppConfig(c.env);
+  const since = Date.now() - 30 * 86_400_000;
+  const rows = await c.env.DB.prepare(
+    `SELECT COALESCE(auth_provider, 'unknown') AS provider, COUNT(*) AS n
+       FROM users WHERE created_at >= ? GROUP BY 1 ORDER BY n DESC`,
+  )
+    .bind(since)
+    .all<{ provider: string; n: number }>();
+  return c.json({
+    methods: resolveAuthMethods(cfg),
+    signups30d: (rows.results || []).map((r) => ({ provider: r.provider, count: Number(r.n) || 0 })),
+  });
+});
+adminRoute.post("/app-settings", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const rawBody = await c.req.json<any>();
+  // Free-rewards cap (lib/promoBudget.ts): linking a budget changes what users
+  // can earn, so it needs the approval password like every other promo action.
+  if (rawBody && Object.prototype.hasOwnProperty.call(rawBody, "freeRewardsBudgetId")) {
+    const v = rawBody.freeRewardsBudgetId;
+    if (v !== null && v !== "" && (typeof v !== "string" || v.length > 64)) {
+      throw httpsError("invalid-argument", "freeRewardsBudgetId must be a budget id or null.");
+    }
+    if (v) await assertLinkableBudget(c.env, v, "free_rewards");
+    await assertApproval(c, rawBody);
+    rawBody.freeRewardsBudgetId = v || null;
+  }
+  // Never stored: the approval password only authorises this request.
+  const body = withoutApproval(rawBody);
+  const rewardSettings = body?.rewardSettings;
+  if (rewardSettings && typeof rewardSettings === "object") {
+    // The signup bonus no longer exists (coins for joining come only from a
+    // referral, lib/referralProgram.ts). A save that still sets one is refused, so
+    // an old admin client cannot believe it configured a bonus.
+    if (rewardSettings.signupBonus !== undefined && rewardSettings.signupBonus !== null && Number(rewardSettings.signupBonus) !== 0) {
+      throw httpsError("invalid-argument", "Signup bonus has been removed. Use the Referral program to reward new users.");
+    }
+    for (const key of REWARD_SETTINGS_COIN_KEYS) {
+      if (rewardSettings[key] === undefined || rewardSettings[key] === null) continue;
+      const n = Number(rewardSettings[key]);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 1_000_000) {
+        throw httpsError(
+          "invalid-argument",
+          `${key} must be a whole number of coins between 0 and 1000000 — it is credited straight to user balances.`,
+        );
+      }
+    }
+  }
+
+  // The announcement banner's link is shown to every user and opened on tap, so a
+  // non-URL value here is a live defect — it made the whole banner a dead tap
+  // target, and once let a diagnostic string ("App version: … Platform: web …")
+  // get stored as the "link". The popup route already validates its link; this is
+  // the matching guard for the banner. Empty/null is allowed (clears the link);
+  // any other value must be an http(s) URL. Normalised (trimmed) in place so the
+  // stored value is exactly what the client will try to open.
+  const announcement = body?.announcement;
+  if (announcement && typeof announcement === "object" && "link" in announcement) {
+    const raw = announcement.link;
+    if (raw == null || String(raw).trim() === "") {
+      announcement.link = null;
+    } else {
+      const link = String(raw).trim();
+      if (!/^https?:\/\/\S/i.test(link)) {
+        throw httpsError("invalid-argument", "announcement.link must be an http(s) URL, or empty to clear it.");
+      }
+      announcement.link = link;
+    }
+  }
+  // First-launch intro: shown to every new guest, so validated here (bounded
+  // text, at most N slides, images only from our own `onboarding/` uploads).
+  if (body?.onboarding !== undefined) {
+    body.onboarding = sanitizeOnboardingSlides(c.env, body.onboarding);
+  }
+  if (body?.onboardingEnabled !== undefined) {
+    if (typeof body.onboardingEnabled !== "boolean") {
+      throw httpsError("invalid-argument", "onboardingEnabled must be true or false.");
+    }
+  }
+  // For You ranking weights: each key within its range (lib/feedWeights.ts).
+  validateFeedWeightsPatch(body?.feedWeights);
+  const existing = (await getAppConfig(c.env)) || {};
+  // Maintenance / force update / announcement / features / withdrawal.
+  validateAppControlPatch(body, existing);
+  if (body && typeof body === "object") {
+    // Never client-supplied; stamped below.
+    delete body._version;
+    delete body.version;
+  }
+  if (body?.verificationReward !== undefined) {
+    // Validated against the MERGED result, so a partial patch (one field) is
+    // checked for consistency with the values already stored.
+    validateVerificationRewardConfig({ ...(existing.verificationReward || {}), ...(body.verificationReward || {}) });
+  }
+  const merged = mergeSettings(existing, body);
+  // Coin package pricing (lib/coinPricing.ts): if either rate moves, every
+  // active package must still not pay out more than it costs — refused BEFORE
+  // anything is written, naming the minimum safe buy rate.
+  const oldRates = ratesFromConfig(existing);
+  const newRates = ratesFromConfig(merged);
+  const ratesChanged = oldRates.buyRate !== newRates.buyRate || oldRates.payoutRate !== newRates.payoutRate;
+  const allPkgs = ratesChanged
+    ? await db
+        .select({ id: schema.coinPackages.id, name: schema.coinPackages.name, coins: schema.coinPackages.coins, bonusCoins: schema.coinPackages.bonusCoins, active: schema.coinPackages.active, budgetId: schema.coinPackages.budgetId })
+        .from(schema.coinPackages)
+        .all()
+    : [];
+  if (ratesChanged) assertPackagesSafe(allPkgs, newRates);
+  // Monotonic: the app keeps whichever copy is newer (pushed vs polled).
+  merged._version = Math.max(Date.now(), (Number(existing._version) || 0) + 1);
+  // Sign-in / sign-up switches: validated against the MERGED result, so a save
+  // can never leave a platform with no way to sign in.
+  const authMethodsError = validateAuthMethods(body?.authMethods, merged);
+  if (authMethodsError) throw httpsError("invalid-argument", authMethodsError);
+  await db
+    .insert(schema.settings)
+    .values({ id: "appConfig", data: merged, updatedAt: now() })
+    .onConflictDoUpdate({ target: schema.settings.id, set: { data: merged, updatedAt: now() } });
+  await invalidateSetting(c.env, "appConfig");
+  // The public projection is edge-cached for 120s. Purging this colo makes an
+  // admin's own check (e.g. the onboarding preview on a phone) show the change
+  // at once; other colos follow within the TTL.
+  edgePurgeUrl(c, "/read/app-config");
+  // Push the new public config to every connected app instance (all shards), so
+  // maintenance / flags / banner change within seconds instead of on the next poll.
+  const pushed = publicAppConfig(merged, Date.now());
+  c.executionCtx.waitUntil(publishMany(c.env, appConfigChannels(), { type: "config", config: pushed }));
+  // Package prices are base coins × buy rate: a new buy rate re-prices the whole
+  // store, and a new payout rate can change which packages are sellable, so push
+  // the catalog too (and refresh the stored price snapshots).
+  if (ratesChanged) {
+    const buyRate = buyRateFromConfig(merged);
+    for (const p of allPkgs) {
+      await db.update(schema.coinPackages).set({ priceInr: packagePriceInr(Number(p.coins), buyRate) }).where(eq(schema.coinPackages.id, p.id));
+    }
+    c.executionCtx.waitUntil(publishCoinCatalog(c.env));
+  }
+  // Coin amounts credited to user balances are money settings: record who
+  // changed them, from what, to what. (Only these sections — the rest of App
+  // Control is cosmetic and is not audited by this handler.)
+  // The intro is what every new user sees first, so its edits are audited too.
+  // Only sections that actually CHANGED: a save that resends a section unchanged
+  // must not write a misleading audit row.
+  for (const section of AUDITED_SECTIONS) {
+    if (body?.[section] !== undefined && JSON.stringify(existing[section] ?? null) !== JSON.stringify(merged[section] ?? null)) {
+      await logAudit(c, `settings.${section}.update`, "settings", "appConfig", {
+        before: existing[section] ?? null,
+        after: merged[section] ?? null,
+      });
+    }
+  }
+  return c.json({ message: "Settings updated successfully", version: merged._version, config: pushed });
+});
+
+// ---- registration verification reward: effective config + counters ----
+adminRoute.get("/verification-reward", async (c) => {
+  requireFullAdmin(c);
+  const [config, stats] = await Promise.all([getVerificationRewardConfig(c.env), verificationRewardStats(c.env)]);
+  return c.json({ config, stats });
+});
+
+// ---- legal documents (settings/appConfig.legalContent) ----
+/**
+ * The four legal documents as the editor needs them: the RAW content in effect for
+ * each (a stored override, or the bundled default) plus whether it is currently
+ * custom. The panel prefills its boxes with `content`, so an operator sees exactly
+ * what the app serves — the previous editor showed empty "override-only" boxes,
+ * which read as "the app has no policy" even though it always does.
+ */
+adminRoute.get("/legal", async (c) => {
+  requireFullAdmin(c);
+  const cfg = (await getAppConfig(c.env)) || {};
+  return c.json({ docs: legalDocsForAdmin(cfg), lastUpdated: LEGAL_LAST_UPDATED });
+});
+
+/**
+ * Save one legal document.
+ *
+ * A non-empty `content` stores an override the app serves in place of the bundled
+ * text (tokens such as {{SUPPORT_EMAIL}} are kept and interpolated at serve time).
+ * An empty/whitespace `content` CLEARS the override, reverting that document to the
+ * bundled default — so "Reset to default" is simply saving nothing.
+ *
+ * The whole `legalContent` object is rewritten explicitly (not deep-merged) so a
+ * cleared key is actually removed. Purges the /read/legal edge cache in this colo so
+ * the change shows in the app immediately here; other colos converge on that
+ * endpoint's 10-minute TTL.
+ */
+adminRoute.post("/legal", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const { key, content } = await c.req.json<{ key?: string; content?: unknown }>();
+  if (typeof key !== "string" || !(LEGAL_DOC_KEYS as readonly string[]).includes(key)) {
+    throw httpsError("invalid-argument", "Unknown legal document.");
+  }
+  const text = typeof content === "string" ? content.trim() : "";
+
+  const existing = (await getAppConfig(c.env)) || {};
+  const legalContent: Record<string, string> = { ...((existing as any).legalContent ?? {}) };
+  if (text) legalContent[key] = text;
+  else delete legalContent[key]; // cleared -> app falls back to the bundled default
+
+  const merged = { ...(existing as any), legalContent };
+  await db
+    .insert(schema.settings)
+    .values({ id: "appConfig", data: merged, updatedAt: now() })
+    .onConflictDoUpdate({ target: schema.settings.id, set: { data: merged, updatedAt: now() } });
+  await invalidateSetting(c.env, "appConfig");
+  edgePurgeUrl(c, "/read/legal");
+  await logAudit(c, "legal.update", "legal", key, { cleared: !text, length: text.length });
+  return c.json({ success: true, isCustom: !!text });
+});
+
+// ---- rewards (settings/gamification) ----
+adminRoute.get("/rewards", async (c) => c.json((await getGamificationSettings(c.env)) || {}));
+/**
+ * Reward keys whose value is added directly to `users.dpcoin`.
+ *
+ * This endpoint merges arbitrary JSON into the gamification settings row, and
+ * these particular keys are then credited to real balances by the daily-reward,
+ * signup and referral paths. A fractional value would break the "coins are whole
+ * numbers" invariant for everyone who claimed it, and a negative one would
+ * silently DEBIT them — so they are validated here, at the point of entry, rather
+ * than being discovered later in a balance. lib/gamification.ts sanitises on read
+ * as a second line of defence for values stored before this check existed.
+ */
+// signupBonus/referralBonus are NOT here: they live in appConfig.rewardSettings
+// (validated on POST /app-settings), not the gamification row.
+const REWARD_COIN_KEYS = ["dailyLoginReward", "dailyBaseReward", "dailyStreakBonus"] as const;
+
+adminRoute.post("/rewards", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const body = await c.req.json<any>();
+  for (const key of REWARD_COIN_KEYS) {
+    if (body?.[key] === undefined || body[key] === null) continue;
+    const n = Number(body[key]);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 1_000_000) {
+      throw httpsError(
+        "invalid-argument",
+        `${key} must be a whole number of coins between 0 and 1000000 — it is credited straight to user balances.`,
+      );
+    }
+  }
+  // Daily task rewards and Hall of Fame prizes are coins too (lib/gamification.ts).
+  try {
+    validateGamificationCoinLists(body);
+  } catch (e: any) {
+    throw httpsError("invalid-argument", e?.message || "Invalid reward settings.");
+  }
+  const existing = (await getGamificationSettings(c.env)) || {};
+  // XP progression and the level curve are owned by POST /gamification/config,
+  // which validates them and asks for the approval password when coins are at
+  // stake. This raw editor posts the whole row back, so `progression` is kept
+  // as stored (never overwritten) and a curve change is refused here.
+  for (const k of ["xpThreshold", "xpIncrement"] as const) {
+    if (body?.[k] !== undefined && Number(body[k]) !== Number(existing[k] ?? 500)) {
+      throw httpsError("invalid-argument", `${k} is edited in Gamification → Rules, where it is validated.`);
+    }
+  }
+  const { progression: _ignoredProgression, ...rest } = body ?? {};
+  void _ignoredProgression;
+  const merged = { ...existing, ...rest, ...(existing.progression !== undefined ? { progression: existing.progression } : {}) };
+  await db
+    .insert(schema.settings)
+    .values({ id: "gamification", data: merged, updatedAt: now() })
+    .onConflictDoUpdate({ target: schema.settings.id, set: { data: merged, updatedAt: now() } });
+  await invalidateSetting(c.env, "gamification");
+  // These amounts are credited to user balances: record who changed what.
+  await logAudit(c, "settings.rewards.update", "settings", "gamification", { before: existing, after: merged });
+  return c.json({ success: true });
+});
+
+/**
+ * Daily check-in and daily task activity per reward day (the admin's reset
+ * time), newest first. Check-ins come from the `daily_reward` ledger rows, task
+ * claims from `daily_task_claims`.
+ */
+adminRoute.get("/rewards/stats", async (c) => {
+  requireFullAdmin(c);
+  const days = boundedQueryInt(c.req.query("days"), 14, 1, 90);
+  const settings = await getGamification(c.env);
+  const ts = now();
+  const offsetMs = settings.dayResetOffsetMinutes * 60_000;
+  const today = rewardDayNumber(ts, settings.dayResetOffsetMinutes);
+  const firstDay = today - days + 1;
+  const since = rewardDayStart(ts, settings.dayResetOffsetMinutes) - (days - 1) * 86_400_000;
+  const checkins = await c.env.DB.prepare(
+    `SELECT CAST((created_at + ?) / 86400000 AS INTEGER) AS day, COUNT(*) AS n, COALESCE(SUM(amount), 0) AS coins
+       FROM coin_transactions WHERE type = 'daily_reward' AND created_at >= ?
+      GROUP BY day`,
+  )
+    .bind(offsetMs, since)
+    .all<{ day: number; n: number; coins: number }>();
+  // Task claims are stored on the reward day they were made, so no offset here.
+  const claims = await c.env.DB.prepare(
+    `SELECT day, task_id AS taskId, COUNT(*) AS n, COALESCE(SUM(reward), 0) AS coins
+       FROM daily_task_claims WHERE day >= ? GROUP BY day, task_id`,
+  )
+    .bind(firstDay)
+    .all<{ day: number; taskId: string; n: number; coins: number }>();
+  const streaks = await c.env.DB.prepare(
+    `SELECT SUM(CASE WHEN streak >= 7 THEN 1 ELSE 0 END) AS week, SUM(CASE WHEN streak >= 30 THEN 1 ELSE 0 END) AS month
+       FROM users WHERE last_daily_claim >= ?`,
+  )
+    .bind(rewardDayStart(ts, settings.dayResetOffsetMinutes) - 86_400_000)
+    .first<{ week: number; month: number }>();
+  const byDay = new Map<number, any>();
+  for (let d = today; d >= firstDay; d--) {
+    byDay.set(d, { day: d, date: new Date(d * 86_400_000).toISOString().slice(0, 10), checkins: 0, checkinCoins: 0, taskClaims: 0, taskCoins: 0, tasks: {} as Record<string, { claims: number; coins: number }> });
+  }
+  for (const r of checkins.results ?? []) {
+    const row = byDay.get(Number(r.day));
+    if (row) {
+      row.checkins = Number(r.n) || 0;
+      row.checkinCoins = Number(r.coins) || 0;
+    }
+  }
+  for (const r of claims.results ?? []) {
+    const row = byDay.get(Number(r.day));
+    if (!row) continue;
+    row.taskClaims += Number(r.n) || 0;
+    row.taskCoins += Number(r.coins) || 0;
+    row.tasks[r.taskId] = { claims: Number(r.n) || 0, coins: Number(r.coins) || 0 };
+  }
+  return c.json({
+    dayResetOffsetMinutes: settings.dayResetOffsetMinutes,
+    tasks: getDailyTaskDefs(settings).map((t) => ({ id: t.id, title: t.title, type: t.type, enabled: t.enabled })),
+    days: [...byDay.values()],
+    activeStreaks: { atLeast7: Number(streaks?.week || 0), atLeast30: Number(streaks?.month || 0) },
+  });
+});
+
+/** One user's check-in streak, recent check-ins, task claims and referral rows. */
+adminRoute.get("/users/:id/rewards", async (c) => {
+  requireFullAdmin(c);
+  const uid = c.req.param("id");
+  const db = getDb(c.env);
+  const u = await db
+    .select({ uid: schema.users.uid, streak: schema.users.streak, lastDailyClaim: schema.users.lastDailyClaim, referralCode: schema.users.referralCode, referredBy: schema.users.referredBy, deviceId: schema.users.deviceId })
+    .from(schema.users)
+    .where(eq(schema.users.uid, uid))
+    .get();
+  if (!u) throw httpsError("not-found", "User not found.");
+  const settings = await getGamification(c.env);
+  const ts = now();
+  const startOfToday = rewardDayStart(ts, settings.dayResetOffsetMinutes);
+  const last = u.lastDailyClaim ? Number(u.lastDailyClaim) : 0;
+  const checkins = await c.env.DB.prepare(
+    `SELECT id, amount, locked_delta AS lockedDelta, description, created_at AS createdAt
+       FROM coin_transactions WHERE uid = ? AND type = 'daily_reward' ORDER BY created_at DESC LIMIT 30`,
+  )
+    .bind(uid)
+    .all();
+  const tasks = await c.env.DB.prepare(
+    `SELECT task_id AS taskId, day, reward, created_at AS createdAt FROM daily_task_claims WHERE uid = ? ORDER BY created_at DESC LIMIT 50`,
+  )
+    .bind(uid)
+    .all();
+  const referredBy = await c.env.DB.prepare(
+    `SELECT r.id, r.status, r.referrer_uid AS referrerUid, ru.username AS referrerUsername, r.referee_reward AS refereeReward, r.created_at AS createdAt
+       FROM referrals r LEFT JOIN users ru ON ru.uid = r.referrer_uid WHERE r.referred_uid = ?`,
+  )
+    .bind(uid)
+    .first();
+  const invited = await c.env.DB.prepare(
+    `SELECT status, COUNT(*) AS n, COALESCE(SUM(referrer_reward), 0) AS earned FROM referrals WHERE referrer_uid = ? GROUP BY status`,
+  )
+    .bind(uid)
+    .all();
+  return c.json({
+    streak: Number(u.streak) || 0,
+    lastDailyClaim: last || null,
+    claimedToday: last >= startOfToday,
+    streakAlive: last >= startOfToday - 86_400_000,
+    checkins: checkins.results ?? [],
+    taskClaims: tasks.results ?? [],
+    referralCode: u.referralCode,
+    deviceId: u.deviceId,
+    referredBy: referredBy ?? null,
+    invited: invited.results ?? [],
+  });
+});
+
+/**
+ * Support fix for a user's check-in streak. `continueStreak` also marks
+ * yesterday as claimed, so the user's next claim continues the streak instead
+ * of starting again at day 1 (e.g. the app was down). It never marks TODAY as
+ * claimed or moves money: today's claim is still guarded by its per-day ledger
+ * id in claimDailyReward. Audited.
+ */
+adminRoute.patch("/users/:id/streak", async (c) => {
+  requireFullAdmin(c);
+  const uid = c.req.param("id");
+  const body = await c.req.json<any>();
+  const streak = Number(body?.streak);
+  if (!Number.isInteger(streak) || streak < 0 || streak > 100_000) throw httpsError("invalid-argument", "streak must be a whole number from 0 to 100000.");
+  const reason = String(body?.reason ?? "").trim();
+  if (reason.length < 3) throw httpsError("invalid-argument", "A reason is required.");
+  const db = getDb(c.env);
+  const u = await db.select({ streak: schema.users.streak, lastDailyClaim: schema.users.lastDailyClaim }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+  if (!u) throw httpsError("not-found", "User not found.");
+  const settings = await getGamification(c.env);
+  const ts = now();
+  const startOfYesterday = rewardDayStart(ts, settings.dayResetOffsetMinutes) - 86_400_000;
+  const last = u.lastDailyClaim ? Number(u.lastDailyClaim) : 0;
+  const patch: Record<string, unknown> = { streak, updatedAt: ts };
+  if (body?.continueStreak === true && last < startOfYesterday) patch.lastDailyClaim = startOfYesterday;
+  await db.update(schema.users).set(patch as any).where(eq(schema.users.uid, uid));
+  await invalidateUserCaches(c.env, [uid], c).catch(() => undefined);
+  await logAudit(c, "user.streak.update", "user", uid, { before: { streak: u.streak, lastDailyClaim: u.lastDailyClaim }, after: patch, reason });
+  return c.json({ success: true, streak, lastDailyClaim: (patch.lastDailyClaim as number | undefined) ?? (last || null) });
+});
+
+// ---- contests ----
+const CONTEST_BANNER_MAX_BYTES = 5 * 1024 * 1024;
+const CONTEST_BANNER_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+
+function contestBannerCandidates(row: any): string[] {
+  const extra = isRecord(row?.extra) ? row.extra : {};
+  return [...new Set([row?.bannerUrl, extra.bannerUrl, extra.bannerImageUrl].filter((url): url is string => typeof url === "string" && !!url))];
+}
+
+async function contestMatchCounts(db: ReturnType<typeof getDb>, contestId: string): Promise<{ waiting: number; active: number }> {
+  const result = await db
+    .select({
+      waiting: sql<number>`COALESCE(SUM(CASE WHEN ${schema.contestMatches.status} = 'waiting_for_opponent' THEN 1 ELSE 0 END), 0)`,
+      active: sql<number>`COALESCE(SUM(CASE WHEN ${schema.contestMatches.status} = 'active' THEN 1 ELSE 0 END), 0)`,
+    })
+    .from(schema.contestMatches)
+    .where(eq(schema.contestMatches.contestId, contestId))
+    .get();
+  return { waiting: Number(result?.waiting ?? 0), active: Number(result?.active ?? 0) };
+}
+
+async function contestBannerKeyIsAttached(
+  db: ReturnType<typeof getDb>,
+  env: Env,
+  key: string,
+): Promise<boolean> {
+  const rows = await db.select({ bannerUrl: schema.contests.bannerUrl, extra: schema.contests.extra }).from(schema.contests).all();
+  return rows.some((row) =>
+    contestBannerCandidates(row).some((url) => contestBannerKeyFromPublicUrl(env, url) === key),
+  );
+}
+
+/**
+ * Is this product image still referenced by anything?
+ *
+ * Checks contests AND prize claims, which is the difference from the banner
+ * version. Settlement copies the image url onto the `prize_claims` row so the
+ * record of what was promised survives the template being edited, and a winner
+ * waiting for delivery is exactly the person who should still be able to see a
+ * picture of it. Deleting the object because no contest points at it any more would
+ * blank the image on a live claim.
+ */
+async function productImageKeyIsAttached(
+  db: ReturnType<typeof getDb>,
+  env: Env,
+  key: string,
+): Promise<boolean> {
+  const [contestRows, claimRows] = await Promise.all([
+    db.select({ url: schema.contests.prizeProductImageUrl }).from(schema.contests).all(),
+    db.select({ url: schema.prizeClaims.productImageUrl }).from(schema.prizeClaims).all(),
+  ]);
+  return [...contestRows, ...claimRows].some(
+    (row) => typeof row.url === "string" && !!row.url && productImageKeyFromPublicUrl(env, row.url) === key,
+  );
+}
+
+async function cleanupUnattachedProductImages(c: any, urls: string[]): Promise<void> {
+  try {
+    const db = getDb(c.env);
+    for (const url of new Set(urls)) {
+      const key = productImageKeyFromPublicUrl(c.env, url);
+      if (!key) continue;
+      if (!(await productImageKeyIsAttached(db, c.env, key))) await deleteProductImageByPublicUrl(c.env, url);
+    }
+  } catch (e) {
+    console.error("[r2] product image cleanup failed (continuing)", e);
+  }
+}
+
+async function cleanupUnattachedContestBanners(c: any, urls: string[]): Promise<void> {
+  try {
+    const db = getDb(c.env);
+    for (const url of new Set(urls)) {
+      const key = contestBannerKeyFromPublicUrl(c.env, url);
+      if (!key) continue;
+      if (!(await contestBannerKeyIsAttached(db, c.env, key))) await deleteContestBannerByPublicUrl(c.env, url);
+    }
+  } catch (e) {
+    console.error("[r2] contest banner cleanup failed (continuing)", e);
+  }
+}
+
+/**
+ * Shared pre-read guards for the two admin image uploads.
+ *
+ * Both routes had an identical 25-line block plus their own local magic-byte
+ * sniffer. The sniffer now lives in `lib/mediaTypes.ts` and is applied inside
+ * `uploadToR2`, so what is left here is the declared-type and size screening that
+ * should happen before the body is read at all.
+ */
+function assertAdminImageUpload(c: any): string {
+  const fileType = (c.req.header("Content-Type") || "").split(";")[0].trim().toLowerCase();
+  if (!CONTEST_BANNER_MIME_TYPES.includes(fileType as any)) {
+    throw httpsError("invalid-argument", "Must be a JPEG, PNG, or WebP image.");
+  }
+  const contentLength = c.req.header("Content-Length");
+  if (contentLength !== undefined) {
+    const declaredBytes = Number(contentLength);
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0) {
+      throw httpsError("invalid-argument", "Invalid Content-Length.");
+    }
+    if (declaredBytes > CONTEST_BANNER_MAX_BYTES) {
+      throw httpsError("invalid-argument", "File too large (max 5MB).");
+    }
+  }
+  return fileType;
+}
+
+async function readAdminImageBody(c: any): Promise<ArrayBuffer> {
+  const body = await c.req.arrayBuffer();
+  if (!body.byteLength) throw httpsError("invalid-argument", "Empty upload.");
+  if (body.byteLength > CONTEST_BANNER_MAX_BYTES) throw httpsError("invalid-argument", "File too large (max 5MB).");
+  return body;
+}
+
+adminRoute.post("/media/contest-banner", async (c) => {
+  requireFullAdmin(c);
+  const fileType = assertAdminImageUpload(c);
+  const body = await readAdminImageBody(c);
+
+  // Passing the exact declared type as the allow-list keeps the strict
+  // behaviour these routes always had: the panel sends the browser's own
+  // `file.type`, so the bytes must match it exactly, not merely be some image.
+  const uploaded = await uploadToR2(c.env, fileType, "contest-banners", body, [fileType]);
+  await logAudit(c, "contest.banner.upload", "contest-banner", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
+  return c.json(uploaded);
+});
+
+// Upload the manual payment QR image (stored in R2). Returns a public URL that
+// the admin saves into appConfig.paymentGateway.qrImageUrl — so the app keeps
+// reading a single URL, but it's now an uploaded image (no external hosting).
+/**
+ * Upload an image for an onboarding slide. Same pre-checks as the other admin
+ * image routes (declared type, size, exact-type sniff); the returned public URL
+ * is what the panel saves into `appConfig.onboarding[i].imageUrl`.
+ */
+/**
+ * Onboarding funnel for the last `days` (1..90, default 30) UTC days, from the
+ * anonymous counters in `onboarding_daily` (routes/telemetry.ts).
+ */
+adminRoute.get("/onboarding/stats", async (c) => {
+  const days = Math.min(90, Math.max(1, Math.floor(Number(c.req.query("days") ?? 30)) || 30));
+  const since = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+  const { results } = await c.env.DB.prepare(
+    `SELECT day, event, slide, platform, SUM(count) AS n FROM onboarding_daily
+      WHERE day >= ? GROUP BY day, event, slide, platform`,
+  )
+    .bind(since)
+    .all<{ day: string; event: string; slide: number; platform: string; n: number }>();
+  const rows = results || [];
+  const total = (event: string) => rows.filter((r) => r.event === event).reduce((a, r) => a + Number(r.n), 0);
+  const bySlide = (event: string) => {
+    const out: number[] = [];
+    for (const r of rows) if (r.event === event && r.slide >= 0) out[r.slide] = (out[r.slide] || 0) + Number(r.n);
+    return Array.from({ length: out.length }, (_, i) => out[i] || 0);
+  };
+  const byPlatform: Record<string, { shown: number; completed: number }> = {};
+  for (const r of rows) {
+    if (r.event !== "shown" && r.event !== "completed") continue;
+    const p = (byPlatform[r.platform] ||= { shown: 0, completed: 0 });
+    p[r.event as "shown" | "completed"] += Number(r.n);
+  }
+  const daily: Record<string, { shown: number; completed: number; skipped: number }> = {};
+  for (const r of rows) {
+    if (r.event !== "shown" && r.event !== "completed" && r.event !== "skipped") continue;
+    const d = (daily[r.day] ||= { shown: 0, completed: 0, skipped: 0 });
+    d[r.event as "shown" | "completed" | "skipped"] += Number(r.n);
+  }
+  c.header("Cache-Control", "private, no-store");
+  return c.json({
+    days,
+    since,
+    totals: {
+      shown: total("shown"),
+      completed: total("completed"),
+      skipped: total("skipped"),
+      login: total("login"),
+    },
+    reachedBySlide: bySlide("reached"),
+    skippedBySlide: bySlide("skipped"),
+    byPlatform,
+    daily: Object.entries(daily)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, v]) => ({ day, ...v })),
+  });
+});
+
+adminRoute.post("/media/onboarding-image", async (c) => {
+  requireFullAdmin(c);
+  const fileType = assertAdminImageUpload(c);
+  const body = await readAdminImageBody(c);
+  const uploaded = await uploadToR2(c.env, fileType, ONBOARDING_IMAGE_PREFIX, body, [fileType]);
+  await logAudit(c, "onboarding.image.upload", "onboarding-image", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
+  return c.json(uploaded);
+});
+
+/** Image for an Explore promo banner (appConfig.explore.banners). */
+adminRoute.post("/media/explore-banner", async (c) => {
+  requireFullAdmin(c);
+  const fileType = assertAdminImageUpload(c);
+  const body = await readAdminImageBody(c);
+  const uploaded = await uploadToR2(c.env, fileType, EXPLORE_BANNER_PREFIX, body, [fileType]);
+  await logAudit(c, "explore.banner.upload", "explore-banner", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
+  return c.json(uploaded);
+});
+
+adminRoute.post("/media/payment-qr", async (c) => {
+  requireFullAdmin(c);
+  const fileType = assertAdminImageUpload(c);
+  const body = await readAdminImageBody(c);
+
+  const uploaded = await uploadToR2(c.env, fileType, "payment-qr", body, [fileType]);
+  await logAudit(c, "payment.qr.upload", "payment-qr", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
+  return c.json(uploaded);
+});
+
+/**
+ * Upload a photo of a physical prize (migration 0042).
+ *
+ * Deliberately the same helper pair as the contest banner above — the same declared
+ * type / declared length pre-checks before the body is read, the same exact-type
+ * allow-list so the bytes must match what the panel claimed, and the same audit
+ * line. A second, subtly different image intake is how one of them ends up without
+ * a size cap.
+ */
+adminRoute.post("/media/product-image", async (c) => {
+  requireFullAdmin(c);
+  const fileType = assertAdminImageUpload(c);
+  const body = await readAdminImageBody(c);
+
+  const uploaded = await uploadToR2(c.env, fileType, PRODUCT_IMAGE_PREFIX, body, [fileType]);
+  await logAudit(c, "prize.product-image.upload", "product-image", uploaded.fileKey, {
+    publicUrl: uploaded.publicUrl,
+  });
+  return c.json(uploaded);
+});
+
+adminRoute.delete("/media/product-image", async (c) => {
+  requireFullAdmin(c);
+  const body = await c.req.json<unknown>();
+  if (!isRecord(body) || typeof body.url !== "string") {
+    throw httpsError("invalid-argument", "url must be an owned product-image URL.");
+  }
+  const key = productImageKeyFromPublicUrl(c.env, body.url);
+  if (!key) throw httpsError("invalid-argument", "url must be an owned product-image URL.");
+  const db = getDb(c.env);
+  if (await productImageKeyIsAttached(db, c.env, key)) {
+    throw httpsError(
+      "failed-precondition",
+      "Cannot delete an image that is attached to a contest or a prize claim.",
+    );
+  }
+  await deleteProductImageByPublicUrl(c.env, body.url);
+  await logAudit(c, "prize.product-image.delete", "product-image", body.url);
+  return c.json({ success: true });
+});
+
+adminRoute.delete("/media/contest-banner", async (c) => {
+  requireFullAdmin(c);
+  const body = await c.req.json<unknown>();
+  if (!isRecord(body) || typeof body.url !== "string") {
+    throw httpsError("invalid-argument", "url must be an owned contest-banner URL.");
+  }
+  const key = contestBannerKeyFromPublicUrl(c.env, body.url);
+  if (!key) throw httpsError("invalid-argument", "url must be an owned contest-banner URL.");
+  const db = getDb(c.env);
+  if (await contestBannerKeyIsAttached(db, c.env, key)) {
+    throw httpsError("failed-precondition", "Cannot delete a banner that is attached to a contest.");
+  }
+  await deleteContestBannerByPublicUrl(c.env, body.url);
+  await logAudit(c, "contest.banner.delete", "contest-banner", body.url);
+  return c.json({ success: true });
+});
+
+adminRoute.delete("/contests/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const current = await db.select().from(schema.contests).where(eq(schema.contests.id, id)).get();
+  if (!current) throw httpsError("not-found", "Contest not found.");
+  if (current.status === "live") throw httpsError("failed-precondition", "Live contests cannot be deleted.");
+  const matches = await contestMatchCounts(db, id);
+  if (matches.waiting || matches.active) {
+    throw httpsError("failed-precondition", "Contests with waiting or active matches cannot be deleted.");
+  }
+
+  const deleted = await db
+    .delete(schema.contests)
+    .where(and(
+      eq(schema.contests.id, id),
+      sql`(${schema.contests.status} IS NULL OR ${schema.contests.status} <> 'live')`,
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${schema.contestMatches}
+        WHERE ${schema.contestMatches.contestId} = ${id}
+          AND ${schema.contestMatches.status} IN ('waiting_for_opponent', 'active')
+      )`,
+    ))
+    .run();
+  if (deleted.meta.changes === 0) {
+    const stillExists = await db.select({ id: schema.contests.id }).from(schema.contests).where(eq(schema.contests.id, id)).get();
+    if (!stillExists) throw httpsError("not-found", "Contest not found.");
+    throw httpsError("failed-precondition", "Contest became ineligible for deletion; refresh and try again.");
+  }
+  await invalidateContestCaches(c.env, id, c);
+  await logAudit(c, "contest.delete", "contest", id, { previous: current });
+  await cleanupUnattachedContestBanners(c, contestBannerCandidates(current));
+  // The product image too, on the same terms as the banner. This was unreachable
+  // before the panel could upload one; without it, deleting a product contest that
+  // never produced a claim leaves its image in R2 forever. `cleanupUnattachedProductImages`
+  // checks contests AND prize_claims, so an image a winner is still looking at while
+  // waiting for delivery is left alone.
+  await cleanupUnattachedProductImages(c, [current?.prizeProductImageUrl].filter((url): url is string => typeof url === "string" && !!url));
+  return c.json({ message: "Contest deleted successfully" });
+});
+
+// Update a contest template.
+adminRoute.patch("/contests/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const body = await c.req.json<unknown>();
+  const { recognized, values } = validateContestInput(body, false);
+  if (!recognized) throw httpsError("invalid-argument", "At least one recognized contest field is required.");
+
+  const current = await db.select().from(schema.contests).where(eq(schema.contests.id, id)).get();
+  if (!current) throw httpsError("not-found", "Contest not found.");
+
+  // Promo prize budget, on the MERGED result. Linking/unlinking it, or changing
+  // the reward of a contest it funds, changes what the platform pays per match:
+  // that needs the approval password (lib/approvalPassword.ts).
+  const mergedBudget = hasOwn(values, "subsidyBudgetId") ? values.subsidyBudgetId : current.subsidyBudgetId ?? null;
+  const mergedPrizeType = hasOwn(values, "prizeType") ? values.prizeType : normalizePrizeType(current.prizeType);
+  const budgetChanged = hasOwn(values, "subsidyBudgetId") && values.subsidyBudgetId !== (current.subsidyBudgetId ?? null);
+  // Switching the prize kind changes which budget kind fits, so it re-checks too.
+  const kindChanged = mergedPrizeType !== normalizePrizeType(current.prizeType);
+  if (mergedBudget && (budgetChanged || kindChanged)) {
+    await assertLinkableBudget(c.env, mergedBudget, mergedPrizeType === "product" ? "product_prize" : "contest_prize");
+  }
+  const mergedFee = hasOwn(values, "totalEntryFee") ? values.totalEntryFee : Number(current.totalEntryFee ?? 0);
+  const mergedCost = mergedPrizeType === "product"
+    ? (hasOwn(values, "prizeCostCoins") ? values.prizeCostCoins : Number(current.prizeCostCoins ?? 0))
+    : 0;
+  assertProductCostFunded(mergedFee, mergedCost, mergedBudget);
+  const rewardChanged = hasOwn(values, "rewardCoins") && values.rewardCoins !== Number(current.rewardCoins ?? 0);
+  const feeChanged = hasOwn(values, "totalEntryFee") && values.totalEntryFee !== Number(current.totalEntryFee ?? 0);
+  const costChanged = hasOwn(values, "prizeCostCoins") && values.prizeCostCoins !== Number(current.prizeCostCoins ?? 0);
+  if (budgetChanged || (mergedBudget && (rewardChanged || feeChanged || costChanged || kindChanged))) await assertApproval(c, body as any);
+
+  // Validate the invariant on the MERGED result: a PATCH that only raises
+  // rewardCoins, or only lowers totalEntryFee, must be rejected just the same.
+  assertPrizeFundedByPot(
+    hasOwn(values, "totalEntryFee") ? values.totalEntryFee : Number(current.totalEntryFee ?? 0),
+    hasOwn(values, "rewardCoins") ? values.rewardCoins : Number(current.rewardCoins ?? 0),
+    { subsidyBudgetId: mergedPrizeType === "product" ? null : mergedBudget },
+  );
+
+  // Same reason as above: a PATCH that only moves one edge of the window has to
+  // be checked against the edge already in the database.
+  assertContestWindow(
+    hasOwn(values, "startsAt") ? values.startsAt : (current.startsAt ?? null),
+    hasOwn(values, "endsAt") ? values.endsAt : (current.endsAt ?? null),
+  );
+
+  const matches = await contestMatchCounts(db, id);
+  if (hasOwn(values, "status") && current.status === "live" && values.status !== "live" && matches.waiting) {
+    throw httpsError("failed-precondition", "Cannot move a live contest while waiting matches exist.");
+  }
+  if (hasOwn(values, "rewardCoins") && values.rewardCoins !== Number(current.rewardCoins ?? 0) && matches.active) {
+    throw httpsError("failed-precondition", "Cannot change rewards while active matches exist.");
+  }
+  if (
+    hasOwn(values, "voteDurationDays") &&
+    values.voteDurationDays !== Number(current.voteDurationDays ?? 1) &&
+    matches.waiting
+  ) {
+    throw httpsError("failed-precondition", "Cannot change vote duration while waiting matches exist.");
+  }
+
+  const currentExtra = isRecord(current.extra) ? current.extra : {};
+  const set: Record<string, any> = {};
+  for (const field of [
+    "title", "type", "status", "totalEntryFee", "rewardCoins", "voteDurationDays", "autoCancelHours", "minVotes", "bannerUrl",
+    "startsAt", "endsAt", "minLevel", "maxLevel",
+    // Prize kind + product fields. `validateContestInput` only emits these as a
+    // consistent set — switching to "product" forces rewardCoins to 0, switching
+    // back to "coins" nulls the product columns — so they are safe to copy through
+    // individually here.
+    "prizeType", "prizeProductTitle", "prizeProductImageUrl", "prizeProductValue", "prizeProductDescription",
+    "subsidyBudgetId", "prizeCostCoins",
+  ]) {
+    if (hasOwn(values, field)) set[field] = values[field];
+  }
+  // Migrate a legacy extra-only banner before removing stale canonical copies.
+  if (!hasOwn(set, "bannerUrl") && !current.bannerUrl && typeof (currentExtra.bannerUrl ?? currentExtra.bannerImageUrl) === "string") {
+    set.bannerUrl = currentExtra.bannerUrl ?? currentExtra.bannerImageUrl;
+  }
+  const extra = cleanContestExtra(currentExtra);
+  if (hasOwn(values, "description")) extra.description = values.description;
+  if (hasOwn(values, "rules")) extra.rules = values.rules;
+  set.extra = extra;
+
+  const finalStatus = hasOwn(set, "status") ? set.status : current.status;
+  const finalBanner = hasOwn(set, "bannerUrl") ? set.bannerUrl : current.bannerUrl;
+  if (
+    finalStatus === "live" &&
+    !contestBannerUrl(finalBanner) &&
+    (current.status !== "live" || hasOwn(set, "bannerUrl"))
+  ) {
+    throw httpsError("failed-precondition", "A banner is required before a contest can go live.");
+  }
+
+  const oldBanners = contestBannerCandidates(current);
+  // The image being replaced, so it can be reaped if nothing else points at it.
+  const oldProductImages = [current.prizeProductImageUrl].filter(
+    (url): url is string => typeof url === "string" && !!url,
+  );
+  const updateConditions: any[] = [eq(schema.contests.id, id)];
+  if (current.status === "live" && set.status !== undefined && set.status !== "live") {
+    updateConditions.push(sql`NOT EXISTS (
+      SELECT 1 FROM ${schema.contestMatches}
+      WHERE ${schema.contestMatches.contestId} = ${id}
+        AND ${schema.contestMatches.status} = 'waiting_for_opponent'
+    )`);
+  }
+  if (set.rewardCoins !== undefined && set.rewardCoins !== Number(current.rewardCoins ?? 0)) {
+    updateConditions.push(sql`NOT EXISTS (
+      SELECT 1 FROM ${schema.contestMatches}
+      WHERE ${schema.contestMatches.contestId} = ${id}
+        AND ${schema.contestMatches.status} = 'active'
+    )`);
+  }
+  if (set.voteDurationDays !== undefined && set.voteDurationDays !== Number(current.voteDurationDays ?? 1)) {
+    updateConditions.push(sql`NOT EXISTS (
+      SELECT 1 FROM ${schema.contestMatches}
+      WHERE ${schema.contestMatches.contestId} = ${id}
+        AND ${schema.contestMatches.status} = 'waiting_for_opponent'
+    )`);
+  }
+  // Changing WHAT is awarded gets the same protection as changing how much.
+  //
+  // The per-match snapshot shields a battle whose `prize_type` is already set, but
+  // a match created before migration 0042 has NULL there and settlement falls back
+  // to this template — so an edit really can change what an in-flight battle pays.
+  // Same guard, same reason, and re-asserted as SQL below for the same TOCTOU
+  // reason as the others.
+  const prizeChanged =
+    (set.prizeType !== undefined && set.prizeType !== normalizePrizeType(current.prizeType)) ||
+    (set.prizeProductTitle !== undefined && set.prizeProductTitle !== (current.prizeProductTitle ?? null)) ||
+    (set.prizeProductImageUrl !== undefined &&
+      set.prizeProductImageUrl !== (current.prizeProductImageUrl ?? null));
+  if (prizeChanged) {
+    const counts = await contestMatchCounts(db, id);
+    if (counts.active > 0) {
+      throw httpsError("failed-precondition", "Cannot change the prize while active matches exist.");
+    }
+    updateConditions.push(sql`NOT EXISTS (
+      SELECT 1 FROM ${schema.contestMatches}
+      WHERE ${schema.contestMatches.contestId} = ${id}
+        AND ${schema.contestMatches.status} = 'active'
+    )`);
+  }
+
+  const updated = await db.update(schema.contests).set(set).where(and(...updateConditions)).run();
+  if (updated.meta.changes === 0) {
+    throw httpsError("failed-precondition", "Contest activity changed while saving. Refresh and try again.");
+  }
+  await invalidateContestCaches(c.env, id, c);
+  await logAudit(c, "contest.update", "contest", id, set);
+  await cleanupUnattachedContestBanners(c, oldBanners);
+  if (hasOwn(set, "prizeProductImageUrl")) await cleanupUnattachedProductImages(c, oldProductImages);
+  return c.json({ message: "Contest updated", id });
+});
+
+// ---- posts ----
+// Moderators can reach these, and a hard delete leaves nothing behind, so each
+// takedown records who did it and whose content it was.
+adminRoute.delete("/posts/:id", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const post = await db.select({ userId: schema.posts.userId }).from(schema.posts).where(eq(schema.posts.id, id)).get();
+  await db.delete(schema.posts).where(eq(schema.posts.id, id));
+  if (post) await logAudit(c, "post.delete", "post", id, { ownerUid: post.userId });
+  return c.json({ message: "Post deleted" });
+});
+adminRoute.patch("/posts/:id", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const { isHidden } = await c.req.json<any>();
+  await db.update(schema.posts).set({ isHidden: !!isHidden }).where(eq(schema.posts.id, id));
+  await logAudit(c, isHidden ? "post.hide" : "post.show", "post", id);
+  return c.json({ message: `Post ${isHidden ? "hidden" : "shown"}` });
+});
+
+// ---- stories ----
+adminRoute.delete("/stories/:id", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const story = await db.select({ userId: schema.stories.userId }).from(schema.stories).where(eq(schema.stories.id, id)).get();
+  await db.delete(schema.stories).where(eq(schema.stories.id, id));
+  if (story) await logAudit(c, "story.delete", "story", id, { ownerUid: story.userId });
+  return c.json({ message: "Story deleted" });
+});
+adminRoute.patch("/stories/:id", async (c) => {
+  // stories table has no isHidden column; deletion is the moderation action.
+  return c.json({ message: "Stories support delete only" });
+});
+
+/**
+ * Moderators see counts, not money. `/revenue` and `/finance-trends` are full-admin
+ * only, but the dashboard (`/overview`) and `/analytics` returned the same coin and
+ * rupee totals to every role. Every key starting with `revenue` is dropped.
+ */
+function withoutRevenueForModerators<T extends Record<string, any>>(c: any, o: T): T {
+  if (isFullAdmin(c)) return o;
+  return Object.fromEntries(Object.entries(o).filter(([k]) => !/^revenue/i.test(k))) as T;
+}
+
+/** The dashboard also tells the panel which role it is talking to (role-aware menu). */
+const withViewerRole = (c: any, o: Record<string, any>) => ({ ...withoutRevenueForModerators(c, o), viewerRole: c.get("adminRole") ?? null });
+
+// ---- reports ----
+/** Fetch a light preview (media/text) of a reported target for moderation. */
+async function reportPreview(db: any, targetType: string | null, targetId: string | null): Promise<any> {
+  if (!targetId) return null;
+  try {
+    switch (targetType) {
+      case "post": {
+        const p = await db.select({ mediaUrl: schema.posts.mediaUrl, caption: schema.posts.caption, userId: schema.posts.userId }).from(schema.posts).where(eq(schema.posts.id, targetId)).get();
+        return p ? { kind: "post", mediaUrl: p.mediaUrl, text: p.caption, ownerId: p.userId } : { kind: "post", missing: true };
+      }
+      case "story": {
+        const s = await db.select({ mediaUrl: schema.stories.mediaUrl, userId: schema.stories.userId }).from(schema.stories).where(eq(schema.stories.id, targetId)).get();
+        return s ? { kind: "story", mediaUrl: s.mediaUrl, ownerId: s.userId } : { kind: "story", missing: true };
+      }
+      case "match":
+      case "contestMatch":
+      case "contestMatches": {
+        const m = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, targetId)).get();
+        const a = (m?.userA as any) || {};
+        const b = (m?.userB as any) || {};
+        // BOTH entries: the reported content is often only one side of the battle.
+        return m
+          ? { kind: "match", mediaUrl: a.mediaUrl, mediaUrlB: b.mediaUrl ?? null, text: m.title, heldAt: m.moderationHoldAt ?? null }
+          : { kind: "match", missing: true };
+      }
+      case "comment": {
+        const cm = await db.select({ text: schema.postComments.text, userId: schema.postComments.userId }).from(schema.postComments).where(eq(schema.postComments.id, targetId)).get();
+        return cm ? { kind: "comment", text: cm.text, ownerId: cm.userId } : { kind: "comment", missing: true };
+      }
+      case "user": {
+        const u = await db.select({ username: schema.users.username, profileImageUrl: schema.users.profileImageUrl }).from(schema.users).where(eq(schema.users.uid, targetId)).get();
+        return u ? { kind: "user", mediaUrl: u.profileImageUrl, text: u.username } : { kind: "user", missing: true };
+      }
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+const MATCH_REPORT_TARGETS = ["match", "contestMatch", "contestMatches"];
+
+/**
+ * Release a battle's moderation hold once no OPEN report on it remains. A no-op
+ * for non-match targets and for battles that were never held.
+ */
+async function releaseMatchHoldIfClear(db: any, targetType: string | null, targetId: string | null): Promise<void> {
+  if (!targetId || !MATCH_REPORT_TARGETS.includes(String(targetType))) return;
+  const open = await db
+    .select({ id: schema.reports.id })
+    .from(schema.reports)
+    .where(
+      and(
+        eq(schema.reports.targetId, targetId),
+        inArray(schema.reports.targetType, MATCH_REPORT_TARGETS),
+        sql`COALESCE(${schema.reports.status}, 'open') = 'open'`,
+      ),
+    )
+    .limit(1)
+    .all();
+  if (open.length === 0) {
+    await db
+      .update(schema.contestMatches)
+      .set({ moderationHoldAt: null } as any)
+      .where(eq(schema.contestMatches.id, targetId));
+  }
+}
+
+adminRoute.get("/reports", async (c) => {
+  const db = getDb(c.env);
+  // Dismissed rows are kept (they make a re-report a no-op duplicate) but are
+  // closed, so the queue only shows what still needs a decision.
+  const rows = await db
+    .select()
+    .from(schema.reports)
+    // 'actioned' (content removed, migration 0067) is closed too.
+    .where(sql`COALESCE(${schema.reports.status}, 'open') NOT IN ('dismissed', 'actioned')`)
+    .orderBy(desc(schema.reports.createdAt))
+    .limit(100)
+    .all();
+  const out = await Promise.all(
+    rows.map(async (r) => ({
+      ...r,
+      createdAt: new Date(r.createdAt).toISOString(),
+      preview: await reportPreview(db, r.targetType, r.targetId),
+    })),
+  );
+  return c.json(out);
+});
+adminRoute.delete("/reports", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.query("id");
+  if (id) {
+    const r = await db.select().from(schema.reports).where(eq(schema.reports.id, id)).get();
+    await db.delete(schema.reports).where(eq(schema.reports.id, id));
+    if (r) {
+      await releaseMatchHoldIfClear(db, r.targetType, r.targetId);
+      await logAudit(c, "report.delete", "report", id, { targetType: r.targetType, targetId: r.targetId });
+    }
+  }
+  return c.json({ message: "Report deleted" });
+});
+
+/** Report target types that name the same thing (the app sends the first of each). */
+const REPORT_TYPE_GROUPS: Record<string, string[]> = {
+  match: MATCH_REPORT_TARGETS,
+  comment: ["comment"],
+  post: ["post"],
+  story: ["story"],
+  user: ["user"],
+};
+const reportGroupOf = (t: string | null) =>
+  Object.values(REPORT_TYPE_GROUPS).find((g) => g.includes(String(t))) ?? [String(t)];
+
+const COALESCE_OPEN = (status: string | null | undefined) => (status ?? "open") === "open";
+
+const REPORT_TARGET_NOUN: Record<string, string> = { match: "battle", comment: "comment", post: "post", story: "story", user: "account" };
+
+/**
+ * Tell reporters what happened to their report (it shows under Settings › My
+ * reports). Never names the reported account, and never says who else reported.
+ */
+async function notifyReporters(
+  c: any,
+  reporterIds: Array<string | null | undefined>,
+  outcome: "actioned" | "dismissed",
+  targetType: string | null,
+) {
+  const ids = [...new Set(reporterIds.filter((x): x is string => !!x))].slice(0, 500);
+  if (!ids.length) return;
+  const noun = REPORT_TARGET_NOUN[reportGroupOf(targetType)[0]] ?? "content";
+  await createNotificationsBulk(c.env, ids, {
+    title: "Update on your report",
+    body:
+      outcome === "actioned"
+        ? `Thanks for reporting. We reviewed the ${noun} and took action because it broke our community guidelines.`
+        : `Thanks for reporting. We reviewed the ${noun} and found it doesn't break our community guidelines.`,
+    type: "report_update",
+    targetId: "reports",
+  }).catch((e) => console.error("[admin] reporter notice failed (continuing)", e));
+}
+
+/** Tell the owner their content was taken down, with the appeal route the policy promises. */
+async function notifyRemoval(c: any, ownerUid: string | null | undefined, what: string) {
+  if (!ownerUid) return;
+  await createNotification(c.env, ownerUid, {
+    title: "Content removed",
+    body: `Your ${what} was removed for breaking the community guidelines. To appeal, use Settings › Report a Problem.`,
+    type: "moderation",
+    targetId: "support",
+  }).catch((e) => console.error("[admin] removal notice failed (continuing)", e));
+}
+
+/**
+ * Take reported content down. Returns false when the target was already gone.
+ *
+ * This used to be a bare row delete for posts, stories and `post_comments` only.
+ * The app reports battle comments as `comment`, and those live in
+ * `match_comments`, so removing one deleted nothing and still answered "Content
+ * removed". Media stayed public at its URL and the feed caches kept serving it.
+ */
+async function removeReportedContent(
+  c: any,
+  r: { targetType: string | null; targetId: string | null },
+): Promise<boolean | "held"> {
+  const db = getDb(c.env);
+  const id = String(r.targetId || "");
+  const group = reportGroupOf(r.targetType);
+  if (group === MATCH_REPORT_TARGETS) {
+    const m = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, id)).get();
+    if (!m) return false;
+    if (m.status === "active" || m.status === "waiting_for_opponent") {
+      // Cancelling a live battle refunds both entry fees, which is a money action:
+      // full admins only, like the cancel button. A moderator's report keeps the
+      // battle held (out of every feed) and stays open for an admin.
+      if (!isFullAdmin(c)) {
+        await db.update(schema.contestMatches).set({ moderationHoldAt: now() } as any).where(eq(schema.contestMatches.id, m.id));
+        return "held";
+      }
+      // A battle still holding entry fees is cancelled WITH a refund — the
+      // same path as the admin cancel button — never a bare status flip that
+      // would swallow both players' coins.
+      const settled = await cancelMatchWithRefund(c, m, { reason: "Removed by moderation:", audit: "match.cancel.report" });
+      if (!settled) throw httpsError("failed-precondition", "The battle settled meanwhile — reload and try again.");
+    } else if (m.status !== "cancelled") {
+      // Already settled: payouts stand; the content is just taken down.
+      await db.update(schema.contestMatches).set({ status: "cancelled" }).where(eq(schema.contestMatches.id, m.id));
+      // Removed content must not stay on either participant's story ring.
+      await teardownVsStories(c.env, m.id).catch((e) =>
+        console.error("[admin] report removal: VS story teardown failed (continuing)", m.id, e),
+      );
+    }
+    return true;
+  }
+  switch (group[0]) {
+    case "post": {
+      const post = await db.select({ userId: schema.posts.userId, mediaUrl: schema.posts.mediaUrl }).from(schema.posts).where(eq(schema.posts.id, id)).get();
+      if (!post) return false;
+      await db.batch([
+        db.delete(schema.postComments).where(eq(schema.postComments.postId, id)),
+        db.delete(schema.postLikes).where(eq(schema.postLikes.postId, id)),
+        db.delete(schema.posts).where(eq(schema.posts.id, id)),
+      ] as any);
+      if (post.mediaUrl) await deleteMediaByUrl(c.env, post.mediaUrl, post.userId).catch(() => {});
+      c.executionCtx.waitUntil(purgeShared(c, userCacheKey(post.userId), commentsCacheKey("posts", id)).catch(() => {}));
+      await notifyRemoval(c, post.userId, "post");
+      return true;
+    }
+    case "story": {
+      const story = await db.select().from(schema.stories).where(eq(schema.stories.id, id)).get();
+      if (!story) return false;
+      // Same ownership rule as the user's own delete: contest media is shared.
+      if (story.mediaUrl && !isContestStoryType(story.type) && !vsImageKeyFromPublicUrl(c.env, story.mediaUrl)) {
+        await deleteMediaByUrl(c.env, story.mediaUrl, story.userId).catch(() => {});
+      }
+      await db.delete(schema.stories).where(eq(schema.stories.id, id));
+      c.executionCtx.waitUntil(purgeShared(c, STORIES_FEED_CACHE_KEY).catch(() => {}));
+      await notifyRemoval(c, story.userId, "story");
+      return true;
+    }
+    case "comment": {
+      const mc = await db.select().from(schema.matchComments).where(eq(schema.matchComments.id, id)).get();
+      if (mc) {
+        const del = await db.delete(schema.matchComments).where(eq(schema.matchComments.id, id)).run();
+        if (del.meta.changes) {
+          const counters = await bumpEngagement(c.env, mc.matchId, "comment", -1);
+          await publish(c.env, `match:${mc.matchId}`, { type: "comment", commentId: id, removed: true, commentCount: counters.comment ?? 0 });
+          await db.delete(schema.commentLikes).where(eq(schema.commentLikes.commentId, id));
+        }
+        c.executionCtx.waitUntil(purgeShared(c, commentsCacheKey("matches", mc.matchId)).catch(() => {}));
+        await notifyRemoval(c, mc.userId, "comment");
+        return true;
+      }
+      const pc = await db.select().from(schema.postComments).where(eq(schema.postComments.id, id)).get();
+      if (pc) {
+        const del = await db.delete(schema.postComments).where(eq(schema.postComments.id, id)).run();
+        if (del.meta.changes) {
+          await db.update(schema.posts).set({ commentCount: sql`MAX(${schema.posts.commentCount} - 1, 0)` }).where(eq(schema.posts.id, pc.postId));
+          await db.delete(schema.commentLikes).where(eq(schema.commentLikes.commentId, id));
+        }
+        c.executionCtx.waitUntil(purgeShared(c, commentsCacheKey("posts", pc.postId)).catch(() => {}));
+        await notifyRemoval(c, pc.userId, "comment");
+        return true;
+      }
+      const bc = await db.select().from(schema.blogComments).where(eq(schema.blogComments.id, id)).get();
+      if (bc) {
+        await db.delete(schema.blogComments).where(eq(schema.blogComments.id, id));
+        await db.delete(schema.commentLikes).where(eq(schema.commentLikes.commentId, id));
+        c.executionCtx.waitUntil(purgeShared(c, commentsCacheKey("blog", bc.postId)).catch(() => {}));
+        await notifyRemoval(c, bc.userId, "comment");
+        return true;
+      }
+      return false;
+    }
+    case "user":
+      throw httpsError(
+        "failed-precondition",
+        "An account cannot be 'removed' from a report. Block it from Users, then dismiss the report.",
+      );
+    default:
+      throw httpsError("failed-precondition", `Reports of type "${r.targetType}" cannot be removed from here.`);
+  }
+}
+
+/**
+ * Resolve a report. action: "dismiss" (just close it) or "remove" (delete the
+ * reported content, then close every open report on it).
+ */
+adminRoute.post("/reports/:id/resolve", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const { action } = await c.req.json<any>();
+  if (action !== "remove" && action !== "dismiss") throw httpsError("invalid-argument", 'action must be "remove" or "dismiss".');
+  const r = await db.select().from(schema.reports).where(eq(schema.reports.id, id)).get();
+  if (!r) throw httpsError("not-found", "Report not found.");
+
+  if (action === "remove") {
+    const removed = await removeReportedContent(c, r);
+    if (removed === "held") {
+      await logAudit(c, "report.hold", r.targetType || "report", r.targetId || id, { reportId: id });
+      return c.json(
+        {
+          message: "Removing a live battle refunds both players, so a full admin must do it. It is held out of the feeds meanwhile.",
+          held: true,
+        },
+        202,
+      );
+    }
+    // The content is gone: every report on it (from any reporter, under any alias
+    // of its type) has nothing left to decide. Removing only this one left the
+    // others in the queue pointing at nothing.
+    //
+    // They are marked 'actioned' rather than deleted (migration 0067), so each
+    // reporter can see the outcome under "My reports" and is told about it. The
+    // queue below excludes them, and a re-report stays a no-op duplicate.
+    const group = and(eq(schema.reports.targetId, r.targetId as string), inArray(schema.reports.targetType, reportGroupOf(r.targetType)));
+    const closed = await db
+      .update(schema.reports)
+      .set({ status: "actioned", resolvedAt: now() } as any)
+      .where(and(group, sql`COALESCE(${schema.reports.status}, 'open') = 'open'`))
+      .returning({ reporterId: schema.reports.reporterId });
+    await notifyReporters(c, closed.map((x: any) => x.reporterId), "actioned", r.targetType);
+    await logAudit(c, "report.remove", r.targetType || "report", r.targetId || id, { reportId: id, removed });
+    return c.json({ message: removed ? "Content removed" : "Content was already gone; reports closed", removed });
+  }
+  // Dismiss keeps the row as 'dismissed' so the same reporter re-reporting is
+  // a duplicate (unique reporter/target) rather than a fresh vote toward the
+  // auto-hold. The hold is released once no OPEN report on the battle remains.
+  await db.update(schema.reports).set({ status: "dismissed", resolvedAt: now() } as any).where(eq(schema.reports.id, id));
+  if (COALESCE_OPEN(r.status)) await notifyReporters(c, [r.reporterId], "dismissed", r.targetType);
+  await releaseMatchHoldIfClear(db, r.targetType, r.targetId);
+  await logAudit(c, "report.dismiss", r.targetType || "report", r.targetId || id, { reportId: id });
+  return c.json({ message: "Report dismissed" });
+});
+
+// ---- support tickets ----
+adminRoute.get("/support", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.supportTickets).orderBy(desc(schema.supportTickets.createdAt)).limit(100).all();
+  // Moderators answer tickets but must not read payment or contact details in them.
+  const full = isFullAdmin(c);
+  return c.json(
+    rows.map((r) => ({
+      ...r,
+      ...(full ? {} : { subject: redactPaymentDetails(r.subject), message: redactPaymentDetails(r.message), adminReply: redactPaymentDetails(r.adminReply) }),
+      createdAt: new Date(r.createdAt).toISOString(),
+      updatedAt: new Date(r.updatedAt).toISOString(),
+    })),
+  );
+});
+adminRoute.patch("/support", async (c) => {
+  const db = getDb(c.env);
+  const { id, status, adminReply } = await c.req.json<any>();
+  if (!id) throw httpsError("invalid-argument", "ID required");
+  await db.update(schema.supportTickets).set({ status: status || "resolved", adminReply: adminReply || "", updatedAt: now() }).where(eq(schema.supportTickets.id, id));
+  await logAudit(c, "support.update", "support_ticket", String(id), { status: status || "resolved" });
+  return c.json({ message: "Ticket updated" });
+});
+adminRoute.delete("/support", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.query("id");
+  if (id) {
+    await db.delete(schema.supportTickets).where(eq(schema.supportTickets.id, id));
+    await logAudit(c, "support.delete", "support_ticket", id);
+  }
+  return c.json({ message: "Ticket deleted" });
+});
+
+// ---- users ----
+adminRoute.delete("/users/:id", async (c) => {
+  const db = getDb(c.env);
+  requireFullAdmin(c);
+  const id = c.req.param("id");
+  await closeRealtimeSessions(c.env, id);
+  await db.delete(schema.users).where(eq(schema.users.uid, id));
+  await deleteAuthUser(c.env, id).catch((e) => console.error("Auth delete failed", e));
+  await logAudit(c, "user.delete", "user", id);
+  return c.json({ message: "User deleted successfully" });
+});
+adminRoute.patch("/users/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const { isBlocked } = await c.req.json<any>();
+  const blocked = !!isBlocked;
+
+  /**
+   * Never overwrite a deletion state with a moderation state.
+   *
+   * `status` carries both, and unblocking used to write `'active'`
+   * unconditionally — so unblocking an account that had asked to be deleted
+   * silently cancelled its deletion, putting it back on every public surface
+   * while `deletion_requests` still said pending. An already-anonymised account
+   * would have been resurrected as a browsable "Deleted user" profile.
+   *
+   * `isBlocked` still moves either way: blocking an account that is pending
+   * deletion is legitimate (the two facts are independent), it just must not
+   * rewrite which of them `status` is recording.
+   */
+  const existing = await db
+    .select({ status: schema.users.status })
+    .from(schema.users)
+    .where(eq(schema.users.uid, id))
+    .get();
+  if (!existing) throw httpsError("not-found", "User not found.");
+  if (existing.status === DELETED_STATUS) {
+    throw httpsError("failed-precondition", "This account has been deleted and cannot be modified.");
+  }
+  const nextStatus =
+    existing.status === PENDING_DELETION_STATUS
+      ? PENDING_DELETION_STATUS
+      : blocked
+        ? "blocked"
+        : "active";
+
+  const updated = await db.update(schema.users)
+    .set({ isBlocked: blocked, status: nextStatus, updatedAt: now() })
+    .where(eq(schema.users.uid, id))
+    .run();
+  if (updated.meta.changes === 0) throw httpsError("not-found", "User not found.");
+  await updateAuthUser(c.env, id, { disabled: blocked }).catch((e) => console.warn("Auth update failed", e));
+  // A banned account's Stories must leave the shared stories bar promptly.
+  c.executionCtx.waitUntil(purgeShared(c, STORIES_FEED_CACHE_KEY).catch(() => {}));
+  // `isBlocked`/`status` changed — drop any cached auth-state (paid tier) so the
+  // block, or the un-block, is enforced on the next request rather than after the
+  // cache TTL. Unblock does NOT revoke sessions, so it would otherwise not be
+  // covered by the invalidation inside `revokeAllSessions` below.
+  await invalidateAuthState(c.env, id);
+  if (blocked) {
+    /**
+     * Kill the AUTH sessions too, not just the realtime ones.
+     *
+     * `revokeRealtimeSessions` closes open WebSockets, which was the only eviction a
+     * block performed. The bearer tokens survived it: `isBlocked` is checked on every
+     * request so a blocked session could not DO anything, but the refresh token stayed
+     * valid indefinitely, so the moment a block was lifted every previously-signed-in
+     * device — including any the account was blocked because of — resumed exactly where
+     * it left off. Unblocking is meant to restore the user's access, not the intruder's.
+     *
+     * Open sockets are closed as part of this — `revokeAllSessions` does it, so that the
+     * user's own "log out of all devices" gets the same treatment rather than only the
+     * admin paths remembering to ask.
+     */
+    await revokeAllSessions(c.env, id, "admin_blocked");
+  }
+  await logAudit(c, blocked ? "user.block" : "user.unblock", "user", id);
+  return c.json({ message: `User ${blocked ? "blocked" : "unblocked"} successfully`, status: blocked });
+});
+
+/**
+ * Sign an account out everywhere WITHOUT blocking it.
+ *
+ * The support case that had no answer: a user writes in saying their account is
+ * compromised. Blocking them evicts the intruder and also locks out the victim, who has
+ * done nothing wrong and now cannot enter contests or reach their balance. The only
+ * other option was to talk them through the in-app control, which is useless if the
+ * intruder has already changed the password.
+ *
+ * Full admin rather than moderator: this ends sessions on an arbitrary account, so it is
+ * the same class of power as blocking, not the same class as hiding a comment.
+ */
+adminRoute.post("/users/:id/logout-all", async (c) => {
+  requireFullAdmin(c);
+  const id = c.req.param("id");
+  const exists = await getDb(c.env)
+    .select({ uid: schema.users.uid })
+    .from(schema.users)
+    .where(eq(schema.users.uid, id))
+    .get();
+  if (!exists) throw httpsError("not-found", "User not found.");
+
+  // Closes open sockets too, as part of the revocation.
+  await revokeAllSessions(c.env, id, "admin_forced");
+  // Audited, because an admin ending someone's sessions is exactly the kind of action
+  // that has to be attributable after the fact.
+  await logAudit(c, "user.logoutAll", "user", id);
+  return c.json({ message: "All sessions for this user have been ended." });
+});
+
+// ---- wallet (was adminManageWallet Cloud Function) ----
+adminRoute.post("/users/:id/wallet", async (c) => {
+  requireFullAdmin(c);
+  const userId = c.req.param("id");
+  const { amount, type, reason: rawReason, requestId, locked: rawLocked } = await c.req.json<any>();
+  if (!["add", "subtract"].includes(type)) {
+    throw httpsError("invalid-argument", "type must be add or subtract.");
+  }
+  // Diamond (users.locked_coins) or DP coin. Adding Diamonds credits play-only
+  // coins; subtracting Diamonds takes only Diamonds (lib/money.ts).
+  const locked = rawLocked === true;
+  const amt = assertCoinAmount(amount, "amount");
+  // Every manual balance change needs a stated reason, and is idempotent. The
+  // key used to be an optional header the admin panel never sent, so a double
+  // click (or a retried request) moved the coins twice.
+  const reason = typeof rawReason === "string" ? rawReason.trim() : "";
+  if (reason.length < 3 || reason.length > 200) {
+    throw httpsError("invalid-argument", "A reason (3-200 characters) is required for a wallet adjustment.");
+  }
+  const idemKey = String(c.req.header("Idempotency-Key") ?? requestId ?? "").trim();
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(idemKey)) {
+    throw httpsError("invalid-argument", "requestId (or an Idempotency-Key header, 8-64 characters) is required.");
+  }
+  const adminUid = c.get("user")?.uid ?? "admin";
+  // `adjustUserWallet` is the only supported wallet mutation: it validates the
+  // amount as a positive whole number, writes balance + ledger in one D1
+  // transaction, and fails loudly instead of clamping an over-subtraction.
+  try {
+    const { newBalance, applied, newDiamonds } = await adjustUserWallet(c.env, {
+      uid: userId,
+      amount: amt,
+      direction: type,
+      type: "admin_adjustment",
+      // Who and why travel with the ledger row itself, so they survive even if
+      // the audit write below fails.
+      description: `Admin ${type} ${amt} ${locked ? "Diamond" : "DP coin"} by ${adminUid}: ${reason}`.slice(0, 300),
+      claimKey: `admin_wallet:${userId}:${idemKey}`,
+      locked,
+      ts: now(),
+    });
+    await logAudit(c, "wallet.adjust", "user", userId, {
+      amount: applied,
+      type,
+      locked,
+      reason,
+      before: newBalance - applied,
+      newBalance,
+      requestId: idemKey,
+    });
+    return c.json({ message: "Wallet updated successfully", newBalance, newDpcoin: Math.max(0, newBalance - newDiamonds), newDiamonds });
+  } catch (e) {
+    if (e instanceof WalletReplay) {
+      // Same key, already applied. Report the current balance rather than
+      // pretending to have moved coins a second time.
+      const current = await getDb(c.env)
+        .select({ balance: schema.users.dpcoin })
+        .from(schema.users)
+        .where(eq(schema.users.uid, userId))
+        .get();
+      return c.json({
+        message: "Wallet already updated for this request (no change applied).",
+        newBalance: current?.balance ?? 0,
+        replayed: true,
+      });
+    }
+    throw e;
+  }
+});
+
+
+// ======================= BLOG =======================
+/** URL-safe slug from a title (keeps unicode letters, e.g. Hindi). */
+function slugify(input: string): string {
+  return (input || "")
+    .toString()
+    .normalize("NFKC")
+    .toLowerCase()
+    .trim()
+    .replace(/['"]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "-") // non letters/numbers -> hyphen
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120) || "post";
+}
+
+/** Ensure the slug is unique in blog_posts (ignoring an optional current id). */
+async function uniqueBlogSlug(db: any, base: string, ignoreId?: string): Promise<string> {
+  let slug = base;
+  for (let i = 2; i < 500; i++) {
+    const existing = await db
+      .select({ id: schema.blogPosts.id })
+      .from(schema.blogPosts)
+      .where(eq(schema.blogPosts.slug, slug))
+      .get();
+    if (!existing || existing.id === ignoreId) return slug;
+    slug = `${base}-${i}`;
+  }
+  return `${base}-${Date.now()}`;
+}
+
+const BLOG_LIMITS = {
+  title: 200,
+  excerpt: 500,
+  content: 1_000_000,
+  url: 2_048,
+  category: 100,
+  author: 100,
+  tag: 50,
+  tags: 20,
+  metaTitle: 160,
+  metaDescription: 300,
+};
+
+function blogText(
+  value: unknown,
+  label: string,
+  maxLength: number,
+  options: { required?: boolean; preserveWhitespace?: boolean } = {},
+): string | null {
+  if (value === null || value === undefined) {
+    if (options.required) throw httpsError("invalid-argument", `${label} is required.`);
+    return null;
+  }
+  if (typeof value !== "string") throw httpsError("invalid-argument", `${label} must be text.`);
+  const normalized = options.preserveWhitespace ? value.trim() : value.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    if (options.required) throw httpsError("invalid-argument", `${label} is required.`);
+    return null;
+  }
+  if (normalized.length > maxLength) {
+    throw httpsError("invalid-argument", `${label} must be ${maxLength.toLocaleString()} characters or fewer.`);
+  }
+  return normalized;
+}
+
+function blogUrl(value: unknown, label: string): string | null {
+  const normalized = blogText(value, label, BLOG_LIMITS.url);
+  if (!normalized) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw httpsError("invalid-argument", `${label} must be a valid URL.`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw httpsError("invalid-argument", `${label} must use http:// or https://.`);
+  }
+  return normalized;
+}
+
+function blogTags(value: unknown): string[] {
+  if (!Array.isArray(value)) throw httpsError("invalid-argument", "Tags must be an array.");
+  if (value.length > BLOG_LIMITS.tags) {
+    throw httpsError("invalid-argument", `Add no more than ${BLOG_LIMITS.tags} tags.`);
+  }
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    const tag = blogText(raw, "Each tag", BLOG_LIMITS.tag);
+    if (!tag) continue;
+    const key = tag.toLocaleLowerCase();
+    if (!seen.has(key)) {
+      tags.push(tag);
+      seen.add(key);
+    }
+  }
+  return tags;
+}
+
+function blogStatus(value: unknown): "published" | "draft" {
+  if (value !== "published" && value !== "draft") {
+    throw httpsError("invalid-argument", "Status must be published or draft.");
+  }
+  return value;
+}
+
+function blogPlainText(content: string | null | undefined): string {
+  return (content || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&[a-zA-Z0-9#]+;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function validatePublishedBlog(status: string, content: string | null | undefined): void {
+  if (status === "published" && blogPlainText(content).length < 20) {
+    throw httpsError("invalid-argument", "Published posts need at least 20 characters of readable content.");
+  }
+}
+
+/**
+ * Clear the hot public list/detail caches after an editorial write.
+ *
+ * Also runs for DELETE and UNPUBLISH, which is why the blog TTLs are the shortest
+ * in `READ_CACHE_TTLS`: this purge clears THIS colo immediately, and every other
+ * colo converges within the (20s) edge TTL. A post pulled for legal reasons is the
+ * case that bound is chosen for.
+ */
+async function invalidateBlogReadCache(c: any, id?: string, ...slugs: Array<string | null | undefined>): Promise<void> {
+  const keys = new Set<string>([blogListCacheKey(12)]);
+  if (id) keys.add(blogPostCacheKey(id));
+  for (const slug of slugs) if (slug) keys.add(blogPostCacheKey(slug));
+  await purgeShared(c, ...keys);
+
+  // `/read/blog/categories` is a whole-RESPONSE entry rather than a logical one, so
+  // it needs the url-keyed purge. It goes through `edgePurgeUrl` — the same builder
+  // the reader uses — instead of the hand-rolled `new URL(c.req.url)` this replaced:
+  // that copy had to re-derive the path and the (empty) query string by hand, and a
+  // reader that ever gained a `varyParams` entry would have silently stopped
+  // matching it.
+  edgePurgeUrl(c, "/read/blog/categories");
+}
+
+// List posts (any status) for the admin table. Optional ?q= title search.
+adminRoute.get("/blog", async (c) => {
+  const db = getDb(c.env);
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 200);
+  const q = (c.req.query("q") || "").trim().toLowerCase();
+  const conds: any[] = [];
+  if (q.length >= 2) conds.push(like(sql`lower(${schema.blogPosts.title})`, `%${q}%`));
+  const rows = await db
+    .select({
+      id: schema.blogPosts.id,
+      slug: schema.blogPosts.slug,
+      title: schema.blogPosts.title,
+      excerpt: schema.blogPosts.excerpt,
+      coverImageUrl: schema.blogPosts.coverImageUrl,
+      category: schema.blogPosts.category,
+      author: schema.blogPosts.author,
+      status: schema.blogPosts.status,
+      source: schema.blogPosts.source,
+      viewCount: schema.blogPosts.viewCount,
+      publishedAt: schema.blogPosts.publishedAt,
+      createdAt: schema.blogPosts.createdAt,
+    })
+    .from(schema.blogPosts)
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.blogPosts.publishedAt))
+    .limit(limit)
+    .all();
+  return c.json(rows);
+});
+
+// Blog stats for dashboards / list header.
+//
+// Three COUNT(*)s over the whole blog_posts table (~4.5k rows each) — a top
+// rows_read source in `wrangler d1 insights` because the admin Blog page and the
+// dashboard refetch it. Memoised in isolate memory for 60s: the counts are a
+// glanceable header, not an authorization decision, so a minute of staleness is
+// fine, and a warm isolate serving an admin clicking around now answers repeat
+// loads with zero D1. Deliberately NOT cross-isolate/KV — this is a pure read
+// saving with no invalidation need at this staleness.
+const BLOG_STATS_MEMO_KEY = "admin:blog-stats";
+adminRoute.get("/blog/stats", async (c) => {
+  const cached = memoGet<{ total: number; published: number; drafts: number; imported: number }>(BLOG_STATS_MEMO_KEY);
+  if (cached) return c.json(cached);
+  const db = getDb(c.env);
+  const total = (await db.select({ v: count() }).from(schema.blogPosts).get())?.v ?? 0;
+  const published =
+    (await db.select({ v: count() }).from(schema.blogPosts).where(eq(schema.blogPosts.status, "published")).get())?.v ?? 0;
+  const imported =
+    (await db.select({ v: count() }).from(schema.blogPosts).where(eq(schema.blogPosts.source, "archive")).get())?.v ?? 0;
+  const stats = { total, published, drafts: total - published, imported };
+  memoPut(BLOG_STATS_MEMO_KEY, stats, 60);
+  return c.json(stats);
+});
+
+
+
+/** sha256 hex of a string (used for content-hash dedup + image keys). */
+async function sha256Hex(input: string | ArrayBuffer): Promise<string> {
+  const data = typeof input === "string" ? new TextEncoder().encode(input) : new Uint8Array(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Bound on a single imported image so one URL cannot exhaust Worker memory. */
+const MAX_IMPORT_IMAGE_BYTES = 15 * 1024 * 1024;
+
+/**
+ * Fetch a single (Wayback-hosted) TopHunt image and store the ORIGINAL bytes in
+ * R2, returning the permanent public R2 URL. De-duplicated by content hash so
+ * the same image is never uploaded twice. Only image content-types are stored.
+ */
+adminRoute.post("/media/fetch-to-r2", async (c) => {
+  // Server-side fetch of an attacker-influenced URL is an SSRF primitive, and
+  // it writes into our own R2 bucket. Restricted to full admins, the URL is
+  // validated against private/link-local/metadata targets, and redirects are
+  // re-validated per hop (see lib/safeFetch.ts).
+  requireFullAdmin(c);
+  const { url, folder } = await c.req.json<any>();
+  if (!url || typeof url !== "string") throw httpsError("invalid-argument", "url is required.");
+  // Keep the key inside our own namespace: no leading slash, no traversal, no
+  // empty segments — a client-controlled prefix must not be able to write over
+  // deployment-owned paths such as `contest-banners/`.
+  const baseFolder = sanitizeMediaFolder(folder || "blog/imported", "blog/imported");
+
+  const { buffer: buf, contentType: ct } = await fetchExternalImage(
+    url,
+    "TopHuntArchiveImporter/1.0 (+https://tophunt.in)",
+    MAX_IMPORT_IMAGE_BYTES,
+  );
+
+  const hash = await sha256Hex(buf);
+  // `putVerifiedImage` decides the extension and the stored content type from the
+  // bytes. The remote `Content-Type` (`ct`) is not trusted for either: this used
+  // to map `image/svg+xml` to `.svg` and fall back to a `.img` extension for
+  // anything unrecognised, which meant a hostile archive host could place a
+  // scriptable SVG — or simply an arbitrary blob — into our bucket.
+  const stored = await putVerifiedImage(c.env, baseFolder, buf, hash);
+  if (!stored) {
+    throw httpsError(
+      "invalid-argument",
+      `That URL returned ${ct || "unknown"} data that is not a JPEG, PNG, WebP or GIF image.`,
+    );
+  }
+  await logAudit(c, "media.fetchToR2", "media", stored.key, { url: stored.publicUrl, bytes: buf.byteLength });
+  return c.json({
+    url: stored.publicUrl,
+    hash,
+    key: stored.key,
+    cached: stored.cached,
+    bytes: buf.byteLength,
+    contentType: stored.contentType,
+  });
+});
+
+/**
+ * Bulk upsert used by the Wayback archive importer. Body: { posts: [...] }.
+ * Each write (post + its import-log row) is committed atomically via db.batch.
+ * De-duplicates by canonical originalUrl first, then by content hash (a
+ * different URL with identical content is recorded as a duplicate and skipped).
+ * publishedAt is stored ONLY when the importer determined it confidently.
+ */
+adminRoute.post("/blog/import", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const body = await c.req.json<any>();
+  const posts: any[] = Array.isArray(body) ? body : body.posts || [];
+  if (!Array.isArray(posts) || posts.length === 0) {
+    throw httpsError("invalid-argument", "Body must be { posts: [...] } with at least one post.");
+  }
+  let created = 0,
+    updated = 0,
+    skipped = 0,
+    duplicates = 0;
+
+  const logRow = (url: string, status: string, extra: any = {}) => {
+    const ts = now();
+    return db
+      .insert(schema.blogImportLog)
+      .values({
+        id: newId(),
+        url,
+        status,
+        error: extra.error || null,
+        postId: extra.postId || null,
+        imagesTotal: extra.imagesTotal ?? 0,
+        imagesMissing: extra.imagesMissing ?? 0,
+        attempts: 1,
+        createdAt: ts,
+        updatedAt: ts,
+      })
+      .onConflictDoUpdate({
+        target: schema.blogImportLog.url,
+        set: {
+          status,
+          error: extra.error || null,
+          postId: extra.postId || null,
+          imagesTotal: extra.imagesTotal ?? 0,
+          imagesMissing: extra.imagesMissing ?? 0,
+          attempts: sql`${schema.blogImportLog.attempts} + 1`,
+          updatedAt: ts,
+        },
+      });
+  };
+
+  for (const p of posts) {
+    const canonical = (p?.originalUrl || p?.canonicalUrl || "").trim();
+    // Validate: must have title + non-trivial content.
+    if (!p || !p.title || !p.content || String(p.content).trim().length < 40) {
+      skipped++;
+      if (canonical) await logRow(canonical, "skipped", { error: "empty or invalid page" }).run();
+      continue;
+    }
+
+    // Dedup by canonical URL.
+    let existing: any = null;
+    if (canonical) {
+      existing = await db
+        .select({ id: schema.blogPosts.id })
+        .from(schema.blogPosts)
+        .where(eq(schema.blogPosts.originalUrl, canonical))
+        .get();
+    }
+    // Dedup by content hash (a different URL with identical content).
+    if (!existing && p.contentHash) {
+      const dup = await db
+        .select({ id: schema.blogPosts.id, originalUrl: schema.blogPosts.originalUrl })
+        .from(schema.blogPosts)
+        .where(eq(schema.blogPosts.contentHash, p.contentHash))
+        .get();
+      if (dup && dup.originalUrl !== canonical) {
+        duplicates++;
+        if (canonical) await logRow(canonical, "duplicate", { postId: dup.id }).run();
+        continue;
+      }
+    }
+
+    const ts = now();
+    const title = String(p.title).slice(0, 500);
+    const excerpt = p.excerpt ? String(p.excerpt).slice(0, 500) : null;
+    // SEO must never be missing.
+    const metaTitle = (p.metaTitle || title).slice(0, 160);
+    const metaDescription = (p.metaDescription || excerpt || String(p.content).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 155)).slice(0, 300);
+    const values = {
+      title,
+      excerpt,
+      content: p.content,
+      coverImageUrl: p.coverImageUrl || null,
+      category: p.category || null,
+      tags: Array.isArray(p.tags) ? p.tags : [],
+      author: p.author || "TopHunt",
+      status: p.status || "published",
+      metaTitle,
+      metaDescription,
+      canonicalUrl: canonical || null,
+      source: "archive",
+      originalUrl: canonical || null,
+      contentHash: p.contentHash || null,
+      publishedAt: typeof p.publishedAt === "number" ? p.publishedAt : null,
+      updatedAt: ts,
+    };
+    const logExtra = { imagesTotal: p.imagesTotal ?? 0, imagesMissing: p.imagesMissing ?? 0 };
+
+    if (existing) {
+      await db.batch([
+        db.update(schema.blogPosts).set(values).where(eq(schema.blogPosts.id, existing.id)),
+        logRow(canonical, "updated", { postId: existing.id, ...logExtra }),
+      ]);
+      updated++;
+    } else {
+      const id = newId();
+      const slug = await uniqueBlogSlug(db, slugify(p.slug || title));
+      await db.batch([
+        db.insert(schema.blogPosts).values({ id, slug, createdAt: ts, viewCount: 0, ...values }),
+        logRow(canonical, "imported", { postId: id, ...logExtra }),
+      ]);
+      created++;
+    }
+  }
+  await logAudit(c, "blog.import", "blog", "bulk", { created, updated, skipped, duplicates, received: posts.length });
+  return c.json({ success: true, created, updated, skipped, duplicates, received: posts.length });
+});
+
+// ---- Import job progress (fed by the importer, read by the dashboard) ----
+adminRoute.post("/blog/import/progress", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const body = await c.req.json<any>();
+  await writeImportProgress(c.env, body);
+  return c.json({ ok: true });
+});
+
+adminRoute.get("/blog/import/progress", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  return c.json((await readImportProgress(c.env)) || null);
+});
+
+// URLs already handled (so the importer can resume and skip them).
+adminRoute.get("/blog/import/done-urls", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const rows = await db
+    .select({ url: schema.blogImportLog.url })
+    .from(schema.blogImportLog)
+    .where(sql`${schema.blogImportLog.status} IN ('imported','updated','duplicate','skipped')`)
+    .all();
+  return c.json({ urls: rows.map((r) => r.url) });
+});
+
+// Import log rows (optionally filtered by ?status=).
+adminRoute.get("/blog/import/log", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const status = c.req.query("status");
+  const limit = boundedQueryInt(c.req.query("limit"), 200, 1, 1000);
+  const conds: any[] = [];
+  if (status) conds.push(eq(schema.blogImportLog.status, status));
+  const rows = await db
+    .select()
+    .from(schema.blogImportLog)
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.blogImportLog.updatedAt))
+    .limit(limit)
+    .all();
+  return c.json(rows);
+});
+
+// Import-log breakdown by status (dashboard counters).
+adminRoute.get("/blog/import/summary", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const rows = await db
+    .select({ status: schema.blogImportLog.status, n: count() })
+    .from(schema.blogImportLog)
+    .groupBy(schema.blogImportLog.status)
+    .all();
+  const byStatus: Record<string, number> = {};
+  let missingImages = 0;
+  for (const r of rows) byStatus[r.status] = r.n;
+  const mi = await db.select({ v: sql<number>`COALESCE(SUM(${schema.blogImportLog.imagesMissing}),0)` }).from(schema.blogImportLog).get();
+  missingImages = mi?.v ?? 0;
+  return c.json({ byStatus, missingImages });
+});
+
+// Mark rows of a certain status as pending so the next importer run retries them.
+adminRoute.post("/blog/import/retry", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const { status } = await c.req.json<{status: string}>();
+  if (!status) {
+    throw httpsError("invalid-argument", "Status is required");
+  }
+  const res = await db
+    .update(schema.blogImportLog)
+    .set({ status: "pending", updatedAt: now() })
+    .where(eq(schema.blogImportLog.status, status))
+    .run();
+  return c.json({ ok: true, requeued: (res as any)?.meta?.changes ?? undefined });
+});
+
+adminRoute.post("/blog/import/discover", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const { type } = await c.req.json<any>();
+  if (type !== "fresh" && type !== "resume" && !["failed", "skipped", "duplicate", "updated"].includes(type)) {
+    throw httpsError("invalid-argument", "Invalid mode");
+  }
+  const urls = await discoverUrls(c.env, type);
+  return c.json({ urls });
+});
+
+adminRoute.post("/blog/import/process-batch", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const { urls, state } = await c.req.json<any>();
+  if (!Array.isArray(urls)) throw httpsError("invalid-argument", "urls must be an array");
+  const newState = await processBatch(c.env, urls, state);
+  return c.json({ state: newState });
+});
+
+adminRoute.post("/blog/import/finish", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const { state } = await c.req.json<any>();
+  if (state) {
+    state.done = true;
+    await writeImportProgress(c.env, state);
+  }
+  return c.json({ ok: true });
+});
+
+// Record a failed URL (importer reports parse/network failures here).
+adminRoute.post("/blog/import/fail", async (c) => {
+  // The importer fetches from the web and bulk-publishes public, indexed pages.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const { url, error } = await c.req.json<any>();
+  if (!url) throw httpsError("invalid-argument", "url is required.");
+  const ts = now();
+  await db
+    .insert(schema.blogImportLog)
+    .values({ id: newId(), url, status: "failed", error: (error || "").slice(0, 500), attempts: 1, createdAt: ts, updatedAt: ts })
+    .onConflictDoUpdate({
+      target: schema.blogImportLog.url,
+      set: { status: "failed", error: (error || "").slice(0, 500), attempts: sql`${schema.blogImportLog.attempts} + 1`, updatedAt: ts },
+    });
+  return c.json({ ok: true });
+});
+
+// Create a single post (admin panel form).
+adminRoute.post("/blog", async (c) => {
+  const db = getDb(c.env);
+  const b = await c.req.json<any>().catch(() => {
+    throw httpsError("invalid-argument", "A JSON request body is required.");
+  });
+  const title = blogText(b.title, "Title", BLOG_LIMITS.title, { required: true })!;
+  const content = blogText(b.content, "Content", BLOG_LIMITS.content, { preserveWhitespace: true });
+  const excerpt = blogText(b.excerpt, "Excerpt", BLOG_LIMITS.excerpt);
+  const status = blogStatus(b.status ?? "draft");
+  const author = blogText(b.author ?? "TopHunt", "Author", BLOG_LIMITS.author, { required: true })!;
+  const category = blogText(b.category, "Category", BLOG_LIMITS.category);
+  const coverImageUrl = blogUrl(b.coverImageUrl, "Cover image URL");
+  const tags = b.tags === undefined ? [] : blogTags(b.tags);
+  validatePublishedBlog(status, content);
+
+  const ts = now();
+  const slug = await uniqueBlogSlug(db, slugify(blogText(b.slug, "Slug", 120) || title));
+  const id = newId();
+  const metaTitle = blogText(b.metaTitle, "SEO title", BLOG_LIMITS.metaTitle) || title.slice(0, BLOG_LIMITS.metaTitle);
+  const metaDescription =
+    blogText(b.metaDescription, "SEO description", BLOG_LIMITS.metaDescription) ||
+    (excerpt || blogPlainText(content)).slice(0, BLOG_LIMITS.metaDescription) || null;
+  if (
+    b.publishedAt !== undefined &&
+    b.publishedAt !== null &&
+    (typeof b.publishedAt !== "number" || !Number.isFinite(b.publishedAt))
+  ) {
+    throw httpsError("invalid-argument", "Published date must be a timestamp or null.");
+  }
+  const publishedAt =
+    typeof b.publishedAt === "number" && Number.isFinite(b.publishedAt)
+      ? b.publishedAt
+      : status === "published"
+        ? ts
+        : null;
+
+  await db.insert(schema.blogPosts).values({
+    id,
+    slug,
+    title,
+    excerpt,
+    content,
+    coverImageUrl,
+    category,
+    tags,
+    author,
+    status,
+    metaTitle,
+    metaDescription,
+    source: "admin",
+    originalUrl: null,
+    viewCount: 0,
+    publishedAt,
+    createdAt: ts,
+    updatedAt: ts,
+  });
+  await invalidateBlogReadCache(c, id, slug);
+  await logAudit(c, "blog.create", "blog_post", id, { title, slug, status });
+  return c.json({ success: true as const, id, slug });
+});
+
+// Read a single post (with content) for the edit form.
+adminRoute.get("/blog/:id", async (c) => {
+  const db = getDb(c.env);
+  const row = await db.select().from(schema.blogPosts).where(eq(schema.blogPosts.id, c.req.param("id"))).get();
+  if (!row) throw httpsError("not-found", "Post not found.");
+  return c.json(row);
+});
+
+// Update a post. Omitted fields are preserved; supplied fields are normalized.
+adminRoute.patch("/blog/:id", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const b = await c.req.json<any>().catch(() => {
+    throw httpsError("invalid-argument", "A JSON request body is required.");
+  });
+  const current = await db.select().from(schema.blogPosts).where(eq(schema.blogPosts.id, id)).get();
+  if (!current) throw httpsError("not-found", "Post not found.");
+  if (b.expectedUpdatedAt !== undefined) {
+    if (typeof b.expectedUpdatedAt !== "number" || !Number.isFinite(b.expectedUpdatedAt)) {
+      throw httpsError("invalid-argument", "expectedUpdatedAt must be a timestamp.");
+    }
+    if (b.expectedUpdatedAt !== current.updatedAt) {
+      throw httpsError("failed-precondition", "This post changed after you opened it. Close and reopen the editor before saving.");
+    }
+  }
+
+  const set: any = { updatedAt: now() };
+  if (b.title !== undefined) set.title = blogText(b.title, "Title", BLOG_LIMITS.title, { required: true });
+  if (b.excerpt !== undefined) set.excerpt = blogText(b.excerpt, "Excerpt", BLOG_LIMITS.excerpt);
+  if (b.content !== undefined) set.content = blogText(b.content, "Content", BLOG_LIMITS.content, { preserveWhitespace: true });
+  if (b.coverImageUrl !== undefined) set.coverImageUrl = blogUrl(b.coverImageUrl, "Cover image URL");
+  if (b.category !== undefined) set.category = blogText(b.category, "Category", BLOG_LIMITS.category);
+  if (b.tags !== undefined) set.tags = blogTags(b.tags);
+  if (b.author !== undefined) set.author = blogText(b.author, "Author", BLOG_LIMITS.author, { required: true });
+  if (b.status !== undefined) set.status = blogStatus(b.status);
+  if (b.publishedAt !== undefined) {
+    if (b.publishedAt !== null && (typeof b.publishedAt !== "number" || !Number.isFinite(b.publishedAt))) {
+      throw httpsError("invalid-argument", "Published date must be a timestamp or null.");
+    }
+    set.publishedAt = b.publishedAt;
+  }
+
+  const finalTitle = set.title ?? current.title;
+  const finalExcerpt = set.excerpt !== undefined ? set.excerpt : current.excerpt;
+  const finalContent = set.content !== undefined ? set.content : current.content;
+  const finalStatus = set.status ?? current.status ?? "draft";
+  if (b.content !== undefined || b.status !== undefined) {
+    validatePublishedBlog(finalStatus, finalContent);
+  }
+
+  if (b.metaTitle !== undefined) {
+    set.metaTitle = blogText(b.metaTitle, "SEO title", BLOG_LIMITS.metaTitle) || finalTitle.slice(0, BLOG_LIMITS.metaTitle);
+  } else if (!current.metaTitle) {
+    set.metaTitle = finalTitle.slice(0, BLOG_LIMITS.metaTitle);
+  }
+  if (b.metaDescription !== undefined) {
+    set.metaDescription =
+      blogText(b.metaDescription, "SEO description", BLOG_LIMITS.metaDescription) ||
+      (finalExcerpt || blogPlainText(finalContent)).slice(0, BLOG_LIMITS.metaDescription) || null;
+  } else if (!current.metaDescription) {
+    set.metaDescription = (finalExcerpt || blogPlainText(finalContent)).slice(0, BLOG_LIMITS.metaDescription) || null;
+  }
+
+  // Regenerate the permalink only when explicitly requested.
+  if (b.slug !== undefined) {
+    const requestedSlug = blogText(b.slug, "Slug", 120, { required: true })!;
+    set.slug = await uniqueBlogSlug(db, slugify(requestedSlug), id);
+  }
+  if (
+    finalStatus === "published" &&
+    current.status !== "published" &&
+    (set.publishedAt === null || set.publishedAt === undefined)
+  ) {
+    set.publishedAt = now();
+  }
+
+  await db.update(schema.blogPosts).set(set).where(eq(schema.blogPosts.id, id));
+  const finalSlug = set.slug || current.slug;
+  await invalidateBlogReadCache(c, id, current.slug, finalSlug);
+  await logAudit(c, "blog.update", "blog_post", id, {
+    title: finalTitle,
+    slug: finalSlug,
+    status: finalStatus,
+    fields: Object.keys(b),
+  });
+  return c.json({ message: "Post updated", id, slug: finalSlug });
+});
+
+// Delete a post.
+adminRoute.delete("/blog/:id", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const current = await db
+    .select({ id: schema.blogPosts.id, slug: schema.blogPosts.slug, title: schema.blogPosts.title })
+    .from(schema.blogPosts)
+    .where(eq(schema.blogPosts.id, id))
+    .get();
+  if (!current) throw httpsError("not-found", "Post not found.");
+  await db.delete(schema.blogPosts).where(eq(schema.blogPosts.id, id));
+  await invalidateBlogReadCache(c, id, current.slug);
+  await logAudit(c, "blog.delete", "blog_post", id, { title: current.title, slug: current.slug });
+  return c.json({ message: "Post deleted" });
+});
+
+// ======================= DASHBOARD =======================
+const OVERVIEW_MEMO_KEY = "admin:overview";
+adminRoute.get("/overview", async (c) => {
+  // The panel polls this every ~20s (sidebar badges + dashboard) and it runs a
+  // dozen COUNT(*)/SUM() aggregates. They are index-backed and cheap while the
+  // tables are small, but `count(*) from users`, `count(*) from posts` and the
+  // SUM over successful payments all scale with total history — so at real
+  // volume this endpoint alone would be a standing D1 cost. Memoise the whole
+  // payload in isolate memory for 30s: the numbers are a glanceable dashboard,
+  // not an authorization decision, so 30s of staleness is fine, and a warm
+  // isolate serving an admin answers repeat polls with zero D1. Per-isolate and
+  // no KV, so it stays free-tier-safe (no KV writes) and needs no invalidation.
+  const cachedOverview = memoGet<Record<string, number>>(OVERVIEW_MEMO_KEY);
+  if (cachedOverview) return c.json(withViewerRole(c, cachedOverview));
+  const db = getDb(c.env);
+  const users = (await db.select({ v: count() }).from(schema.users).get())?.v ?? 0;
+  const posts = (await db.select({ v: count() }).from(schema.posts).get())?.v ?? 0;
+  const reports = (await db.select({ v: count() }).from(schema.reports).get())?.v ?? 0;
+  const support =
+    (await db.select({ v: count() }).from(schema.supportTickets).where(ne(schema.supportTickets.status, "resolved")).get())?.v ?? 0;
+  // Money + engagement metrics.
+  //
+  // `revenue` is COINS SOLD (that is what payments.amount has always held, and
+  // what the dashboard card is labelled). `revenueInr` is the actual money.
+  const money = await db
+    .select({
+      coins: sql<number>`COALESCE(SUM(COALESCE(${schema.payments.coins}, ${schema.payments.amount})),0)`,
+      paise: sql<number>`COALESCE(SUM(${schema.payments.amountPaise}),0)`,
+    })
+    .from(schema.payments)
+    .where(eq(schema.payments.status, "success"))
+    .get();
+  const revenue = Number(money?.coins ?? 0);
+  const revenueInr = roundFiat(Number(money?.paise ?? 0) / 100);
+  const activeMatches =
+    (await db.select({ v: count() }).from(schema.contestMatches).where(eq(schema.contestMatches.status, "active")).get())?.v ?? 0;
+  const liveContests =
+    (await db.select({ v: count() }).from(schema.contests).where(eq(schema.contests.status, "live")).get())?.v ?? 0;
+  const pendingWithdrawals =
+    (await db.select({ v: count() }).from(schema.withdrawals).where(eq(schema.withdrawals.status, "pending")).get())?.v ?? 0;
+  const pendingDeposits =
+    (await db.select({ v: count() }).from(schema.deposits).where(eq(schema.deposits.status, "pending")).get())?.v ?? 0;
+  // Prize claims that still need a human: anything not yet delivered or cancelled.
+  // Counted by exclusion rather than by listing the open states, so a status added
+  // to the lifecycle later shows up in the badge instead of being silently ignored.
+  //
+  // `unclaimed` is deliberately included even though it is waiting on the WINNER,
+  // not on us: a physical prize nobody ever claims is the one state an operator has
+  // to notice in order to chase it, and it is invisible everywhere else.
+  const pendingPrizeClaims =
+    (
+      await db
+        .select({ v: count() })
+        .from(schema.prizeClaims)
+        .where(notInArray(schema.prizeClaims.status, ["delivered", "cancelled"]))
+        .get()
+    )?.v ?? 0;
+  const overview = { users, posts, reports, support, revenue, revenueInr, activeMatches, liveContests, pendingWithdrawals, pendingDeposits, pendingPrizeClaims };
+  memoPut(OVERVIEW_MEMO_KEY, overview, 30);
+  return c.json(withViewerRole(c, overview));
+});
+
+// Cloudflare free-tier capacity snapshot for the dashboard widget: growth-table
+// row counts + DB storage (measured in-Worker, memoised 5 min) and — when a
+// CF_ANALYTICS_TOKEN is configured — today's live D1 rows_read / rows_written.
+// See lib/capacity.ts and CAPACITY_MONITORING.md.
+adminRoute.get("/capacity", async (c) => c.json(await computeCapacity(c.env)));
+
+/**
+ * Anonymous usage counters (lib/usageEvents.ts) for the Analytics page. Full
+ * admins only, like revenue. Each SQL API call is one of 10,000 free read queries
+ * a day, so the answer is memoised per isolate for 5 minutes.
+ */
+adminRoute.get("/usage-events", async (c) => {
+  requireFullAdmin(c);
+  const days = boundedQueryInt(c.req.query("days"), 7, 1, 90);
+  const key = `memo:usageEvents:${days}`;
+  const cached = memoGet<{ configured: boolean; rows: UsageSummaryRow[] }>(key);
+  if (cached) return c.json(cached);
+  const rows = await fetchUsageSummary(c.env, days).catch((e) => {
+    console.error("[usage] summary failed", e);
+    return null;
+  });
+  const out = { configured: rows !== null, days, rows: rows ?? [] };
+  if (rows !== null) memoPut(key, out, 300);
+  return c.json(out);
+});
+
+adminRoute.get("/device-stats", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select({ platform: schema.users.platform }).from(schema.users).limit(1000).all();
+  let web = 0, mobile = 0, other = 0;
+  for (const r of rows) {
+    const p = (r.platform || "").toLowerCase();
+    if (p === "web") web++;
+    else if (p === "android" || p === "ios") mobile++;
+    else other++;
+  }
+  return c.json({ web, mobile, other });
+});
+
+adminRoute.get("/user-growth", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select({ createdAt: schema.users.createdAt }).from(schema.users).orderBy(desc(schema.users.createdAt)).limit(1000).all();
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const currentMonth = new Date().getMonth();
+  const order: string[] = [];
+  const map: Record<string, number> = {};
+  for (let i = 6; i >= 0; i--) {
+    const m = (currentMonth - i + 12) % 12;
+    order.push(months[m]);
+    map[months[m]] = 0;
+  }
+  for (const r of rows) {
+    if (!r.createdAt) continue;
+    const name = months[new Date(r.createdAt).getMonth()];
+    if (map[name] !== undefined) map[name]++;
+  }
+  return c.json({ categories: order, data: order.map((m) => map[m]) });
+});
+
+adminRoute.get("/recent-tickets", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.supportTickets).orderBy(desc(schema.supportTickets.createdAt)).limit(5).all();
+  const full = isFullAdmin(c);
+  return c.json(
+    rows.map((t) => ({
+      ...t,
+      ...(full ? {} : { subject: redactPaymentDetails(t.subject), message: redactPaymentDetails(t.message), adminReply: redactPaymentDetails(t.adminReply) }),
+      createdAt: new Date(t.createdAt).toISOString(),
+    })),
+  );
+});
+
+// ======================= TABLES =======================
+/**
+ * Columns no panel screen needs. Push tokens can target a user's device with
+ * arbitrary notifications, and `tokensValidAfter` is session-revocation state.
+ */
+const ADMIN_USER_NEVER = ["fcmTokens", "tokensValidAfter"] as const;
+/**
+ * Contact and identity PII. A moderator's job is content; the support and money
+ * flows that need a user's email or phone are full-admin only.
+ */
+const ADMIN_USER_FULL_ONLY = ["email", "phone", "dob", "coordinates", "deviceId"] as const;
+
+/**
+ * Project a `users` row for the panel. It used to spread the whole row, so the
+ * content-only moderator role could page through every user's email, phone,
+ * date of birth, location and FCM push tokens.
+ */
+export function adminUser(row: any, fullAdmin: boolean, gs?: Parameters<typeof levelForXp>[1]) {
+  const u: Record<string, any> = { ...row };
+  for (const k of ADMIN_USER_NEVER) delete u[k];
+  if (!fullAdmin) for (const k of ADMIN_USER_FULL_ONLY) delete u[k];
+  return {
+    id: u.uid,
+    ...u,
+    Dpcoin: u.dpcoin ?? 0,
+    // Derived from XP; the stored column is frozen (lib/gamification.ts#levelForXp).
+    level: levelForXp(u.xp ?? 0, gs ?? { xpThreshold: 500, xpIncrement: 500 }),
+    createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : null,
+    stats: {
+      postsCount: u.postsCount ?? 0,
+      followersCount: u.followersCount ?? 0,
+      followingCount: u.followingCount ?? 0,
+      contestsJoined: u.contestsJoined ?? 0,
+      wins: u.wins ?? 0,
+      totalVotesReceived: u.totalVotesReceived ?? 0,
+    },
+  };
+}
+const iso = (r: any) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null });
+
+adminRoute.get("/users", async (c) => {
+  const db = getDb(c.env);
+  const q = (c.req.query("q") || "").trim().toLowerCase();
+  const limit = boundedQueryInt(c.req.query("limit"), 50, 1, 100);
+  const offset = boundedQueryInt(c.req.query("offset"), 0, 0, 1_000_000);
+  const full = isFullAdmin(c);
+  const conds: any[] = [];
+  if (q.length >= 2) {
+    const term = `%${q}%`;
+    // Searching by email is itself an email lookup, so it follows the same
+    // full-admin rule as returning the column.
+    conds.push(
+      or(
+        like(sql`lower(${schema.users.username})`, term),
+        like(sql`lower(${schema.users.fullName})`, term),
+        ...(full ? [like(sql`lower(${schema.users.email})`, term)] : []),
+      ),
+    );
+  }
+  const rows = await db
+    .select()
+    .from(schema.users)
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.users.createdAt))
+    .limit(limit)
+    .offset(offset)
+    .all();
+  if (rows.length === limit) c.header("X-Next-Offset", String(offset + limit));
+  const gsList = await getGamification(c.env);
+  return c.json(rows.map((r) => adminUser(r, full, gsList)));
+});
+
+adminRoute.get("/users/:id/posts", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.posts).where(eq(schema.posts.userId, c.req.param("id"))).all();
+  return c.json(rows.map(iso));
+});
+
+adminRoute.get("/users/:id/stories", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.stories).where(eq(schema.stories.userId, c.req.param("id"))).all();
+  return c.json(rows.map(iso));
+});
+
+adminRoute.get("/users/:id", async (c) => {
+  const db = getDb(c.env);
+  const u = await db.select().from(schema.users).where(eq(schema.users.uid, c.req.param("id"))).get();
+  return c.json(u ? adminUser(u, isFullAdmin(c), await getGamification(c.env)) : null);
+});
+
+adminRoute.get("/posts", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.posts).orderBy(desc(schema.posts.createdAt)).limit(100).all();
+  return c.json(rows.map(iso));
+});
+
+adminRoute.get("/stories", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.stories).orderBy(desc(schema.stories.createdAt)).limit(100).all();
+  return c.json(rows.map(iso));
+});
+
+adminRoute.get("/contests", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db
+    .select({
+      id: schema.contests.id,
+      title: schema.contests.title,
+      type: schema.contests.type,
+      status: schema.contests.status,
+      bannerUrl: schema.contests.bannerUrl,
+      totalEntryFee: schema.contests.totalEntryFee,
+      rewardCoins: schema.contests.rewardCoins,
+      prizeType: schema.contests.prizeType,
+      prizeProductTitle: schema.contests.prizeProductTitle,
+      prizeProductImageUrl: schema.contests.prizeProductImageUrl,
+      prizeProductValue: schema.contests.prizeProductValue,
+      prizeProductDescription: schema.contests.prizeProductDescription,
+      subsidyBudgetId: schema.contests.subsidyBudgetId,
+      prizeCostCoins: schema.contests.prizeCostCoins,
+      voteDurationDays: schema.contests.voteDurationDays,
+      autoCancelHours: schema.contests.autoCancelHours,
+      minVotes: schema.contests.minVotes,
+      minLevel: schema.contests.minLevel,
+      maxLevel: schema.contests.maxLevel,
+      startsAt: schema.contests.startsAt,
+      endsAt: schema.contests.endsAt,
+      extra: schema.contests.extra,
+      createdBy: schema.contests.createdBy,
+      createdAt: schema.contests.createdAt,
+      totalMatches: count(schema.contestMatches.id),
+      waitingMatches: sql<number>`COALESCE(SUM(CASE WHEN ${schema.contestMatches.status} = 'waiting_for_opponent' THEN 1 ELSE 0 END), 0)`,
+      activeMatches: sql<number>`COALESCE(SUM(CASE WHEN ${schema.contestMatches.status} = 'active' THEN 1 ELSE 0 END), 0)`,
+    })
+    .from(schema.contests)
+    .leftJoin(schema.contestMatches, eq(schema.contestMatches.contestId, schema.contests.id))
+    .groupBy(schema.contests.id)
+    .orderBy(desc(schema.contests.createdAt))
+    .all();
+
+  return c.json(rows.map((row) => {
+    const extra = isRecord(row.extra) ? row.extra : {};
+    return {
+      id: row.id,
+      title: row.title,
+      name: row.title,
+      type: row.type,
+      status: row.status,
+      // Fall back only for legacy rows; any subsequent edit migrates this URL
+      // into the canonical physical column and removes stale extra aliases.
+      bannerUrl: row.bannerUrl ?? (
+        typeof extra.bannerUrl === "string"
+          ? extra.bannerUrl
+          : typeof extra.bannerImageUrl === "string"
+            ? extra.bannerImageUrl
+            : null
+      ),
+      totalEntryFee: row.totalEntryFee,
+      entryFishCoins: row.totalEntryFee,
+      rewardCoins: row.rewardCoins,
+      prizePool: row.rewardCoins,
+      ...publicPrize(row),
+      subsidyBudgetId: row.subsidyBudgetId ?? null,
+      // Admin-only: what one product costs the platform, in coins.
+      prizeCostCoins: Number(row.prizeCostCoins ?? 0),
+      voteDurationDays: row.voteDurationDays,
+      autoCancelHours: row.autoCancelHours,
+      minVotes: row.minVotes,
+      minLevel: row.minLevel ?? null,
+      maxLevel: row.maxLevel ?? null,
+      startsAt: row.startsAt ?? null,
+      endsAt: row.endsAt ?? null,
+      description: typeof extra.description === "string" ? extra.description : null,
+      rules: typeof extra.rules === "string" ? extra.rules : null,
+      createdBy: row.createdBy,
+      createdAt: row.createdAt,
+      totalMatches: Number(row.totalMatches ?? 0),
+      waitingMatches: Number(row.waitingMatches ?? 0),
+      activeMatches: Number(row.activeMatches ?? 0),
+    };
+  }));
+});
+
+// ======================= ADMIN NOTIFICATIONS =======================
+/**
+ * Notifications visible to the caller.
+ *
+ * The feed carries financial events (payout requests, refund clawbacks,
+ * chargebacks, cron failures) which name users and amounts. Moderators have
+ * panel access for content moderation only, so they see moderation-scoped
+ * notifications and nothing else — filtered rather than 403'd, so the bell in
+ * the panel layout keeps working for them.
+ */
+adminRoute.get("/notifications", async (c) => {
+  const db = getDb(c.env);
+  const scopes = isFullAdmin(c) ? ["finance", "moderation"] : ["moderation"];
+  const rows = await db
+    .select()
+    .from(schema.adminNotifications)
+    .where(inArray(schema.adminNotifications.scope, scopes))
+    .orderBy(desc(schema.adminNotifications.createdAt))
+    .limit(10)
+    .all();
+  return c.json(rows.map((n) => ({ ...n, isRead: !!n.isRead })));
+});
+
+adminRoute.post("/notifications/read", async (c) => {
+  const db = getDb(c.env);
+  // Only mark read what the caller was allowed to see.
+  const scopes = isFullAdmin(c) ? ["finance", "moderation"] : ["moderation"];
+  await db
+    .update(schema.adminNotifications)
+    .set({ isRead: true })
+    .where(and(
+      eq(schema.adminNotifications.isRead, false),
+      inArray(schema.adminNotifications.scope, scopes),
+    ));
+  return c.json({ success: true });
+});
+
+/**
+ * Clear (delete) the caller's notifications — the "Clear all" action.
+ *
+ * "Mark all read" only silences the badge; the feed still fills, which for a
+ * repeating alert (a cron failing every tick) reads as "read does nothing". This
+ * removes them. Scoped like the read/list endpoints, so a moderator can only clear
+ * what they can see and never a finance alert. Old rows are also swept
+ * automatically by `pruneOpsTables`; this is the manual version.
+ */
+adminRoute.delete("/notifications", async (c) => {
+  const db = getDb(c.env);
+  const scopes = isFullAdmin(c) ? ["finance", "moderation"] : ["moderation"];
+  await db
+    .delete(schema.adminNotifications)
+    .where(inArray(schema.adminNotifications.scope, scopes));
+  return c.json({ success: true });
+});
+
+
+// ======================= OPS (used by admin CLI scripts) =======================
+// Make/unmake a user admin: sets the Firebase custom claim (Identity Toolkit)
+// AND the D1 users.role, keyed by email or uid.
+adminRoute.post("/set-role", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const { email, userId, makeAdmin, role: roleArg } = await c.req.json<any>();
+  let uid = userId as string | undefined;
+  if (!uid && email) {
+    uid = (await getUserByEmail(c.env, email)) || undefined;
+  }
+  if (!uid) throw httpsError("not-found", "User not found (provide a valid email or userId).");
+  // Prefer an explicit role ("admin" | "moderator" | "user"); fall back to the
+  // legacy makeAdmin boolean.
+  // An unknown role used to fall through to "admin": `{ role: "superadmin" }` (or a
+  // typo) granted full admin. Only the legacy `makeAdmin` flag may omit it.
+  if (roleArg != null && !["admin", "moderator", "user"].includes(roleArg)) {
+    throw httpsError("invalid-argument", 'role must be "admin", "moderator" or "user".');
+  }
+  const role = roleArg != null ? roleArg : makeAdmin === false ? "user" : "admin";
+
+  // Role hierarchy. `requireFullAdmin` admits admin AND superadmin, and nothing
+  // here looked at the TARGET, so any plain admin could demote a superadmin (or
+  // re-role themselves). The /api twin already refused superadmin targets and
+  // pointed here as the place where only a superadmin can do it — now true.
+  const callerUid: string | undefined = c.get("user")?.uid;
+  if (callerUid && callerUid === uid) {
+    throw httpsError("permission-denied", "You cannot change your own role.");
+  }
+  const target = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+  const previousRole = target?.role ?? null;
+  if (previousRole === "superadmin" && c.get("adminRole") !== "superadmin") {
+    throw httpsError("permission-denied", "Only a superadmin can change a superadmin's role.");
+  }
+
+  await setCustomClaims(c.env, uid, { role });
+  await db.update(schema.users).set({ role, updatedAt: now() }).where(eq(schema.users.uid, uid));
+  // A demotion must take effect NOW. The /admin gate honours the role claim
+  // carried in the ID token, and an already-issued token keeps the old claim
+  // until it expires (up to an hour) — an hour of admin access, including money
+  // endpoints, after being demoted. Ending the sessions forces a fresh token,
+  // which carries the new claim.
+  if (isDemotion(previousRole, role)) {
+    await revokeAllSessions(c.env, uid, "role_changed");
+  }
+  await logAudit(c, "user.set-role", "user", uid, { role, previousRole });
+  return c.json({ success: true, uid, role });
+});
+
+// Create a contest template (used by seed-contests and the admin panel).
+adminRoute.post("/contests", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const body = await c.req.json<unknown>();
+  const { values } = validateContestInput(body, true);
+  if (!values.bannerUrl) throw httpsError("failed-precondition", "A banner is required for a new contest.");
+  // A prize larger than the pot the two players fund would mint coins on every
+  // settled match — unless a promo budget pays the difference, reserved per
+  // match (lib/promoBudget.ts). Enforced here and on PATCH against the MERGED values.
+  const isProductContest = values.prizeType === "product";
+  if (values.subsidyBudgetId) {
+    await assertLinkableBudget(c.env, values.subsidyBudgetId, isProductContest ? "product_prize" : "contest_prize");
+    await assertApproval(c, body as any);
+  }
+  assertProductCostFunded(values.totalEntryFee, isProductContest ? values.prizeCostCoins : 0, values.subsidyBudgetId);
+  assertPrizeFundedByPot(values.totalEntryFee, values.rewardCoins, { subsidyBudgetId: isProductContest ? null : values.subsidyBudgetId });
+  assertContestWindow(values.startsAt, values.endsAt, { requireFuture: true });
+
+  const id = newId();
+  const user = c.get("user");
+  const createdBy = user?.uid || user?.email || "server";
+  const extra = createContestExtra(body as Record<string, any>, values);
+  const createdAt = now();
+  await db.insert(schema.contests).values({
+    id,
+    title: values.title,
+    type: values.type,
+    status: values.status,
+    totalEntryFee: values.totalEntryFee,
+    rewardCoins: values.rewardCoins,
+    voteDurationDays: values.voteDurationDays,
+    autoCancelHours: values.autoCancelHours,
+    minVotes: values.minVotes,
+    bannerUrl: values.bannerUrl,
+    prizeType: values.prizeType,
+    prizeProductTitle: values.prizeProductTitle,
+    prizeProductImageUrl: values.prizeProductImageUrl,
+    prizeProductValue: values.prizeProductValue,
+    prizeProductDescription: values.prizeProductDescription,
+    subsidyBudgetId: values.subsidyBudgetId ?? null,
+    prizeCostCoins: values.prizeType === "product" ? values.prizeCostCoins ?? 0 : 0,
+    startsAt: values.startsAt,
+    endsAt: values.endsAt,
+    minLevel: values.minLevel ?? null,
+    maxLevel: values.maxLevel ?? null,
+    extra,
+    createdBy,
+    createdAt,
+  });
+  await invalidateContestCaches(c.env, id, c);
+  await logAudit(c, "contest.create", "contest", id, { ...values, createdBy, createdAt });
+  return c.json({ success: true, contestId: id, id });
+});
+
+// Send a notification to a user (used by test-notification).
+//
+// Full admins only. It was reachable by moderators, letting the weakest admin
+// role push arbitrary official-looking "system" messages (e.g. phishing for a
+// payout UPI id) to any user, with no audit trail.
+adminRoute.post("/notify", async (c) => {
+  requireFullAdmin(c);
+  const { userId, title, body, type } = await c.req.json<any>();
+  if (!userId || typeof userId !== "string") throw httpsError("invalid-argument", "userId is required.");
+  await logAudit(c, "user.notify", "user", userId, { title: title ?? null, type: type ?? null });
+  await createNotification(c.env, userId, {
+    title: title || "Test Notification",
+    body: body || "Hello from the Worker.",
+    type: type || "system",
+    targetId: "admin-test",
+  });
+  return c.json({ success: true });
+});
+
+
+// ======================= TRANSACTIONS / REVENUE =======================
+/**
+ * Coin transaction ledger. Optional filters: ?uid= , ?type= , ?limit= .
+ * Joins the user's display name/username for a readable admin table.
+ */
+adminRoute.get("/transactions", async (c) => {
+  // Full admins only: the coin ledger for every user.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const uid = c.req.query("uid");
+  const type = c.req.query("type");
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 500);
+  const conds: any[] = [];
+  if (uid) conds.push(eq(schema.coinTransactions.uid, uid));
+  if (type) conds.push(eq(schema.coinTransactions.type, type));
+  const rows = await db
+    .select({
+      id: schema.coinTransactions.id,
+      uid: schema.coinTransactions.uid,
+      amount: schema.coinTransactions.amount,
+      // Diamond part of the row (lib/diamonds.ts); DP coin part = amount − lockedDelta.
+      lockedDelta: schema.coinTransactions.lockedDelta,
+      type: schema.coinTransactions.type,
+      contestId: schema.coinTransactions.contestId,
+      matchId: schema.coinTransactions.matchId,
+      description: schema.coinTransactions.description,
+      createdAt: schema.coinTransactions.createdAt,
+      username: schema.users.username,
+      fullName: schema.users.fullName,
+    })
+    .from(schema.coinTransactions)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.coinTransactions.uid))
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.coinTransactions.createdAt))
+    .limit(limit)
+    .all();
+  return c.json(rows.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })));
+});
+
+// Distinct transaction types (for the filter dropdown).
+adminRoute.get("/transactions/types", async (c) => {
+  // Full admins only: ledger metadata.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const rows = await db.select({ type: schema.coinTransactions.type }).from(schema.coinTransactions).groupBy(schema.coinTransactions.type).all();
+  return c.json(rows.map((r) => r.type).filter(Boolean));
+});
+
+/**
+ * Revenue analytics.
+ *
+ * IMPORTANT: money and coins are different units and are now reported as such.
+ * `payments.amount` holds COINS (it always did), so summing it and calling the
+ * result `totalRevenue` reported a coin count as rupees — every ₹ figure in the
+ * admin panel was wrong. Revenue is read from `payments.amount_paise`, the actual
+ * amount charged, in integer paise.
+ *
+ * Refunded and disputed payments are excluded from revenue, which is only
+ * possible now that the clawback path marks them.
+ */
+adminRoute.get("/revenue", async (c) => {
+  // Full admins only: revenue and top spenders.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  /**
+   * Gross receipts. `partially_refunded` belongs here: the payment succeeded and
+   * most of it stands, so dropping the whole row (which is what happened while a
+   * partial refund flipped the status straight to `refunded`) wrote off revenue we
+   * actually kept. The part that WAS returned is netted off via `reversed` below.
+   */
+  const successful = inArray(schema.payments.status, ["success", "partially_refunded"]);
+
+  const totals = await db
+    .select({
+      paise: sql<number>`COALESCE(SUM(${schema.payments.amountPaise}),0)`,
+      coins: sql<number>`COALESCE(SUM(COALESCE(${schema.payments.coins}, ${schema.payments.amount})),0)`,
+      n: count(),
+      // Rows predating the split have no fiat value recorded. Surfacing the count
+      // is more honest than silently under-reporting revenue.
+      unpriced: sql<number>`SUM(CASE WHEN ${schema.payments.amountPaise} IS NULL THEN 1 ELSE 0 END)`,
+    })
+    .from(schema.payments)
+    .where(successful)
+    .get();
+
+  /**
+   * Money actually returned, read from `payment_orders.refunded_amount_paise`
+   * rather than by summing whole `payments` rows.
+   *
+   * Summing the payment total treated every reversal as total: a ₹1000 payment with
+   * a ₹100 refund was reported as ₹1000 reversed. The clawback path has always
+   * written the real figure to this column (and now accumulates it across several
+   * partial refunds), so this is both accurate and partial-aware.
+   */
+  const reversed = await db
+    .select({
+      paise: sql<number>`COALESCE(SUM(${schema.paymentOrders.refundedAmountPaise}),0)`,
+      n: count(),
+    })
+    .from(schema.paymentOrders)
+    .where(gt(schema.paymentOrders.refundedAmountPaise, 0))
+    .get();
+
+  const coinsInCirculation =
+    (await db.select({ v: sql<number>`COALESCE(SUM(${schema.users.dpcoin}),0)` }).from(schema.users).get())?.v ?? 0;
+
+  const byType = await db
+    .select({ type: schema.coinTransactions.type, total: sql<number>`COALESCE(SUM(${schema.coinTransactions.amount}),0)`, n: count() })
+    .from(schema.coinTransactions)
+    .groupBy(schema.coinTransactions.type)
+    .all();
+
+  // Last 14 days, bucketed by day (UTC). Both units are returned so the panel
+  // can label each correctly instead of guessing.
+  const since = now() - 14 * 86400000;
+  const recentPayments = await db
+    .select({
+      paise: schema.payments.amountPaise,
+      coins: schema.payments.coins,
+      legacyAmount: schema.payments.amount,
+      createdAt: schema.payments.createdAt,
+    })
+    .from(schema.payments)
+    .where(and(successful, gte(schema.payments.createdAt, since)))
+    .all();
+  const dayMap: Record<string, { paise: number; coins: number }> = {};
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(now() - i * 86400000).toISOString().slice(0, 10);
+    dayMap[d] = { paise: 0, coins: 0 };
+  }
+  for (const p of recentPayments) {
+    const d = new Date(p.createdAt).toISOString().slice(0, 10);
+    if (!dayMap[d]) continue;
+    dayMap[d].paise += Number(p.paise) || 0;
+    dayMap[d].coins += Number(p.coins ?? p.legacyAmount) || 0;
+  }
+  const trend = Object.entries(dayMap).map(([date, v]) => ({
+    date,
+    revenueInr: roundFiat(v.paise / 100),
+    coins: v.coins,
+    // Legacy field name kept for the existing chart; now genuinely rupees.
+    amount: roundFiat(v.paise / 100),
+  }));
+
+  const topSpenders = await db
+    .select({
+      userId: schema.payments.userId,
+      totalInr: sql<number>`COALESCE(SUM(${schema.payments.amountPaise}),0)`,
+      totalCoins: sql<number>`COALESCE(SUM(COALESCE(${schema.payments.coins}, ${schema.payments.amount})),0)`,
+      username: schema.users.username,
+      fullName: schema.users.fullName,
+    })
+    .from(schema.payments)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.payments.userId))
+    .where(successful)
+    .groupBy(schema.payments.userId)
+    .orderBy(desc(sql`SUM(${schema.payments.amountPaise})`))
+    .limit(10)
+    .all();
+
+  const grossPaise = Number(totals?.paise ?? 0);
+  const refundedPaise = Number(reversed?.paise ?? 0);
+  return c.json({
+    // Money (rupees).
+    totalRevenue: roundFiat(grossPaise / 100),
+    grossRevenueInr: roundFiat(grossPaise / 100),
+    refundedInr: roundFiat(refundedPaise / 100),
+    netRevenueInr: roundFiat((grossPaise - refundedPaise) / 100),
+    refundedCount: Number(reversed?.n ?? 0),
+    // Coins (not money).
+    coinsSold: Number(totals?.coins ?? 0),
+    coinsInCirculation,
+    // Data-quality signal for pre-migration rows with no recorded fiat amount.
+    paymentsWithoutRecordedAmount: Number(totals?.unpriced ?? 0),
+    paymentCount: Number(totals?.n ?? 0),
+    byType,
+    trend,
+    topSpenders: topSpenders.map((s) => ({
+      ...s,
+      totalInr: roundFiat(Number(s.totalInr) / 100),
+      // Legacy field the panel already renders.
+      total: roundFiat(Number(s.totalInr) / 100),
+    })),
+  });
+});
+
+// Raw payment (top-up) list.
+adminRoute.get("/payments", async (c) => {
+  // Full admins only: individual payment records.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 500);
+  const rows = await db
+    .select({
+      id: schema.payments.id,
+      userId: schema.payments.userId,
+      amount: schema.payments.amount,
+      status: schema.payments.status,
+      createdAt: schema.payments.createdAt,
+      username: schema.users.username,
+      fullName: schema.users.fullName,
+    })
+    .from(schema.payments)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.payments.userId))
+    .orderBy(desc(schema.payments.createdAt))
+    .limit(limit)
+    .all();
+  return c.json(rows.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })));
+});
+
+// ======================= CONTEST MATCHES (BATTLES) =======================
+function matchRow(m: any) {
+  const a = (m.userA as any) || {};
+  const b = (m.userB as any) || {};
+  return {
+    id: m.id,
+    contestId: m.contestId,
+    title: m.title,
+    type: m.type,
+    status: m.status,
+    entryFee: m.entryFee,
+    isPrivate: !!m.isPrivate,
+    totalVotes: m.totalVotes ?? 0,
+    likeCount: m.likeCount ?? 0,
+    commentCount: m.commentCount ?? 0,
+    winnerUid: m.winnerUid,
+    rewardAmount: m.rewardAmount ?? 0,
+    /**
+     * The match's own prize snapshot. Without it the panel's Reward column showed a
+     * bare `0` for every product-prize battle, which is indistinguishable from a
+     * misconfigured contest — and `rewardAmount` really is 0, because a product
+     * prize moves no coins.
+     */
+    ...publicPrize(m),
+    userA: { uid: a.uid, username: a.username, profilePic: a.profilePic || a.profileImageUrl, mediaUrl: a.mediaUrl, votes: a.votes ?? 0 },
+    userB: { uid: b.uid, username: b.username, profilePic: b.profilePic || b.profileImageUrl, mediaUrl: b.mediaUrl, votes: b.votes ?? 0 },
+    createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null,
+    expiresAt: m.expiresAt ? new Date(m.expiresAt).toISOString() : null,
+    completedAt: m.completedAt ? new Date(m.completedAt).toISOString() : null,
+    // VS Story publication (migration 0055). Admin-only, so the raw error is
+    // included for triage; public reads expose only the derived status.
+    vsStoryStatus: m.vsStoryStatus ?? null,
+    vsStoryAttempts: m.vsStoryAttempts ?? 0,
+    vsStoryError: m.vsStoryError ?? null,
+    vsStoryPublishedAt: m.vsStoryPublishedAt ? new Date(m.vsStoryPublishedAt).toISOString() : null,
+    vsImageUrl: m.vsImageUrl ?? null,
+  };
+}
+
+// List matches. Optional ?status= filter.
+adminRoute.get("/matches", async (c) => {
+  const db = getDb(c.env);
+  const status = c.req.query("status");
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 300);
+  const conds: any[] = [];
+  if (status) conds.push(eq(schema.contestMatches.status, status));
+  const rows = await db
+    .select()
+    .from(schema.contestMatches)
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.contestMatches.createdAt))
+    .limit(limit)
+    .all();
+  return c.json(rows.map(matchRow));
+});
+
+// Single match detail.
+adminRoute.get("/matches/:id", async (c) => {
+  const db = getDb(c.env);
+  const m = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, c.req.param("id"))).get();
+  return c.json(m ? matchRow(m) : null);
+});
+
+// Votes cast in a match (audit — includes device ids for fraud checks).
+adminRoute.get("/matches/:id/votes", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db
+    .select({
+      id: schema.votes.id,
+      voterUid: schema.votes.voterUid,
+      votedForUid: schema.votes.votedForUid,
+      deviceId: schema.votes.deviceId,
+      createdAt: schema.votes.createdAt,
+      username: schema.users.username,
+    })
+    .from(schema.votes)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.votes.voterUid))
+    .where(eq(schema.votes.matchId, c.req.param("id")))
+    .orderBy(desc(schema.votes.createdAt))
+    .limit(500)
+    .all();
+  // Device ids are full-admin data (ADMIN_USER_FULL_ONLY strips them from user
+  // rows); this list returned them to moderators anyway.
+  const full = isFullAdmin(c);
+  return c.json(
+    rows.map(({ deviceId, ...r }) => ({
+      ...r,
+      ...(full ? { deviceId } : {}),
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+    })),
+  );
+});
+
+/**
+ * Vote-fraud analysis for a match — detection, not prevention.
+ *
+ * The vote path already blocks double/self/non-participant/closed votes, and a
+ * single account or device can vote at most once per match. What it CANNOT stop
+ * is one person voting through several real accounts on several devices (or
+ * spoofed device ids) to rig a paid battle and take the opponent's stake — the
+ * per-IP limit is a throttle, not a dedup, because carrier NAT clusters legit
+ * users. So instead of rejecting those votes blindly (which would hit real
+ * voters), we SURFACE the fraud signals here for a human to judge before paying
+ * out or when handling a dispute:
+ *
+ *  - ipClusters:   IPs used by 2+ voters, and which side each favoured. The
+ *                  primary stuffing signal — a handful of same-IP votes deciding
+ *                  a small battle is suspicious; hundreds of IPs on a viral one
+ *                  are not.
+ *  - deviceReuse:  device ids seen on 2+ votes. Per-match dedup makes this rare,
+ *                  so any hit is worth a look (legacy/seed data or a bypass).
+ *  - freshAccounts: voters whose account was created right around the match
+ *                  start — sockpuppets minted just in time to vote.
+ *
+ * Full-admin only: it exposes voter IPs.
+ */
+adminRoute.get("/matches/:id/vote-audit", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const m = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, id)).get();
+  if (!m) throw httpsError("not-found", "Match not found.");
+  const uidA = (m.userA as any)?.uid ?? null;
+  const uidB = (m.userB as any)?.uid ?? null;
+  const matchCreatedAt = Number(m.createdAt) || 0;
+  // Account created within this window before the match started (or after it) is
+  // treated as "fresh" — old enough accounts are almost certainly organic.
+  const FRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+  const rows = await db
+    .select({
+      voterUid: schema.votes.voterUid,
+      votedForUid: schema.votes.votedForUid,
+      deviceId: schema.votes.deviceId,
+      ip: schema.votes.ip,
+      createdAt: schema.votes.createdAt,
+      username: schema.users.username,
+    })
+    .from(schema.votes)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.votes.voterUid))
+    .where(eq(schema.votes.matchId, id))
+    .orderBy(desc(schema.votes.createdAt))
+    .limit(5000)
+    .all();
+
+  // Voter account ages come from a SEPARATE query, not the join above: selecting
+  // users.created_at alongside votes.created_at collides on the shared column
+  // name and silently drops one, so the fresh-account signal would always read
+  // zero. Batch it by uid instead.
+  const voterUids = [...new Set(rows.map((r) => r.voterUid))];
+  const acctRows = voterUids.length
+    ? await db
+        .select({ uid: schema.users.uid, createdAt: schema.users.createdAt })
+        .from(schema.users)
+        .where(inArray(schema.users.uid, voterUids))
+        .all()
+    : [];
+  const acctAge = new Map(acctRows.map((r) => [r.uid, Number(r.createdAt) || 0]));
+
+  const sideOf = (uid: string | null) => (uid === uidA ? "A" : uid === uidB ? "B" : "?");
+  const ipMap = new Map<string, { ip: string; count: number; forA: number; forB: number }>();
+  const devMap = new Map<string, { deviceId: string; count: number; forA: number; forB: number; voters: string[] }>();
+  const freshVoters: Array<{ voterUid: string; username: string | null; side: string; accountCreatedAt: string | null; votedAt: string | null }> = [];
+  let freshA = 0;
+  let freshB = 0;
+
+  for (const r of rows) {
+    const side = sideOf(r.votedForUid);
+    if (r.ip) {
+      const e = ipMap.get(r.ip) || { ip: r.ip, count: 0, forA: 0, forB: 0 };
+      e.count++;
+      if (side === "A") e.forA++;
+      else if (side === "B") e.forB++;
+      ipMap.set(r.ip, e);
+    }
+    if (r.deviceId) {
+      const e = devMap.get(r.deviceId) || { deviceId: r.deviceId, count: 0, forA: 0, forB: 0, voters: [] };
+      e.count++;
+      if (side === "A") e.forA++;
+      else if (side === "B") e.forB++;
+      if (e.voters.length < 10) e.voters.push(r.username || r.voterUid);
+      devMap.set(r.deviceId, e);
+    }
+    const acct = acctAge.get(r.voterUid) ?? 0;
+    const isFresh = acct > 0 && matchCreatedAt > 0 && acct >= matchCreatedAt - FRESH_WINDOW_MS;
+    if (isFresh) {
+      if (side === "A") freshA++;
+      else if (side === "B") freshB++;
+      if (freshVoters.length < 100) {
+        freshVoters.push({
+          voterUid: r.voterUid,
+          username: r.username ?? null,
+          side,
+          accountCreatedAt: acct ? new Date(acct).toISOString() : null,
+          votedAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+        });
+      }
+    }
+  }
+
+  const ipClusters = [...ipMap.values()].filter((x) => x.count >= 2).sort((a, b) => b.count - a.count).slice(0, 50);
+  const deviceReuse = [...devMap.values()].filter((x) => x.count >= 2).sort((a, b) => b.count - a.count).slice(0, 50);
+  const clusteredIpVotes = ipClusters.reduce((s, x) => s + x.count, 0);
+
+  return c.json({
+    matchId: id,
+    usernameA: (m.userA as any)?.username ?? null,
+    usernameB: (m.userB as any)?.username ?? null,
+    totalVotes: rows.length,
+    distinctIps: ipMap.size,
+    distinctDevices: devMap.size,
+    // Votes that came from an IP shared by 2+ voters — the headline stuffing number.
+    clusteredIpVotes,
+    ipClusters,
+    deviceReuse,
+    freshAccounts: { withinHours: 24, forA: freshA, forB: freshB, voters: freshVoters },
+  });
+});
+
+/**
+ * Force-resolve a match and pay out the winner. `winnerUid` may be provided to
+ * override the vote result (dispute resolution); otherwise the winner is
+ * decided by the authoritative vote tally. Mirrors the cron payout: reward +
+ * XP + wins + ledger + notifications, all committed atomically. Idempotent —
+ * only claims a match that is still active/waiting.
+ */
+adminRoute.post("/matches/:id/declare-winner", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const body = await c.req.json<any>().catch(() => ({}));
+  const m = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, id)).get();
+  if (!m) throw httpsError("not-found", "Match not found.");
+  if (m.status !== "active") throw httpsError("failed-precondition", "Only an active match can have a winner declared.");
+  const userA = m.userA as any;
+  const userB = m.userB as any;
+  if (!userA?.uid || !userB?.uid) throw httpsError("failed-precondition", "Match has no opponents to judge.");
+
+  const requestedWinnerUid = body.winnerUid == null ? null : String(body.winnerUid);
+  if (requestedWinnerUid && requestedWinnerUid !== userA.uid && requestedWinnerUid !== userB.uid) {
+    throw httpsError("invalid-argument", "winnerUid must be one of the two participants.");
+  }
+
+  // Without an explicit winner, the declaration follows the automatic rules
+  // (cron.ts resolveMatch): a tie or a battle below its minimum votes has no
+  // winner and is refunded. `votesA >= votesB` used to hand a tie to player A and
+  // ignore the minimum. Checked on the LIVE tally first, so a refused request
+  // does not close voting.
+  const minVotes = Number(m.minVotesRequired) || 0;
+  const noWinner = (v: { votesA: number; votesB: number }) =>
+    v.votesA === v.votesB
+      ? "The votes are tied. Choose the winner explicitly, or cancel the battle to refund both players."
+      : v.votesA + v.votesB < minVotes
+        ? `Only ${v.votesA + v.votesB} of the required ${minVotes} votes. Choose the winner explicitly, or cancel to refund.`
+        : null;
+  if (!requestedWinnerUid) {
+    const reason = noWinner(await getLiveTally(c.env, id, userA.uid, userB.uid));
+    if (reason) throw httpsError("failed-precondition", reason);
+  }
+
+  // Validate every client-supplied field before permanently closing the actor.
+  const t = await finalizeVotes(c.env, id, userA.uid, userB.uid, Number(m.expiresAt || 0), true);
+  const votesA = t.votesA;
+  const votesB = t.votesB;
+  if (!requestedWinnerUid) {
+    // A vote landed between the check and the close and made it a tie.
+    const reason = noWinner(t);
+    if (reason) throw httpsError("failed-precondition", reason);
+  }
+
+  const winnerUid: string = requestedWinnerUid || (votesA > votesB ? userA.uid : userB.uid);
+  const loserUid = winnerUid === userA.uid ? userB.uid : userA.uid;
+
+  // Pay the prize snapshotted on the match, clamped to the pot the two players
+  // funded — identical rule to the cron resolver, so a manual declaration can
+  // never pay more than an automatic one.
+  const pot = matchPot(m.entryFee);
+  // A promo subsidy reserved at creation (lib/promoBudget.ts) raises the
+  // ceiling by exactly what was set aside for this match, never more.
+  let rewardAmount = m.prizeCoins == null ? null : Math.min(Number(m.prizeCoins), matchPrizeCeiling(m.entryFee, m.subsidyCoins));
+  // The prize TEMPLATE is only consulted for a row written before the snapshot
+  // columns existed — same rule as the cron resolver, so a manual declaration and
+  // an automatic one can never disagree about what was promised.
+  let prizeTemplate: any = null;
+  if (rewardAmount == null || m.prizeType == null) {
+    if (m.contestId) {
+      prizeTemplate = await db
+        .select({
+          reward: schema.contests.rewardCoins,
+          prizeType: schema.contests.prizeType,
+          prizeProductTitle: schema.contests.prizeProductTitle,
+          prizeProductImageUrl: schema.contests.prizeProductImageUrl,
+          prizeProductValue: schema.contests.prizeProductValue,
+        })
+        .from(schema.contests)
+        .where(eq(schema.contests.id, m.contestId))
+        .get();
+    }
+    if (rewardAmount == null) {
+      rewardAmount = Math.min(Number(prizeTemplate?.reward ?? pot), pot);
+    }
+  }
+
+  const prize = resolveMatchPrize(m, prizeTemplate, rewardAmount);
+  const ts = now();
+  const settled = await settleWinner(c.env, {
+    matchId: id,
+    contestId: m.contestId,
+    expectedStatus: "active",
+    winnerUid,
+    loserUid,
+    rewardAmount: prize.coins,
+    description: prize.product
+      ? `Admin-declared prize: ${prize.product.title} — "${m.title}"`
+      : `Admin-declared victory for "${m.title}"`,
+    completedAt: ts,
+    productPrize: prize.product,
+  });
+  if (!settled) throw httpsError("failed-precondition", "Match was already resolved.");
+
+  // Flip any live feed card to its winner/result view without a refetch.
+  await publish(c.env, `match:${id}`, {
+    type: "match_status",
+    status: "completed",
+    votesA,
+    votesB,
+    totalVotes: votesA + votesB,
+    winnerUid,
+  });
+
+  if (prize.product) {
+    // A product is not delivered by winning — it has to be claimed, and the claim
+    // needs an address. `targetId` therefore points at the claim, not the battle.
+    await createNotification(c.env, winnerUid, {
+      title: "You Won a Prize! 🎁",
+      body: `You won ${prize.product.title} in "${m.title}". Add your delivery details to claim it.`,
+      type: "prize-claim",
+      targetId: `prize:${id}`,
+    });
+  } else {
+    await createNotification(c.env, winnerUid, { title: "You Won! 🏆", body: `You won the battle "${m.title}" and earned ${prize.coins} DP coin!`, type: "contest-win", targetId: id });
+  }
+  await createNotification(c.env, loserUid, { title: "Battle Ended", body: `The battle "${m.title}" has concluded.`, type: "contest-loss", targetId: id });
+  // The winner just received a prize — send a receipt (coins) or a call to action
+  // (product). No email for the loser: a "you lost" email is noise, not a record.
+  c.executionCtx.waitUntil(
+    sendUserEmail(
+      c.env,
+      winnerUid,
+      prize.product ? prizeClaimEmail(m.title, prize.product.title) : contestWinEmail(m.title, prize.coins),
+    ),
+  );
+  await logAudit(c, "match.declare-winner", "match", id, {
+    winnerUid,
+    rewardAmount: prize.coins,
+    prizeType: prize.type,
+    productTitle: prize.product?.title ?? null,
+    forced: !!body.winnerUid,
+  });
+  return c.json({ message: "Winner declared", winnerUid, rewardAmount: prize.coins, prizeType: prize.type });
+});
+
+/**
+ * Cancel a match and refund both participants' entry fees. Only cancels a match
+ * that isn't already completed/cancelled. Idempotent via an atomic status claim.
+ */
+/**
+ * Cancel an active/waiting match and refund both participants' entry fees.
+ * Shared by the admin cancel endpoint and report removal so a moderated battle
+ * never swallows entry fees. Idempotent via the atomic settlement claim; returns
+ * false when another resolver already settled it.
+ */
+async function cancelMatchWithRefund(
+  c: any,
+  m: typeof schema.contestMatches.$inferSelect,
+  opts: { reason: string; audit: string },
+): Promise<boolean> {
+  const id = m.id;
+  const userA = m.userA as any;
+  const userB = m.userB as any;
+  if (m.status === "active") {
+    if (!userA?.uid || !userB?.uid) {
+      throw httpsError("failed-precondition", "Active match participants are incomplete.");
+    }
+    // Close first so a vote already in flight cannot land after cancellation.
+    await finalizeVotes(c.env, id, userA.uid, userB.uid, Number(m.expiresAt || 0), true);
+  } else if (!userA?.uid) {
+    throw httpsError("failed-precondition", "Waiting match creator is missing.");
+  }
+
+  const ts = now();
+  const participants = [userA, userB].filter((u) => u?.uid).map((u) => String(u.uid));
+  const settled = await settleRefund(c.env, {
+    matchId: id,
+    contestId: m.contestId,
+    expectedStatus: m.status as "active" | "waiting_for_opponent",
+    finalStatus: "cancelled",
+    participantUids: participants,
+    // Refund exactly what each player was charged (whole coins, floored).
+    refundPerUser: perPlayerEntryFee(m.entryFee),
+    description: `${opts.reason} "${m.title}" — entry fee refunded`,
+    completedAt: ts,
+  });
+  if (!settled) return false;
+  for (const u of [userA, userB]) {
+    if (u?.uid) {
+      await createNotification(c.env, u.uid, { title: "Battle Cancelled", body: `The battle "${m.title}" was cancelled by an admin and your entry fee Diamond were refunded.`, type: "contest-refund", targetId: "wallet" });
+      // Entry fee moved back — send the refund receipt.
+      c.executionCtx.waitUntil(sendUserEmail(c.env, u.uid, contestRefundEmail(m.title, "it was cancelled by an admin")));
+    }
+  }
+  // A cancelled battle must not keep (or later gain) a VS Story. Unpublished work
+  // is marked skipped; published stories are removed. The composite itself is
+  // left to the reference-aware sweep. Independent of the refund above, which
+  // has already committed with its own idempotency.
+  try {
+    await teardownVsStories(c.env, id);
+  } catch (e) {
+    console.error("[admin] cancel: VS story teardown failed (continuing)", id, e);
+  }
+  await logAudit(c, opts.audit, "match", id, {
+    refundPerUser: perPlayerEntryFee(m.entryFee),
+    participants: participants.length,
+  });
+  return true;
+}
+
+adminRoute.post("/matches/:id/cancel", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const m = await db.select().from(schema.contestMatches).where(eq(schema.contestMatches.id, id)).get();
+  if (!m) throw httpsError("not-found", "Match not found.");
+  if (m.status !== "active" && m.status !== "waiting_for_opponent") {
+    throw httpsError("failed-precondition", "Only an active or waiting match can be cancelled.");
+  }
+  const settled = await cancelMatchWithRefund(c, m, { reason: "Admin cancelled", audit: "match.cancel" });
+  if (!settled) throw httpsError("failed-precondition", "Match could not be cancelled.");
+  return c.json({ message: "Match cancelled and refunded" });
+});
+
+/**
+ * Repair a VS Story publication that failed permanently (or is stuck): requeue
+ * it and run it once now. Safe to repeat — the workflow is idempotent and
+ * leased, and it never touches entry fees, refunds or settlement. Refuses
+ * published and non-active matches; never back-publishes historical battles
+ * (vs_story_status NULL is not requeueable).
+ */
+adminRoute.post("/matches/:id/vs-story/retry", async (c) => {
+  requireFullAdmin(c);
+  const id = c.req.param("id");
+  const before = await getDb(c.env)
+    .select({ vsStoryStatus: schema.contestMatches.vsStoryStatus, vsStoryError: schema.contestMatches.vsStoryError })
+    .from(schema.contestMatches)
+    .where(eq(schema.contestMatches.id, id))
+    .get();
+  if (!before) throw httpsError("not-found", "Match not found.");
+  if (!(await requeueVsPublication(c.env, id))) {
+    throw httpsError("failed-precondition", `VS Story cannot be retried from state "${before.vsStoryStatus ?? "none"}".`);
+  }
+  const result = await runVsPublication(c.env, id);
+  await logAudit(c, "match.vsStory.retry", "match", id, {
+    previousStatus: before.vsStoryStatus,
+    previousError: before.vsStoryError,
+    outcome: result.outcome,
+    reason: result.reason ?? null,
+  });
+  return c.json(result);
+});
+
+// ======================= FRAUD DETECTION =======================
+/**
+ * Devices that cast votes under more than one voter account — a signal of
+ * multi-account vote stuffing. Returns each suspicious device with the number
+ * of distinct accounts and total votes it produced.
+ */
+adminRoute.get("/fraud/votes", async (c) => {
+  // Groups voters by device id, so full admins only, like /fraud/vote-networks.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const rows = await db
+    .select({
+      deviceId: schema.votes.deviceId,
+      accounts: sql<number>`COUNT(DISTINCT ${schema.votes.voterUid})`,
+      totalVotes: count(),
+    })
+    .from(schema.votes)
+    .where(sql`${schema.votes.deviceId} IS NOT NULL AND ${schema.votes.deviceId} != ''`)
+    .groupBy(schema.votes.deviceId)
+    .having(sql`COUNT(DISTINCT ${schema.votes.voterUid}) > 1`)
+    .orderBy(desc(sql`COUNT(DISTINCT ${schema.votes.voterUid})`))
+    .limit(100)
+    .all();
+  return c.json(rows);
+});
+
+/**
+ * Networks that voted for the SAME entry under many accounts within one match.
+ *
+ * The IP was never recorded before, so this class of collusion — a farm rotating
+ * device ids but sharing an uplink — was invisible.
+ *
+ * Read this as a signal, not proof: carrier NAT legitimately puts thousands of
+ * unrelated users behind one address, which is exactly why the vote path does not
+ * BLOCK on IP. What is suspicious is many accounts from one address converging on
+ * one entry in one match, so the grouping is per (match, ip, votedFor).
+ */
+adminRoute.get("/fraud/vote-networks", async (c) => {
+  // Full admins only: exposes voter IP addresses.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const minAccounts = Math.min(Math.max(parseInt(c.req.query("minAccounts") || "3", 10), 2), 50);
+  const rows = await db
+    .select({
+      matchId: schema.votes.matchId,
+      ip: schema.votes.ip,
+      votedForUid: schema.votes.votedForUid,
+      accounts: sql<number>`COUNT(DISTINCT ${schema.votes.voterUid})`,
+      devices: sql<number>`COUNT(DISTINCT ${schema.votes.deviceId})`,
+      totalVotes: count(),
+    })
+    .from(schema.votes)
+    .where(sql`${schema.votes.ip} IS NOT NULL AND ${schema.votes.ip} != ''`)
+    .groupBy(schema.votes.matchId, schema.votes.ip, schema.votes.votedForUid)
+    .having(sql`COUNT(DISTINCT ${schema.votes.voterUid}) >= ${minAccounts}`)
+    .orderBy(desc(sql`COUNT(DISTINCT ${schema.votes.voterUid})`))
+    .limit(100)
+    .all();
+  return c.json(rows);
+});
+
+// ======================= BROADCAST =======================
+// Send a push + in-app notification to every user.
+adminRoute.post("/broadcast", async (c) => {
+  requireFullAdmin(c);
+  const { title, body, image, segment } = await c.req.json<any>();
+  if (!title || !body) throw httpsError("invalid-argument", "title and body are required.");
+  // A re-submitted broadcast used to fan out to every user a second time. With
+  // an Idempotency-Key header the retry is rejected instead.
+  const idem = await enforceAdminIdempotency(c, "broadcast");
+  try {
+    // Queued and drained by cron — see lib/broadcast.ts for why this is not sent
+    // inline. `recipients` is the estimated audience.
+    const { jobId, estimatedRecipients } = await enqueueBroadcast(c.env, {
+      title,
+      body,
+      image: image || undefined,
+      segment,
+      createdBy: c.get("user")?.uid ?? null,
+    });
+    await logAudit(c, "notification.broadcast", "broadcast", jobId, {
+      title,
+      recipients: estimatedRecipients,
+      segment,
+    });
+    return c.json({ success: true, jobId, recipients: estimatedRecipients, queued: true });
+  } catch (e) {
+    await idem?.finish(false);
+    throw e;
+  }
+});
+
+// ======================= ANNOUNCEMENT POPUPS =======================
+// In-app popups shown to users (see schema `announcements`). Unlike a broadcast
+// (which writes one notification row per user), an announcement is a single row
+// the user endpoint evaluates live against targeting + per-user snooze — so it
+// can re-appear after the snooze window without re-fanning-out to anyone.
+
+const ANNOUNCEMENT_TARGET_TYPES = ["all", "users"] as const;
+
+/** Validate + normalise a create/update payload. Throws invalid-argument. */
+function parseAnnouncementInput(body: any, { partial }: { partial: boolean }) {
+  const out: Record<string, any> = {};
+
+  const wants = (k: string) => hasOwn(body, k);
+
+  if (!partial || wants("title")) {
+    const title = String(body.title ?? "").trim();
+    if (!title) throw httpsError("invalid-argument", "title is required.");
+    if (title.length > 120) throw httpsError("invalid-argument", "title must be 120 characters or fewer.");
+    out.title = title;
+  }
+  if (!partial || wants("body")) {
+    const text = String(body.body ?? "").trim();
+    if (!text) throw httpsError("invalid-argument", "body is required.");
+    if (text.length > 2000) throw httpsError("invalid-argument", "body must be 2000 characters or fewer.");
+    out.body = text;
+  }
+  if (wants("link")) {
+    const link = body.link == null ? null : String(body.link).trim() || null;
+    if (link && !/^https?:\/\//i.test(link)) {
+      throw httpsError("invalid-argument", "link must be an http(s) URL.");
+    }
+    out.link = link;
+  }
+  if (wants("image")) {
+    out.image = body.image == null ? null : String(body.image).trim() || null;
+  }
+  if (wants("isActive")) out.isActive = !!body.isActive;
+  if (wants("targetType")) {
+    if (!ANNOUNCEMENT_TARGET_TYPES.includes(body.targetType)) {
+      throw httpsError("invalid-argument", "targetType must be 'all' or 'users'.");
+    }
+    out.targetType = body.targetType;
+  }
+  if (wants("snoozeHours")) {
+    const n = Number(body.snoozeHours);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 8760) {
+      throw httpsError("invalid-argument", "snoozeHours must be a whole number of hours between 1 and 8760.");
+    }
+    out.snoozeHours = n;
+  }
+  if (wants("priority")) {
+    const n = Number(body.priority);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 1000) {
+      throw httpsError("invalid-argument", "priority must be a whole number between 0 and 1000.");
+    }
+    out.priority = n;
+  }
+  for (const k of ["startAt", "endAt"] as const) {
+    if (wants(k)) {
+      if (body[k] == null || body[k] === "") {
+        out[k] = null;
+      } else {
+        const n = Number(body[k]);
+        if (!Number.isFinite(n)) throw httpsError("invalid-argument", `${k} must be an epoch-ms timestamp.`);
+        out[k] = Math.trunc(n);
+      }
+    }
+  }
+  if (out.startAt != null && out.endAt != null && out.endAt <= out.startAt) {
+    throw httpsError("invalid-argument", "endAt must be after startAt.");
+  }
+
+  // Explicit target uid list (only meaningful for targetType 'users').
+  let userIds: string[] | undefined;
+  if (wants("userIds")) {
+    if (!Array.isArray(body.userIds)) throw httpsError("invalid-argument", "userIds must be an array.");
+    const cleaned = (body.userIds as unknown[]).map((u) => String(u).trim()).filter((u): u is string => u.length > 0);
+    userIds = [...new Set<string>(cleaned)];
+    if (userIds.length > 5000) throw httpsError("invalid-argument", "userIds is limited to 5000 entries.");
+  }
+
+  return { fields: out, userIds };
+}
+
+/** Replace the target rows for an announcement with the given uid list. */
+async function replaceAnnouncementTargets(db: any, announcementId: string, userIds: string[]): Promise<void> {
+  await db.delete(schema.announcementTargets).where(eq(schema.announcementTargets.announcementId, announcementId));
+  // Chunk the insert — SQLite caps bound parameters (~999) and D1 caps row count.
+  for (let i = 0; i < userIds.length; i += 100) {
+    const chunk = userIds.slice(i, i + 100);
+    if (chunk.length === 0) continue;
+    await db
+      .insert(schema.announcementTargets)
+      .values(chunk.map((uid) => ({ announcementId, uid })))
+      .onConflictDoNothing();
+  }
+}
+
+// List every announcement, newest first, with its explicit-target count.
+adminRoute.get("/announcements", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.announcements).orderBy(desc(schema.announcements.createdAt)).all();
+  const counts = await db
+    .select({ announcementId: schema.announcementTargets.announcementId, n: count() })
+    .from(schema.announcementTargets)
+    .groupBy(schema.announcementTargets.announcementId)
+    .all();
+  const byId = new Map(counts.map((r: any) => [r.announcementId, Number(r.n)]));
+  return c.json(rows.map((r: any) => ({ ...r, targetCount: byId.get(r.id) ?? 0 })));
+});
+
+// Create an announcement (optionally with an explicit target uid list).
+adminRoute.post("/announcements", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const { fields, userIds } = parseAnnouncementInput(await c.req.json<any>(), { partial: false });
+  const id = newId();
+  const ts = now();
+  await db.insert(schema.announcements).values({
+    id,
+    title: fields.title,
+    body: fields.body,
+    link: fields.link ?? null,
+    image: fields.image ?? null,
+    isActive: fields.isActive ?? true,
+    targetType: fields.targetType ?? "all",
+    snoozeHours: fields.snoozeHours ?? 24,
+    priority: fields.priority ?? 0,
+    startAt: fields.startAt ?? null,
+    endAt: fields.endAt ?? null,
+    createdBy: c.get("user")?.uid ?? null,
+    createdAt: ts,
+    updatedAt: ts,
+  });
+  if ((fields.targetType ?? "all") === "users") {
+    await replaceAnnouncementTargets(db, id, userIds ?? []);
+  }
+  await logAudit(c, "announcement.create", "announcement", id, {
+    title: fields.title,
+    targetType: fields.targetType ?? "all",
+    targets: userIds?.length ?? 0,
+  });
+  return c.json({ success: true, id });
+});
+
+// Update fields and/or the target list. Absent keys are left unchanged.
+adminRoute.patch("/announcements/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const existing = await db.select().from(schema.announcements).where(eq(schema.announcements.id, id)).get();
+  if (!existing) throw httpsError("not-found", "Announcement not found.");
+  const { fields, userIds } = parseAnnouncementInput(await c.req.json<any>(), { partial: true });
+  await db
+    .update(schema.announcements)
+    .set({ ...fields, updatedAt: now() })
+    .where(eq(schema.announcements.id, id));
+  // Rewrite targets when a uid list was sent, or clear them if the announcement
+  // is (now) an "all" announcement so stale rows can't linger.
+  const effectiveType = fields.targetType ?? existing.targetType;
+  if (effectiveType === "users") {
+    if (userIds) await replaceAnnouncementTargets(db, id, userIds);
+  } else if (fields.targetType === "all") {
+    await db.delete(schema.announcementTargets).where(eq(schema.announcementTargets.announcementId, id));
+  }
+  await logAudit(c, "announcement.update", "announcement", id, { changed: Object.keys(fields) });
+  return c.json({ success: true, id });
+});
+
+// Delete an announcement and all of its targeting + dismissal state.
+adminRoute.delete("/announcements/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  await db.delete(schema.announcementTargets).where(eq(schema.announcementTargets.announcementId, id));
+  await db.delete(schema.announcementDismissals).where(eq(schema.announcementDismissals.announcementId, id));
+  await db.delete(schema.announcements).where(eq(schema.announcements.id, id));
+  await logAudit(c, "announcement.delete", "announcement", id);
+  return c.json({ success: true });
+});
+
+// The explicit target uids for one announcement (so the editor can prefill).
+adminRoute.get("/announcements/:id/targets", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const rows = await db
+    .select({ uid: schema.announcementTargets.uid })
+    .from(schema.announcementTargets)
+    .where(eq(schema.announcementTargets.announcementId, id))
+    .all();
+  return c.json(rows.map((r: any) => r.uid));
+});
+
+// ======================= COMMENTS MODERATION =======================
+// Recent comments (with author + optional ?postId= filter).
+//
+// `?target=blog` switches to `blog_comments`. Blog comments NEED a moderation
+// surface more than app-feed ones do, because they sit on pages that search
+// engines index: spam there is not just visible to followers, it is published.
+// The two are separate lists rather than a merged feed so the "Post" column
+// keeps a single meaning and a delete can never hit the wrong table.
+adminRoute.get("/comments", async (c) => {
+  const db = getDb(c.env);
+  const postId = c.req.query("postId");
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 300);
+  if (c.req.query("target") === "blog") {
+    const rows = await db
+      .select({
+        id: schema.blogComments.id,
+        postId: schema.blogComments.postId,
+        userId: schema.blogComments.userId,
+        text: schema.blogComments.text,
+        likeCount: schema.blogComments.likeCount,
+        createdAt: schema.blogComments.createdAt,
+        username: schema.users.username,
+        fullName: schema.users.fullName,
+        // The article title/slug, so a moderator can see WHAT was commented on
+        // instead of an opaque id — and can open the public page to check context.
+        postTitle: schema.blogPosts.title,
+        postSlug: schema.blogPosts.slug,
+      })
+      .from(schema.blogComments)
+      .leftJoin(schema.users, eq(schema.users.uid, schema.blogComments.userId))
+      .leftJoin(schema.blogPosts, eq(schema.blogPosts.id, schema.blogComments.postId))
+      .where(postId ? eq(schema.blogComments.postId, postId) : (undefined as any))
+      .orderBy(desc(schema.blogComments.createdAt))
+      .limit(limit)
+      .all();
+    return c.json(rows.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })));
+  }
+  const conds: any[] = [];
+  if (postId) conds.push(eq(schema.postComments.postId, postId));
+  const rows = await db
+    .select({
+      id: schema.postComments.id,
+      postId: schema.postComments.postId,
+      userId: schema.postComments.userId,
+      text: schema.postComments.text,
+      likeCount: schema.postComments.likeCount,
+      createdAt: schema.postComments.createdAt,
+      username: schema.users.username,
+      fullName: schema.users.fullName,
+    })
+    .from(schema.postComments)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.postComments.userId))
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.postComments.createdAt))
+    .limit(limit)
+    .all();
+  return c.json(rows.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })));
+});
+
+adminRoute.delete("/comments/:id", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  if (c.req.query("target") === "blog") {
+    const row = await db.select({ postId: schema.blogComments.postId }).from(schema.blogComments).where(eq(schema.blogComments.id, id)).get();
+    await db.delete(schema.blogComments).where(eq(schema.blogComments.id, id));
+    // Drop the cached thread, otherwise the removed comment stays on the public
+    // page for the rest of the TTL — the one place a moderator expects a delete
+    // to be immediate, since anyone can be looking at that url.
+    // Immediate in THIS colo, and within `READ_CACHE_TTLS.comments.edge` (30s)
+    // everywhere else — the Cache API cannot be purged across colos. Accepted
+    // deliberately for the highest-exposure UGC surface here: a blog comment is
+    // public, indexed and readable signed-out, and it is deleted precisely when its
+    // content is the problem. 30s is inside any moderation SLA, and the alternative —
+    // keeping this one thread family on KV for a global delete — costs ~1,440 writes a
+    // day per active thread against a 1,000/day budget for the entire Worker, i.e. it
+    // would disable every other cache in the app to shorten this window.
+    if (row?.postId) await purgeShared(c, commentsCacheKey("blog", row.postId));
+    await logAudit(c, "blogComment.delete", "blogComment", id);
+    return c.json({ message: "Comment deleted" });
+  }
+  const comment = await db.select({ postId: schema.postComments.postId }).from(schema.postComments).where(eq(schema.postComments.id, id)).get();
+  await db.delete(schema.postComments).where(eq(schema.postComments.id, id));
+  // Keep the post's denormalized counter honest.
+  if (comment?.postId) {
+    await db.update(schema.posts).set({ commentCount: sql`MAX(${schema.posts.commentCount} - 1, 0)` }).where(eq(schema.posts.id, comment.postId));
+  }
+  await logAudit(c, "comment.delete", "comment", id);
+  return c.json({ message: "Comment deleted" });
+});
+
+// ======================= FOLLOWERS =======================
+adminRoute.get("/users/:id/followers", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db
+    .select({ uid: schema.users.uid, username: schema.users.username, fullName: schema.users.fullName, profileImageUrl: schema.users.profileImageUrl, since: schema.follows.createdAt })
+    .from(schema.follows)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.follows.followerId))
+    .where(eq(schema.follows.followingId, c.req.param("id")))
+    .orderBy(desc(schema.follows.createdAt))
+    .limit(200)
+    .all();
+  return c.json(rows);
+});
+
+adminRoute.get("/users/:id/following", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db
+    .select({ uid: schema.users.uid, username: schema.users.username, fullName: schema.users.fullName, profileImageUrl: schema.users.profileImageUrl, since: schema.follows.createdAt })
+    .from(schema.follows)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.follows.followingId))
+    .where(eq(schema.follows.followerId, c.req.param("id")))
+    .orderBy(desc(schema.follows.createdAt))
+    .limit(200)
+    .all();
+  return c.json(rows);
+});
+
+// ======================= WITHDRAWALS =======================
+// List payout requests (optional ?status= filter).
+adminRoute.get("/withdrawals", async (c) => {
+  // Full admins only: payout PII (bank / UPI details).
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const status = c.req.query("status");
+  const conds: any[] = [];
+  if (status) conds.push(eq(schema.withdrawals.status, status));
+  const rows = await db
+    .select({
+      id: schema.withdrawals.id,
+      userId: schema.withdrawals.userId,
+      amount: schema.withdrawals.amount,
+      cashAmount: schema.withdrawals.cashAmount,
+      grossAmount: schema.withdrawals.grossAmount,
+      feeAmount: schema.withdrawals.feeAmount,
+      method: schema.withdrawals.method,
+      accountDetails: schema.withdrawals.accountDetails,
+      status: schema.withdrawals.status,
+      adminNote: schema.withdrawals.adminNote,
+      payoutRef: schema.withdrawals.payoutRef,
+      paidAt: schema.withdrawals.paidAt,
+      riskLevel: schema.withdrawals.riskLevel,
+      riskFlags: schema.withdrawals.riskFlags,
+      createdAt: schema.withdrawals.createdAt,
+      updatedAt: schema.withdrawals.updatedAt,
+      username: schema.users.username,
+      fullName: schema.users.fullName,
+      // Total (DP coin + Diamond); the Diamond part is lockedCoins.
+      balance: schema.users.dpcoin,
+      lockedCoins: schema.users.lockedCoins,
+    })
+    .from(schema.withdrawals)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.withdrawals.userId))
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.withdrawals.createdAt))
+    .limit(200)
+    .all();
+  return c.json(
+    rows.map((r) => ({
+      ...r,
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+      updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
+    })),
+  );
+});
+
+/**
+ * Allowed withdrawal status transitions. `paid` and `rejected` are terminal.
+ *
+ * This table is load-bearing, not documentation. Without it a `reserved` row
+ * could be rejected (coins refunded) and then marked paid — the `w.reserved`
+ * branch performs no deduction — leaving the user with their coins AND the
+ * payout. It matches the buttons the admin panel actually renders:
+ * pending → Approve/Reject, approved → Mark as paid.
+ */
+const WITHDRAWAL_TRANSITIONS: Record<string, readonly string[]> = {
+  pending: ["approved", "rejected"],
+  approved: ["paid", "rejected"],
+  paid: [],
+  rejected: [],
+};
+
+/**
+ * Action a withdrawal request. action: "approve" | "reject" | "paid".
+ *
+ * Coins are deducted (held) when moving to approved/paid; a rejection of a
+ * still-held request refunds the coins. The user's balance is validated on
+ * approval so we never approve more than they hold.
+ *
+ * Concurrency: the status is claimed with a compare-and-swap BEFORE any money
+ * moves, so a double-clicked Reject or two admins acting at once cannot both
+ * observe `pending` and both issue a refund.
+ */
+adminRoute.patch("/withdrawals/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const { action, adminNote, payoutRef } = await c.req.json<any>();
+  if (!["approve", "reject", "paid"].includes(action)) throw httpsError("invalid-argument", "Invalid action.");
+  const w = await db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, id)).get();
+  if (!w) throw httpsError("not-found", "Withdrawal not found.");
+  const admin = c.get("user");
+  const ts = now();
+
+  const status = action === "approve" ? "approved" : action === "paid" ? "paid" : "rejected";
+  const fromStatus = w.status;
+
+  if (!(WITHDRAWAL_TRANSITIONS[fromStatus] ?? []).includes(status))
+    throw httpsError(
+      "failed-precondition",
+      `Cannot ${action} a withdrawal that is already "${fromStatus}".`,
+    );
+
+  // Payouts are executed by hand in the banking app, so "we marked it paid" and
+  // "the bank actually sent it" were two facts with nothing linking them. A bank
+  // reference (UTR / RRN / NEFT ref) is now REQUIRED to mark a payout paid, which
+  // makes every outgoing rupee reconcilable against a statement.
+  let payoutReference: string | null = null;
+  if (action === "paid") {
+    payoutReference = String(payoutRef ?? "").trim();
+    if (payoutReference.length < 4 || payoutReference.length > 64 || !/^[A-Za-z0-9._/-]+$/.test(payoutReference)) {
+      throw httpsError(
+        "invalid-argument",
+        "A bank payout reference (UTR / RRN, 4–64 characters) is required to mark a payout as paid.",
+      );
+    }
+    // The same reference must not be recorded against two payouts.
+    const dupe = await db
+      .select({ id: schema.withdrawals.id })
+      .from(schema.withdrawals)
+      .where(and(eq(schema.withdrawals.payoutRef, payoutReference), ne(schema.withdrawals.id, id)))
+      .get();
+    if (dupe) {
+      throw httpsError("already-exists", `That payout reference is already recorded on withdrawal ${dupe.id}.`);
+    }
+  }
+
+  // Money must not leave while the account owes coins. A refund or chargeback
+  // that lands after the request was escrowed claws the purchase back by driving
+  // the balance NEGATIVE (lib/coinOrders.ts); nothing re-checked that here, so a
+  // payout bought with since-reversed money could still be approved and paid.
+  // Rejecting stays allowed: it returns the held coins and settles the debt.
+  if (action === "approve" || action === "paid") {
+    const owing = await db
+      .select({ dpcoin: schema.users.dpcoin })
+      .from(schema.users)
+      .where(eq(schema.users.uid, w.userId))
+      .get();
+    const openDispute = await db
+      .select({ orderId: schema.paymentOrders.orderId })
+      .from(schema.paymentOrders)
+      .where(and(eq(schema.paymentOrders.userId, w.userId), eq(schema.paymentOrders.status, "disputed")))
+      .get();
+    if (!owing || Number(owing.dpcoin) < 0 || openDispute) {
+      throw httpsError(
+        "failed-precondition",
+        openDispute
+          ? `This user has a disputed payment (order ${openDispute.orderId}). Resolve it before paying out.`
+          : "This user's balance is negative (a purchase was refunded or charged back). Reject or wait until it is settled.",
+      );
+    }
+  }
+
+  // Atomic claim: flip the status only if it is STILL the value we just read.
+  // The loser of this compare-and-swap does no accounting at all. Same pattern
+  // as the exactly-once coin credit in lib/coinOrders.ts.
+  const claim = await db
+    .update(schema.withdrawals)
+    .set({
+      status,
+      adminNote: adminNote || w.adminNote,
+      processedBy: admin?.uid ?? null,
+      payoutRef: payoutReference ?? w.payoutRef,
+      paidAt: action === "paid" ? ts : w.paidAt,
+      updatedAt: ts,
+    })
+    .where(and(eq(schema.withdrawals.id, id), eq(schema.withdrawals.status, fromStatus)))
+    .run();
+  if (claim.meta.changes === 0)
+    throw httpsError(
+      "failed-precondition",
+      "This withdrawal was just actioned by someone else. Reload and try again.",
+    );
+
+  /** Undo the claim so a failed accounting step doesn't strand the row. */
+  const revertClaim = async () => {
+    await db
+      .update(schema.withdrawals)
+      .set({
+        status: fromStatus,
+        adminNote: w.adminNote,
+        processedBy: w.processedBy,
+        payoutRef: w.payoutRef,
+        paidAt: w.paidAt,
+        updatedAt: w.updatedAt,
+      })
+      .where(and(eq(schema.withdrawals.id, id), eq(schema.withdrawals.status, status)))
+      .run();
+  };
+
+  // Coin accounting depends on WHEN the coins were held:
+  //   * reserved rows (new model): coins were already deducted at request time,
+  //     so approving/paying does NOT deduct again; a rejection refunds them.
+  //   * legacy rows (reserved = false, created before the escrow model): coins
+  //     are deducted here on approval and refunded only on a reject-from-approved.
+  try {
+    if (w.reserved) {
+      // Refund on rejection of a still-held request. The transition table
+      // guarantees fromStatus is "pending" or "approved" here.
+      if (action === "reject") {
+        await refundRejectedWithdrawal(c.env, id, w.userId, w.amount, ts);
+      }
+      // Settle the hold when the money actually leaves.
+      //
+      // The `withdrawal_hold` debit written at request time was never resolved:
+      // marking a reserved payout paid wrote NO ledger row at all, so the ledger
+      // carried a permanently dangling hold and could not be reconciled against
+      // a bank statement. This closes it with a zero-sum pair (release the hold,
+      // record the settled payout) so the balance is unchanged — the coins left
+      // at request time — while the ledger tells the true story.
+      if (action === "paid") {
+        await db.batch([
+          db.insert(schema.coinTransactions).values({
+            id: `withdrawal_hold_release:${id}`,
+            uid: w.userId,
+            amount: w.amount,
+            type: "withdrawal_hold_release",
+            description: "Payout hold released on settlement",
+            createdAt: ts,
+          }).onConflictDoNothing(),
+          db.insert(schema.coinTransactions).values({
+            id: `withdrawal_settled:${id}`,
+            uid: w.userId,
+            amount: -w.amount,
+            type: "withdrawal",
+            description: `Payout sent (${w.method}) — ref ${payoutReference}`,
+            createdAt: ts,
+          }).onConflictDoNothing(),
+        ]);
+      }
+    } else {
+      // Legacy rows are deducted on approval. `paid` can now only be reached
+      // from `approved`, where the deduction already happened.
+      if (action === "approve") {
+        // Deduct and ledger in ONE transaction. These were two separate writes,
+        // so a failure between them moved a balance with no ledger row. Both
+        // statements test the same pre-transaction balance snapshot (the INSERT
+        // runs first and does not touch `users`), so they cannot disagree.
+        //
+        // Exactly-once: the ledger row has a fixed id, so a repeated INSERT was
+        // ignored — but the balance UPDATE used to be ungated, so the
+        // claim → batch commits → later failure → revertClaim() → admin retries
+        // sequence debited the user TWICE against ONE ledger row. Both money
+        // statements are now gated on a per-request nonce claim that can only be
+        // won while the ledger row is absent. The `withdrawal` scope is not in the
+        // retention allowlist (lib/ops.ts), so the claim is never pruned, and the
+        // claim itself also re-checks the permanent ledger row.
+        const ledgerId = `withdrawal_legacy:${id}`;
+        const nonce = crypto.randomUUID();
+        const claimGate = `EXISTS (SELECT 1 FROM idempotency_keys WHERE key = ? AND nonce = ?)`;
+        const legacyResults = await c.env.DB.batch([
+          c.env.DB.prepare(
+            `INSERT OR IGNORE INTO idempotency_keys (key, nonce, scope, created_at)
+             SELECT ?, ?, 'withdrawal', ?
+              WHERE EXISTS (SELECT 1 FROM users WHERE uid = ? AND dpcoin - locked_coins >= ?)
+                AND NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)`,
+          ).bind(ledgerId, nonce, ts, w.userId, w.amount, ledgerId),
+          // A payout takes DP coins only (dpcoin - locked_coins); Diamonds are
+          // never withdrawn (lib/diamonds.ts), so locked_coins does not move.
+          c.env.DB.prepare(
+            `INSERT OR IGNORE INTO coin_transactions
+               (id, uid, amount, type, description, created_at, locked_delta)
+             SELECT ?, ?, ?, 'withdrawal', ?, ?, 0
+              WHERE ${claimGate}`,
+          ).bind(ledgerId, w.userId, -w.amount, `Payout ${status} (${w.method}) · DP coin`, ts, ledgerId, nonce),
+          c.env.DB.prepare(
+            `UPDATE users SET dpcoin = dpcoin - ?, updated_at = ?
+              WHERE uid = ? AND dpcoin - locked_coins >= ? AND ${claimGate}`,
+          ).bind(w.amount, ts, w.userId, w.amount, ledgerId, nonce),
+        ]);
+        if (Number(legacyResults[2]?.meta?.changes || 0) === 0) {
+          const alreadyDebited = await c.env.DB.prepare(`SELECT 1 AS x FROM coin_transactions WHERE id = ?`)
+            .bind(ledgerId)
+            .first();
+          // A previous attempt already took the coins (and wrote the ledger row);
+          // this retry just completes the approval without moving money again.
+          if (!alreadyDebited) {
+            await revertClaim();
+            throw httpsError("failed-precondition", "User ke paas itne DP coin nahi hain (Diamond withdraw nahi hote).");
+          }
+        }
+      }
+      // Rejecting a previously-approved legacy request refunds the held coins.
+      if (action === "reject" && fromStatus === "approved") {
+        await refundRejectedWithdrawal(c.env, id, w.userId, w.amount, ts);
+      }
+    }
+  } catch (err) {
+    // Insufficient-balance already reverted and is a clean precondition failure.
+    if (err instanceof ApiError) throw err;
+    await revertClaim();
+    throw err;
+  }
+
+  // The money action has committed: audit it FIRST. The notification below used
+  // to run before the audit and could throw, leaving a committed payout with no
+  // audit row and a 500 for the admin (whose retry then said "already actioned").
+  await logAudit(c, `withdrawal.${action}`, "withdrawal", id, {
+    amount: w.amount,
+    from: fromStatus,
+    to: status,
+    reserved: w.reserved,
+    ...(payoutReference ? { payoutRef: payoutReference } : {}),
+  });
+  await createNotification(c.env, w.userId, {
+    title: action === "reject" ? "Withdrawal Rejected" : action === "paid" ? "Payout Sent 💸" : "Withdrawal Approved",
+    body: action === "reject" ? `Your payout request was rejected. ${adminNote ? "Reason: " + adminNote : ""}` : action === "paid" ? `Your payout of ${w.amount} DP coin has been sent.` : "Your payout request was approved and is being processed.",
+    type: "withdrawal",
+    targetId: "wallet",
+  }).catch((e) => console.error("[withdrawal] notification failed (action already applied)", id, e));
+  // Real money moved (or was denied) — the user is owed a durable receipt, not
+  // just an in-app toast. `status` is "approved" | "paid" | "rejected".
+  c.executionCtx.waitUntil(
+    sendUserEmail(c.env, w.userId, withdrawalDecisionEmail(status as "approved" | "paid" | "rejected", w.amount, adminNote || "")),
+  );
+  return c.json({ message: `Withdrawal ${status}` });
+});
+
+// ======================= DEPOSITS (manual QR/UPI top-ups) =======================
+adminRoute.get("/deposits", async (c) => {
+  // Full admins only: deposit records and UTRs.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const status = c.req.query("status");
+  const conds: any[] = [];
+  if (status) conds.push(eq(schema.deposits.status, status));
+  const rows = await db
+    .select({
+      id: schema.deposits.id,
+      userId: schema.deposits.userId,
+      amount: schema.deposits.amount,
+      payAmount: schema.deposits.payAmount,
+      bonusCoins: schema.deposits.bonusCoins,
+      method: schema.deposits.method,
+      utr: schema.deposits.utr,
+      screenshotUrl: schema.deposits.screenshotUrl,
+      status: schema.deposits.status,
+      adminNote: schema.deposits.adminNote,
+      createdAt: schema.deposits.createdAt,
+      updatedAt: schema.deposits.updatedAt,
+      username: schema.users.username,
+      fullName: schema.users.fullName,
+    })
+    .from(schema.deposits)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.deposits.userId))
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.deposits.createdAt))
+    .limit(200)
+    .all();
+  // Flag UTRs that appear on more than one deposit (possible reuse / fraud).
+  const dupRows = await db
+    .select({ utr: schema.deposits.utr })
+    .from(schema.deposits)
+    .where(sql`${schema.deposits.utr} IS NOT NULL AND ${schema.deposits.utr} != ''`)
+    .groupBy(schema.deposits.utr)
+    .having(sql`COUNT(*) > 1`)
+    .all();
+  const dupSet = new Set(dupRows.map((r) => (r.utr || "").toLowerCase()));
+  return c.json(
+    rows.map((r) => ({
+      ...r,
+      duplicateUtr: !!r.utr && dupSet.has((r.utr || "").toLowerCase()),
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+      updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
+    })),
+  );
+});
+
+// ======================= REFERRALS =======================
+adminRoute.get("/referrals", async (c) => {
+  // Full admins only: referral attribution names both accounts.
+  requireFullAdmin(c);
+  const status = c.req.query("status");
+  const q = String(c.req.query("q") || "").trim().toLowerCase().slice(0, 64);
+  const limit = boundedQueryInt(c.req.query("limit"), 200, 1, 500);
+  const where: string[] = [];
+  const binds: unknown[] = [];
+  if (status) {
+    where.push("r.status = ?");
+    binds.push(status);
+  }
+  if (q) {
+    where.push("(lower(ru.username) LIKE ? OR lower(iu.username) LIKE ? OR upper(r.code) LIKE ?)");
+    binds.push(`${q}%`, `${q}%`, `${q.toUpperCase()}%`);
+  }
+  const rows = await c.env.DB.prepare(
+    `SELECT r.id, r.referrer_uid AS referrerUid, r.referred_uid AS referredUid, r.status, r.code,
+            r.referrer_reward AS referrerReward, r.referee_reward AS refereeReward, r.qualify_action AS qualifyAction,
+            r.qualified_at AS qualifiedAt, r.rewarded_at AS rewardedAt, r.expires_at AS expiresAt,
+            r.reject_reason AS rejectReason, r.hold_reason AS holdReason, r.ip AS ip, r.device_id AS deviceId, r.decided_by AS decidedBy, r.created_at AS createdAt,
+            ru.username AS referrerUsername, iu.username AS referredUsername,
+            iu.email_verified AS referredEmailVerified, iu.phone_verified AS referredPhoneVerified,
+            iu.contests_joined AS referredContests
+       FROM referrals r
+       LEFT JOIN users ru ON ru.uid = r.referrer_uid
+       LEFT JOIN users iu ON iu.uid = r.referred_uid
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY r.created_at DESC
+      LIMIT ?`,
+  )
+    .bind(...binds, limit)
+    .all();
+  const stats = await c.env.DB.prepare(
+    `SELECT status, COUNT(*) AS n, COALESCE(SUM(referrer_reward + referee_reward), 0) AS paid
+       FROM referrals GROUP BY status`,
+  ).all<{ status: string; n: number; paid: number }>();
+  const milestones = await c.env.DB.prepare(
+    `SELECT COALESCE(SUM(amount), 0) AS s FROM coin_transactions WHERE id LIKE 'referral_milestone:%'`,
+  ).first<{ s: number }>();
+  const top = await c.env.DB.prepare(
+    `SELECT r.referrer_uid AS uid, u.username, COUNT(*) AS rewarded, COALESCE(SUM(r.referrer_reward), 0) AS earned
+       FROM referrals r LEFT JOIN users u ON u.uid = r.referrer_uid
+      WHERE r.status = 'rewarded' GROUP BY r.referrer_uid ORDER BY rewarded DESC LIMIT 10`,
+  ).all();
+  const byStatus = Object.fromEntries((stats.results || []).map((r) => [r.status, Number(r.n) || 0]));
+  const coinsPaid = (stats.results || []).filter((r) => r.status === "rewarded").reduce((t, r) => t + (Number(r.paid) || 0), 0);
+  const month = await c.env.DB.prepare(
+    `SELECT COALESCE(SUM(referrer_reward + referee_reward), 0) AS s FROM referrals WHERE status = 'rewarded' AND rewarded_at >= ?`,
+  )
+    .bind(referralMonthStart(now()))
+    .first<{ s: number }>();
+  return c.json({
+    rows: (rows.results || []).map((r: any) => ({
+      ...r,
+      referredEmailVerified: !!r.referredEmailVerified,
+      referredPhoneVerified: !!r.referredPhoneVerified,
+    })),
+    stats: { byStatus, coinsPaid: coinsPaid + Number(milestones?.s || 0), milestonePaid: Number(milestones?.s || 0), paidThisMonth: Number(month?.s || 0) },
+    topReferrers: top.results || [],
+    program: parseReferralConfig(await getAppConfig(c.env)),
+  });
+});
+
+/**
+ * Approve (pay) or reject a pending / in-review referral, or reverse (claw
+ * back) a rewarded one. Audited.
+ */
+adminRoute.patch("/referrals/:id", async (c) => {
+  requireFullAdmin(c);
+  const id = c.req.param("id");
+  const { action, reason } = await c.req.json<any>();
+  if (action !== "approve" && action !== "reject" && action !== "reverse") {
+    throw httpsError("invalid-argument", "action must be approve, reject or reverse.");
+  }
+  if (action === "reverse") {
+    const why = String(reason ?? "").trim();
+    if (why.length < 3) throw httpsError("invalid-argument", "A reason is required to reverse a referral.");
+    const result = await reverseReferral(c.env, id, c.get("user")?.uid ?? null, why);
+    await logAudit(c, "referral.reverse", "referral", id, { reason: why, sides: result.sides });
+    return c.json({ success: true, ...result });
+  }
+  const result = await decideReferral(c.env, id, action, c.get("user")?.uid ?? null, reason);
+  await logAudit(c, `referral.${action}`, "referral", id, { reason: reason ?? null });
+  return c.json({ success: true, ...result });
+});
+
+/** Approve or reject many pending / in-review referrals at once (max 100). */
+adminRoute.post("/referrals/bulk", async (c) => {
+  requireFullAdmin(c);
+  const { ids, action, reason } = await c.req.json<any>();
+  if (action !== "approve" && action !== "reject") throw httpsError("invalid-argument", "action must be approve or reject.");
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100 || !ids.every((x) => typeof x === "string" && x.length <= 64)) {
+    throw httpsError("invalid-argument", "ids must be a list of 1 to 100 referral ids.");
+  }
+  const adminUid = c.get("user")?.uid ?? null;
+  const results: { id: string; ok: boolean; status?: string; error?: string }[] = [];
+  for (const id of [...new Set(ids as string[])]) {
+    try {
+      const r = await decideReferral(c.env, id, action, adminUid, reason);
+      results.push({ id, ok: true, status: r.status });
+    } catch (e: any) {
+      results.push({ id, ok: false, error: String(e?.message || e).slice(0, 200) });
+    }
+  }
+  await logAudit(c, `referral.bulk_${action}`, "referral", null, {
+    reason: reason ?? null,
+    ok: results.filter((r) => r.ok).map((r) => r.id),
+    failed: results.filter((r) => !r.ok).map((r) => r.id),
+  });
+  return c.json({ success: true, results });
+});
+
+/** Accounts linked to a referral by device or IP (fraud review). */
+adminRoute.get("/referrals/:id/links", async (c) => {
+  requireFullAdmin(c);
+  return c.json(await referralLinks(c.env, c.req.param("id")));
+});
+
+
+// ======================= FINANCE TRENDS =======================
+/**
+ * 14-day daily series of approved deposits and paid/approved withdrawals.
+ *
+ * Deposits and withdrawals are reported in BOTH units. The previous version
+ * summed `deposits.amount` and `withdrawals.amount` — both coin counts — and the
+ * panel charted them as money. The rupee values live in `deposits.pay_amount`
+ * (what the user transferred in) and `withdrawals.cash_amount` (what we pay out).
+ */
+adminRoute.get("/finance-trends", async (c) => {
+  // Full admins only: financial trends.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const since = now() - 14 * 86400000;
+  const deps = await db
+    .select({
+      coins: schema.deposits.amount,
+      inr: schema.deposits.payAmount,
+      createdAt: schema.deposits.updatedAt,
+    })
+    .from(schema.deposits)
+    .where(and(eq(schema.deposits.status, "approved"), gte(schema.deposits.updatedAt, since)))
+    .all();
+  const wds = await db
+    .select({
+      coins: schema.withdrawals.amount,
+      inr: schema.withdrawals.cashAmount,
+      status: schema.withdrawals.status,
+      createdAt: schema.withdrawals.updatedAt,
+    })
+    .from(schema.withdrawals)
+    .where(and(inArray(schema.withdrawals.status, ["approved", "paid"]), gte(schema.withdrawals.updatedAt, since)))
+    .all();
+  const days: string[] = [];
+  const depMap: Record<string, { coins: number; inr: number }> = {};
+  const wdMap: Record<string, { coins: number; inr: number }> = {};
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(now() - i * 86400000).toISOString().slice(0, 10);
+    days.push(d);
+    depMap[d] = { coins: 0, inr: 0 };
+    wdMap[d] = { coins: 0, inr: 0 };
+  }
+  for (const r of deps) {
+    const d = new Date(r.createdAt).toISOString().slice(0, 10);
+    if (!depMap[d]) continue;
+    depMap[d].coins += Number(r.coins) || 0;
+    depMap[d].inr += Number(r.inr) || 0;
+  }
+  for (const r of wds) {
+    const d = new Date(r.createdAt).toISOString().slice(0, 10);
+    if (!wdMap[d]) continue;
+    wdMap[d].coins += Number(r.coins) || 0;
+    wdMap[d].inr += Number(r.inr) || 0;
+  }
+  return c.json(
+    days.map((d) => ({
+      date: d,
+      // Legacy field names, now unambiguously RUPEES so the existing chart is
+      // finally labelled correctly.
+      deposits: roundFiat(depMap[d].inr),
+      withdrawals: roundFiat(wdMap[d].inr),
+      depositsInr: roundFiat(depMap[d].inr),
+      withdrawalsInr: roundFiat(wdMap[d].inr),
+      depositsCoins: depMap[d].coins,
+      withdrawalsCoins: wdMap[d].coins,
+    })),
+  );
+});
+
+/**
+ * Action a manual deposit. action: "approve" | "reject".
+ *
+ * Approving credits the coins (`users.dpcoin`), records a `payments` row and a
+ * coin ledger entry, and stamps `credited_at` — ALL IN ONE D1 BATCH, every
+ * statement gated on the same `status = 'pending'` snapshot.
+ *
+ * That gating is the whole point. The status claim used to be its own statement
+ * followed by a separate crediting batch whose balance update carried no gate, so
+ * a failure between the two left the deposit reading `approved` with no coins, no
+ * `payments` row and no ledger row — while the "already processed" guard below
+ * made a retry impossible. The user had wired real INR against a verified UTR and
+ * the loss was invisible: unlike a Razorpay order, nothing swept for it, because
+ * `recoverStrandedPaidOrders` only ever looks at `payment_orders`.
+ *
+ * With one batch that window does not exist, so there is deliberately no recovery
+ * sweeper here — there is no state for it to find. (A Razorpay order genuinely
+ * needs one: its claim cannot share a transaction with the credit, because the
+ * gateway decides the outcome.) `computeMoneyHealth` keeps that claim honest by
+ * reporting any `approved` deposit with `credited_at IS NULL`.
+ *
+ * The ledger id is deterministic (`manual_deposit:<id>`) so that even a manual
+ * operator re-run cannot write a second ledger row for one deposit — the same
+ * reason `recoverStrandedPaidOrders` uses `purchase:<paymentId>`.
+ */
+adminRoute.patch("/deposits/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const { action, adminNote } = await c.req.json<any>();
+  if (!["approve", "reject"].includes(action)) throw httpsError("invalid-argument", "Invalid action.");
+  const d = await db.select().from(schema.deposits).where(eq(schema.deposits.id, id)).get();
+  if (!d) throw httpsError("not-found", "Deposit not found.");
+  if (d.status !== "pending") throw httpsError("failed-precondition", "Deposit is already processed.");
+  const admin = c.get("user");
+  const ts = now();
+  const status = action === "approve" ? "approved" : "rejected";
+
+  // Guard against crediting a UTR that was already credited on another deposit.
+  // Submit-time blocking covers new requests; this catches any duplicate rows
+  // that predate that check (or were created concurrently).
+  if (action === "approve" && d.utr) {
+    const already = await db
+      .select({ id: schema.deposits.id })
+      .from(schema.deposits)
+      .where(and(sql`lower(${schema.deposits.utr}) = ${d.utr.toLowerCase()}`, eq(schema.deposits.status, "approved"), ne(schema.deposits.id, id)))
+      .get();
+    if (already) throw httpsError("failed-precondition", "This UTR was already credited on another deposit.");
+  }
+
+  // `amount` already includes the package bonus; this just makes it visible in
+  // the ledger and the notification so the user can see the offer was applied.
+  const depBonus = Number(d.bonusCoins) || 0;
+  const bonusSuffix = depBonus > 0 ? ` (incl. ${depBonus} bonus)` : "";
+
+  if (action === "approve") {
+    const coins = assertCoinAmount(d.amount, "deposit amount");
+    /**
+     * Every statement is gated on the deposit STILL being pending and the
+     * recipient still existing, and the status claim comes LAST.
+     *
+     * Ordering matters: the claim is the only statement that changes
+     * `deposits.status`, so placing it last means all four evaluate the same
+     * pre-transaction snapshot and can only all apply or all no-op. Two
+     * overlapping approvals therefore still credit exactly once — the loser's
+     * gate is already false when its batch runs — and there is no window in
+     * which the row is `approved` but the coins are not there.
+     *
+     * The user-exists arm matters too: without it a deposit for a deleted
+     * account would flip to `approved` while the credit silently matched no
+     * row, which is ledger drift in the other direction.
+     */
+    //
+    // The UTR arm is inside the gate for the same reason. The pre-check above
+    // is a read before the batch, so two DIFFERENT pending deposits carrying
+    // the same bank reference, approved at the same time, both passed it and
+    // both credited: one transfer paid out twice. D1 runs a batch as one
+    // serialized transaction, so here the second approval sees the first one's
+    // `approved` row and no-ops.
+    const utrKey = d.utr ? d.utr.toLowerCase() : null;
+    const pendingGate = `EXISTS (SELECT 1 FROM deposits WHERE id = ? AND status = 'pending')
+        AND EXISTS (SELECT 1 FROM users WHERE uid = ?)
+        AND (? IS NULL OR NOT EXISTS (
+          SELECT 1 FROM deposits WHERE lower(utr) = ? AND status = 'approved' AND id <> ?))`;
+    const gateArgs = [id, d.userId, utrKey, utrKey, id];
+    const ledgerId = `manual_deposit:${id}`;
+    // A budget-funded bonus (lib/promoBudget.ts) is credited as its own locked,
+    // play-only `promo_bonus` row; the deposit row carries the paid coins only.
+    const promoBonus = d.budgetId && depBonus > 0 ? depBonus : 0;
+    const paidCoins = coins - promoBonus;
+    // A deposit buys Diamonds (lib/diamonds.ts): play-only, never withdrawable.
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE users SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, updated_at = ?
+          WHERE uid = ? AND ${pendingGate}`,
+      ).bind(paidCoins, paidCoins, ts, d.userId, ...gateArgs),
+      c.env.DB.prepare(
+        `INSERT OR IGNORE INTO payments
+           (id, user_id, amount, coins, amount_paise, source, status, created_at)
+         SELECT ?, ?, ?, ?, ?, 'manual_deposit', 'success', ?
+          WHERE ${pendingGate}`,
+        // `amount` is the legacy coin column; the split fields record the coins
+        // credited and the rupees actually transferred, so revenue reporting can
+        // read real money instead of a coin count.
+      ).bind(`dep_${id}`, d.userId, coins, coins, toPaise(Number(d.payAmount) || 0), ts, ...gateArgs),
+      c.env.DB.prepare(
+        `INSERT OR IGNORE INTO coin_transactions
+           (id, uid, amount, type, description, created_at, locked_delta)
+         SELECT ?, ?, ?, 'manual_deposit', ?, ?, ?
+          WHERE ${pendingGate}`,
+      ).bind(
+        ledgerId,
+        d.userId,
+        paidCoins,
+        `Diamond deposit approved${bonusSuffix} (UTR ${d.utr || "-"})`,
+        ts,
+        paidCoins,
+        ...gateArgs,
+      ),
+      ...(promoBonus > 0
+        ? promoBonusCreditStatements(
+            c.env,
+            {
+              uid: d.userId,
+              coins: promoBonus,
+              budgetId: String(d.budgetId),
+              reservationId: depositReservationId(id),
+              ledgerId: `promo_bonus:deposit:${id}`,
+              refId: id,
+              description: `Bonus ${promoBonus} Diamond — deposit ${id}`,
+              ts,
+            },
+            pendingGate,
+            gateArgs,
+          )
+        : []),
+      c.env.DB.prepare(
+        `UPDATE deposits
+            SET status = 'approved', admin_note = ?, processed_by = ?, credited_at = ?, updated_at = ?
+          WHERE id = ? AND status = 'pending'
+            AND EXISTS (SELECT 1 FROM users WHERE uid = ?)
+            AND (? IS NULL OR NOT EXISTS (
+              SELECT 1 FROM deposits WHERE lower(utr) = ? AND status = 'approved' AND id <> ?))`,
+      ).bind(adminNote || null, admin?.uid ?? null, ts, ts, ...gateArgs),
+    ]);
+    if (Number(results[results.length - 1]?.meta?.changes || 0) === 0) {
+      // Nothing moved: another approval won the race, the same UTR was credited
+      // on another deposit in the meantime, or the recipient account no longer
+      // exists. In every case no coins were credited.
+      if (utrKey) {
+        const dup = await db
+          .select({ id: schema.deposits.id })
+          .from(schema.deposits)
+          .where(and(sql`lower(${schema.deposits.utr}) = ${utrKey}`, eq(schema.deposits.status, "approved"), ne(schema.deposits.id, id)))
+          .get();
+        if (dup) throw httpsError("failed-precondition", "This UTR was already credited on another deposit.");
+      }
+      const stillThere = await db
+        .select({ uid: schema.users.uid })
+        .from(schema.users)
+        .where(eq(schema.users.uid, d.userId))
+        .get();
+      if (!stillThere) throw httpsError("failed-precondition", "That user account no longer exists.");
+      throw httpsError("failed-precondition", "Deposit was already processed.");
+    }
+  } else {
+    // Rejection moves no money, so a plain compare-and-swap is enough.
+    const claim = await db
+      .update(schema.deposits)
+      .set({ status, adminNote: adminNote || null, processedBy: admin?.uid ?? null, updatedAt: ts })
+      .where(and(eq(schema.deposits.id, id), eq(schema.deposits.status, "pending")))
+      .run();
+    if (claim.meta.changes === 0) throw httpsError("failed-precondition", "Deposit was already processed.");
+    // The bonus held for this deposit goes back to its budget.
+    if (d.budgetId) await releaseStatement(c.env, depositReservationId(id), ts).run();
+  }
+
+  await createNotification(c.env, d.userId, {
+    title: action === "approve" ? "Deposit Approved 🎉" : "Deposit Rejected",
+    body: action === "approve" ? `${d.amount} Diamond have been added to your wallet${bonusSuffix}.` : `Your deposit request was rejected. ${adminNote ? "Reason: " + adminNote : ""}`,
+    type: "deposit",
+    targetId: "wallet",
+  });
+  // An approved manual deposit credits coins — same receipt as a card top-up.
+  if (action === "approve") {
+    c.executionCtx.waitUntil(sendUserEmail(c.env, d.userId, coinsAddedEmail(Number(d.amount) || 0)));
+  }
+  // Referral: an approved first deposit may qualify the user's pending referral
+  // (lib/referralProgram.ts — never throws).
+  if (action === "approve") c.executionCtx.waitUntil(qualifyReferral(c.env, d.userId, "purchase", { amountInr: Number(d.payAmount) || 0 }));
+  await logAudit(c, `deposit.${action}`, "deposit", id, { amount: d.amount, utr: d.utr });
+  return c.json({ message: `Deposit ${status}` });
+});
+
+// ======================= AUDIT LOG =======================
+adminRoute.get("/audit-log", async (c) => {
+  // Full admins only: the trail of admin actions, including actions taken against the caller.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 500);
+  const action = c.req.query("action");
+  const conds: any[] = [];
+  if (action) conds.push(eq(schema.adminAuditLog.action, action));
+  const rows = await db
+    .select()
+    .from(schema.adminAuditLog)
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.adminAuditLog.createdAt))
+    .limit(limit)
+    .all();
+  return c.json(rows.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })));
+});
+
+
+// ======================= ERROR LOGS (observability) =========================
+// Server errors persisted from app.onError (src/lib/observability.ts) so admins
+// can triage without the Cloudflare dashboard.
+adminRoute.get("/logs", async (c) => {
+  // Full admins only: server error logs, which can contain request context.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 500);
+  const level = c.req.query("level");
+  const q = c.req.query("q");
+  const conds: any[] = [];
+  if (level) conds.push(eq(schema.errorLogs.level, level));
+  if (q) conds.push(like(schema.errorLogs.message, `%${q}%`));
+  const rows = await db
+    .select()
+    .from(schema.errorLogs)
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.errorLogs.createdAt))
+    .limit(limit)
+    .all();
+  return c.json(rows.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })));
+});
+
+adminRoute.get("/logs/stats", async (c) => {
+  // Full admins only: error-log statistics.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const since = Date.now() - 24 * 60 * 60 * 1000;
+  const total = await db.select({ n: count() }).from(schema.errorLogs).get();
+  const last24h = await db
+    .select({ n: count() })
+    .from(schema.errorLogs)
+    .where(gte(schema.errorLogs.createdAt, since))
+    .get();
+  return c.json({ total: total?.n ?? 0, last24h: last24h?.n ?? 0 });
+});
+
+// ======================= ACCOUNT DELETIONS (compliance) =====================
+/**
+ * Deletion requests and completed erasures.
+ *
+ * `account_deletions` has existed since migration 0030 and was WRITE-ONLY: no
+ * endpoint and no panel screen ever read it, so nobody could answer "how many
+ * people are leaving", "why", or — the one that matters operationally — "is a
+ * purge stuck?". A deletion that fails mid-phase now records `last_error` and
+ * `attempts`, and this is where a human sees it. Without that, the phase machine
+ * would retry five times and then go quiet forever.
+ *
+ * Full admins only. The rows are pseudonymous by design, but a deletion reason is
+ * free text a departing user wrote about the product, and the pending list names
+ * accounts that still exist.
+ */
+adminRoute.get("/account-deletions", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 500);
+  const status = c.req.query("status");
+
+  const conds: any[] = [];
+  if (status) conds.push(eq(schema.deletionRequests.status, status));
+
+  const requests = await db
+    .select()
+    .from(schema.deletionRequests)
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.deletionRequests.requestedAt))
+    .limit(limit)
+    .all();
+
+  const ts = Date.now();
+  const [pending, processing, completed, cancelled, overdue, failing] = await Promise.all([
+    db.select({ n: count() }).from(schema.deletionRequests).where(eq(schema.deletionRequests.status, "pending")).get(),
+    db.select({ n: count() }).from(schema.deletionRequests).where(eq(schema.deletionRequests.status, "processing")).get(),
+    db.select({ n: count() }).from(schema.deletionRequests).where(eq(schema.deletionRequests.status, "completed")).get(),
+    db.select({ n: count() }).from(schema.deletionRequests).where(eq(schema.deletionRequests.status, "cancelled")).get(),
+    // Due but still not purged. A non-zero number here means the cron sweep is
+    // behind, or a purge is failing — the two failure modes that are otherwise
+    // completely silent, because a 4xx/5xx never happens on this path.
+    db
+      .select({ n: count() })
+      .from(schema.deletionRequests)
+      .where(
+        and(
+          inArray(schema.deletionRequests.status, ["pending", "processing"]),
+          lte(schema.deletionRequests.scheduledFor, ts),
+        ),
+      )
+      .get(),
+    db
+      .select({ n: count() })
+      .from(schema.deletionRequests)
+      .where(and(isNotNull(schema.deletionRequests.lastError), ne(schema.deletionRequests.status, "completed")))
+      .get(),
+  ]);
+
+  const forfeited = await db
+    .select({ total: sql<number>`COALESCE(SUM(${schema.accountDeletions.forfeitedCoins}), 0)` })
+    .from(schema.accountDeletions)
+    .get();
+
+  // Attach a display handle so an operator can identify the account — a bare uid
+  // is unusable for support. Resolved in ONE indexed lookup for the whole page
+  // rather than a join, so the `...r` spread below stays intact. A completed
+  // (anonymised) row resolves to its `deleted_…` handle, which is correct.
+  const uids = requests.map((r) => r.uid);
+  const users = uids.length
+    ? await db
+        .select({ uid: schema.users.uid, username: schema.users.username, email: schema.users.email })
+        .from(schema.users)
+        .where(inArray(schema.users.uid, uids))
+        .all()
+    : [];
+  const userByUid = new Map(users.map((u) => [u.uid, u]));
+
+  return c.json({
+    requests: requests.map((r) => ({
+      ...r,
+      username: userByUid.get(r.uid)?.username ?? null,
+      email: userByUid.get(r.uid)?.email ?? null,
+      requestedAtIso: r.requestedAt ? new Date(r.requestedAt).toISOString() : null,
+      scheduledForIso: r.scheduledFor ? new Date(r.scheduledFor).toISOString() : null,
+      completedAtIso: r.completedAt ? new Date(r.completedAt).toISOString() : null,
+      cancelledAtIso: r.cancelledAt ? new Date(r.cancelledAt).toISOString() : null,
+      isOverdue:
+        (r.status === "pending" || r.status === "processing") && (r.scheduledFor ?? 0) <= ts,
+    })),
+    stats: {
+      pending: pending?.n ?? 0,
+      processing: processing?.n ?? 0,
+      completed: completed?.n ?? 0,
+      cancelled: cancelled?.n ?? 0,
+      overdue: overdue?.n ?? 0,
+      failing: failing?.n ?? 0,
+      forfeitedCoinsTotal: Number(forfeited?.total ?? 0),
+    },
+  });
+});
+
+/**
+ * Force a purge to run NOW — or resume one that stalled.
+ *
+ * The cron sweep retries a failing purge five times and then goes silent, so once
+ * the underlying cause is fixed (or for a support/legal escalation that cannot
+ * wait out the grace period) this is the manual trigger. `executeAccountDeletion`
+ * resumes from the last completed phase and every phase is idempotent, so
+ * re-running a half-done or failed purge continues rather than repeating work.
+ *
+ * Irreversible. Full admins only, and audited.
+ */
+adminRoute.post("/account-deletions/:uid/purge", async (c) => {
+  requireFullAdmin(c);
+  const uid = c.req.param("uid");
+  const existing = await getDb(c.env)
+    .select({ status: schema.deletionRequests.status })
+    .from(schema.deletionRequests)
+    .where(eq(schema.deletionRequests.uid, uid))
+    .get();
+  if (existing?.status === "completed") {
+    throw httpsError("failed-precondition", "This account has already been erased.");
+  }
+  const result = await executeAccountDeletion(c.env, uid, "admin_forced");
+  await logAudit(c, "account.deletion.purge", "user", uid, {
+    forfeitedCoins: result.forfeitedCoins,
+    mediaRemoved: result.mediaUrls.length,
+  });
+  return c.json({ success: true, ...result });
+});
+
+/**
+ * Restore an account during the grace period, on the user's behalf.
+ *
+ * The support case: someone asked to leave, changed their mind, and cannot sign in
+ * to cancel it themselves. `cancelAccountDeletion` refuses once the purge has
+ * started (`processing`) or finished (`completed`) — there is nothing left to bring
+ * back — and is idempotent otherwise. Full admins only, and audited.
+ */
+adminRoute.post("/account-deletions/:uid/cancel", async (c) => {
+  requireFullAdmin(c);
+  const uid = c.req.param("uid");
+  const result = await cancelAccountDeletion(c.env, uid, c);
+  await logAudit(c, "account.deletion.cancel", "user", uid, { cancelled: result.cancelled });
+  return c.json({ success: true, ...result });
+});
+
+adminRoute.delete("/logs", async (c) => {
+  // Full admins only: destroys the error trail.
+  requireFullAdmin(c);
+  const n = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM error_logs").first<{ n: number }>();
+  await c.env.DB.prepare("DELETE FROM error_logs").run();
+  // Wiping the error trail is itself recorded.
+  await logAudit(c, "logs.clear", "error_logs", "all", { rows: Number(n?.n ?? 0) });
+  return c.json({ success: true });
+});
+
+
+// ======================= SYSTEM HEALTH (admin console) =======================
+//
+// Authenticated mirrors of the operational health signals, for the admin
+// panel's one-stop System Health page. These never mutate anything.
+
+/**
+ * Deep health, behind the admin gate and always 200.
+ *
+ * Same computation as the public `/health/deep` (see lib/health.ts) — D1, KV,
+ * R2, required secrets, integrations and cron — but returned as 200 with the
+ * payload even when unhealthy, so the panel's Bearer-auth client (which throws
+ * on non-2xx) can render the red state instead of treating it as a request
+ * error.
+ */
+adminRoute.get("/health", async (c) => {
+  requireFullAdmin(c);
+  return c.json(await computeDeepHealth(c.env));
+});
+
+/**
+ * Money-flow integrity: ledger-vs-balance drift, stranded/stuck orders, clawback
+ * shortfalls, negative balances, and the pending money queues. Read-only.
+ */
+adminRoute.get("/money-health", async (c) => {
+  requireFullAdmin(c);
+  return c.json(await computeMoneyHealth(c.env));
+});
+
+/**
+ * Per-job cron status (last run, ok/fail, duration, stale). Previously only
+ * visible inside the public /health/deep; surfaced here for the console.
+ */
+adminRoute.get("/ops/cron-health", async (c) => {
+  requireFullAdmin(c);
+  return c.json(await cronHealth(c.env));
+});
+
+// ============================== SEO AUDIT ==================================
+/**
+ * Latest stored SEO audit, or `{ ranAt: null }` before the first cron run.
+ *
+ * Deliberately returns 200 even when the audit is full of critical findings — same
+ * reasoning as /health above: the panel throws on a non-2xx response and would
+ * render a request error instead of the report it is asking for.
+ */
+adminRoute.get("/seo", async (c) => {
+  requireFullAdmin(c);
+  const audit = await getSeoAudit(c.env);
+  return c.json(audit ?? { ranAt: null });
+});
+
+/**
+ * Re-scan now.
+ *
+ * A scan makes ~15 subrequests to our own public site and reads every published
+ * post, so it is a real cost — hence full-admin only, and audited.
+ */
+adminRoute.post("/seo/scan", async (c) => {
+  requireFullAdmin(c);
+  const result = await seoAuditJob(c.env, { force: true });
+  await logAudit(c, "seo.scan", "seo", null, result as Record<string, unknown>);
+  return c.json({ message: "SEO scan complete", ...result });
+});
+
+
+// ======================= COIN PACKAGES (top-up store) =======================
+adminRoute.get("/coin-packages", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.coinPackages).orderBy(schema.coinPackages.sortOrder).all();
+  // The LIVE price (base coins × buy rate), not the stored snapshot, plus what
+  // the admin needs to keep it safe (lib/coinPricing.ts).
+  const cfg = await getAppConfig(c.env);
+  const rates = ratesFromConfig(cfg);
+  return c.json(
+    rows.map((r) => {
+      const priced = pricePackage(r, rates);
+      return {
+        ...r,
+        active: !!r.active,
+        priceInr: priced.priceInr,
+        payoutInr: priced.payoutInr,
+        purchasable: priced.purchasable,
+        reason: priced.reason ?? null,
+        minSafeBuyRate: minSafeBuyRate(r, rates.payoutRate),
+        buyRate: rates.buyRate,
+        payoutRate: rates.payoutRate,
+        buyRateSet: hasExplicitBuyRate(cfg),
+      };
+    }),
+  );
+});
+
+/**
+ * `budgetId` on a coin package: a package_bonus promo budget pays its bonus,
+ * credited as locked (play-only) coins (lib/promoBudget.ts). `undefined` = not
+ * sent, `null` = unlink.
+ */
+function packageBudgetInput(b: any): string | null | undefined {
+  if (!b || !Object.prototype.hasOwnProperty.call(b, "budgetId") || b.budgetId === undefined) return undefined;
+  if (b.budgetId === null || b.budgetId === "") return null;
+  if (typeof b.budgetId !== "string" || b.budgetId.length > 64) throw httpsError("invalid-argument", "budgetId must be a budget id.");
+  return b.budgetId;
+}
+
+adminRoute.post("/coin-packages", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const b = await c.req.json<any>();
+  const budgetId = packageBudgetInput(b) ?? null;
+  // Packages price every real purchase, so they are validated on the way IN.
+  const values = validateCoinPackage(b, undefined, { promoFunded: !!budgetId });
+  if (values.coins == null) {
+    throw httpsError("invalid-argument", "coins is required.");
+  }
+  if (budgetId) {
+    await assertLinkableBudget(c.env, budgetId, "package_bonus");
+    if (!(Number(values.bonusCoins) > 0)) throw httpsError("invalid-argument", "Budget wale package me bonus coins 0 se zyada hone chahiye.");
+    // A platform-funded bonus needs the approval password.
+    await assertApproval(c, b);
+  }
+  // The price is not entered: it is base coins × buy rate (lib/coinPricing.ts).
+  // The column keeps a snapshot of it, for reference only. A package that would
+  // pay out more than it costs is refused.
+  const rates = ratesFromConfig(await getAppConfig(c.env));
+  assertPackagesSafe([{ name: values.name, coins: values.coins, bonusCoins: values.bonusCoins ?? 0, active: values.active ?? true, budgetId }], rates);
+  values.priceInr = packagePriceInr(values.coins, rates.buyRate);
+  const id = newId();
+  const ts = now();
+  await db.insert(schema.coinPackages).values({
+    id,
+    name: values.name ?? null,
+    coins: values.coins,
+    bonusCoins: values.bonusCoins ?? 0,
+    priceInr: values.priceInr,
+    active: values.active ?? true,
+    sortOrder: values.sortOrder ?? 0,
+    budgetId,
+    createdAt: ts,
+    updatedAt: ts,
+  });
+  await logAudit(c, "coin-package.create", "coin_package", id, { ...values, budgetId });
+  c.executionCtx.waitUntil(publishCoinCatalog(c.env));
+  return c.json({ success: true, id });
+});
+
+adminRoute.patch("/coin-packages/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const b = await c.req.json<any>();
+  const current = await db.select().from(schema.coinPackages).where(eq(schema.coinPackages.id, id)).get();
+  if (!current) throw httpsError("not-found", "Package not found.");
+  const budgetInput = packageBudgetInput(b);
+  const budgetId = budgetInput === undefined ? current.budgetId ?? null : budgetInput;
+  // Validate against the MERGED result so raising the bonus alone, or lowering
+  // the coins alone, is still checked against the other value.
+  const values = validateCoinPackage(b, {
+    coins: Number(current.coins),
+    bonusCoins: Number(current.bonusCoins),
+  }, { promoFunded: !!budgetId });
+  const set: any = { ...values, updatedAt: now() };
+  const budgetChanged = budgetInput !== undefined && budgetInput !== (current.budgetId ?? null);
+  if (budgetChanged) set.budgetId = budgetId;
+  if (budgetId) {
+    if (budgetChanged) await assertLinkableBudget(c.env, budgetId, "package_bonus");
+    if (!(Number(values.bonusCoins ?? current.bonusCoins) > 0)) {
+      throw httpsError("invalid-argument", "Budget wale package me bonus coins 0 se zyada hone chahiye.");
+    }
+  }
+  // Linking or unlinking a budget, or changing a platform-funded bonus, changes
+  // what the platform pays per purchase: approval password.
+  const bonusChanged = values.bonusCoins !== undefined && Number(values.bonusCoins) !== Number(current.bonusCoins);
+  if (budgetChanged || (budgetId && bonusChanged)) await assertApproval(c, b);
+  // Price follows the buy rate; keep the reference snapshot in step, and refuse
+  // an edit that would make the package pay out more than it costs.
+  const rates = ratesFromConfig(await getAppConfig(c.env));
+  assertPackagesSafe(
+    [{
+      name: values.name ?? current.name,
+      coins: values.coins ?? current.coins,
+      bonusCoins: values.bonusCoins ?? current.bonusCoins,
+      active: values.active ?? current.active,
+      budgetId,
+    }],
+    rates,
+  );
+  set.priceInr = packagePriceInr(values.coins ?? Number(current.coins), rates.buyRate);
+  await db.update(schema.coinPackages).set(set).where(eq(schema.coinPackages.id, id));
+  await logAudit(c, "coin-package.update", "coin_package", id, set);
+  c.executionCtx.waitUntil(publishCoinCatalog(c.env));
+  return c.json({ message: "Package updated" });
+});
+
+adminRoute.delete("/coin-packages/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  await db.delete(schema.coinPackages).where(eq(schema.coinPackages.id, id));
+  await logAudit(c, "coin-package.delete", "coin_package", id);
+  c.executionCtx.waitUntil(publishCoinCatalog(c.env));
+  return c.json({ message: "Package deleted" });
+});
+
+// ======================= COIN ECONOMY (promo budgets, ledger reports) =======
+// Approval password: a second secret for anything that makes the platform pay
+// coins nobody paid for (lib/approvalPassword.ts).
+adminRoute.get("/approval-password", async (c) => {
+  requireFullAdmin(c);
+  return c.json(await approvalPasswordStatus(c.env));
+});
+
+adminRoute.post("/approval-password", async (c) => {
+  requireFullAdmin(c);
+  const body = await c.req.json<any>().catch(() => ({}));
+  const before = await approvalPasswordStatus(c.env);
+  await setApprovalPassword(c, { current: body?.current, next: body?.next });
+  await logAudit(c, before.configured ? "approval-password.change" : "approval-password.set", "settings", "approvalSecret");
+  return c.json({ success: true });
+});
+
+// Forgotten approval password: superadmin only, recent sign-in (sudo gate) and
+// a code emailed to the superadmin's own login email.
+adminRoute.post("/approval-password/reset/request", async (c) => {
+  requireFullAdmin(c);
+  const out = await requestApprovalReset(c);
+  await logAudit(c, "approval-password.reset.request", "settings", "approvalSecret", { sentTo: out.sentTo });
+  return c.json({ success: true, ...out });
+});
+
+adminRoute.post("/approval-password/reset/confirm", async (c) => {
+  requireFullAdmin(c);
+  const body = await c.req.json<any>().catch(() => ({}));
+  await confirmApprovalReset(c, { code: body?.code, next: body?.next });
+  await logAudit(c, "approval-password.reset", "settings", "approvalSecret");
+  return c.json({ success: true });
+});
+
+adminRoute.get("/promo-budgets", async (c) => {
+  requireFullAdmin(c);
+  return c.json(await listBudgets(c.env));
+});
+
+adminRoute.get("/promo-budgets/:id", async (c) => {
+  requireFullAdmin(c);
+  const id = c.req.param("id");
+  const budget = await getBudget(c.env, id);
+  if (!budget) throw httpsError("not-found", "Promo budget not found.");
+  const db = getDb(c.env);
+  const [packages, contests, activity] = await Promise.all([
+    db.select({ id: schema.coinPackages.id, name: schema.coinPackages.name, coins: schema.coinPackages.coins, bonusCoins: schema.coinPackages.bonusCoins, active: schema.coinPackages.active })
+      .from(schema.coinPackages).where(eq(schema.coinPackages.budgetId, id)).all(),
+    db.select({ id: schema.contests.id, title: schema.contests.title, status: schema.contests.status, totalEntryFee: schema.contests.totalEntryFee, rewardCoins: schema.contests.rewardCoins })
+      .from(schema.contests).where(eq(schema.contests.subsidyBudgetId, id)).all(),
+    budgetActivity(c.env, id),
+  ]);
+  return c.json({ budget, packages, contests, ...activity });
+});
+
+adminRoute.post("/promo-budgets", async (c) => {
+  requireFullAdmin(c);
+  const body = await c.req.json<any>();
+  const values = validateBudgetInput(body, true);
+  const reason = requireReason(body);
+  await assertApproval(c, body);
+  if (values.startsAt && values.endsAt && values.endsAt <= values.startsAt) {
+    throw httpsError("invalid-argument", "End date must be after the start date.");
+  }
+  const id = newId();
+  const ts = now();
+  const user = c.get("user");
+  await getDb(c.env).insert(schema.promoBudgets).values({
+    id,
+    name: values.name!,
+    kind: values.kind!,
+    totalCoins: values.totalCoins!,
+    spentCoins: 0,
+    status: values.status ?? "active",
+    startsAt: values.startsAt ?? null,
+    endsAt: values.endsAt ?? null,
+    // Per-user caps apply where the recipient is known up front: package bonus
+    // and free rewards (e.g. "max 500 free coins per user this month").
+    perUserLimit: values.kind === "package_bonus" || values.kind === "free_rewards" ? values.perUserLimit ?? null : null,
+    note: values.note ?? null,
+    createdBy: user?.email || user?.uid || "server",
+    createdAt: ts,
+    updatedAt: ts,
+  });
+  await logAudit(c, "promo-budget.create", "promo_budget", id, { ...values, reason });
+  return c.json({ success: true, id, budget: await getBudget(c.env, id) });
+});
+
+adminRoute.patch("/promo-budgets/:id", async (c) => {
+  requireFullAdmin(c);
+  const id = c.req.param("id");
+  const body = await c.req.json<any>();
+  const values = validateBudgetInput(body, false);
+  const reason = requireReason(body);
+  const current = await getBudget(c.env, id);
+  if (!current) throw httpsError("not-found", "Promo budget not found.");
+  if (!Object.keys(values).length) throw httpsError("invalid-argument", "Nothing to change.");
+  if (current.status === "closed") {
+    throw httpsError("failed-precondition", "Closed budget badla nahi ja sakta. Naya budget banao.");
+  }
+  await assertApproval(c, body);
+  const committed = current.spentCoins + current.heldCoins;
+  if (values.totalCoins !== undefined && values.totalCoins < committed) {
+    throw httpsError(
+      "failed-precondition",
+      `Total kam se kam ${committed} rakhna hoga: ${current.spentCoins} coins kharch ho chuke hain aur ${current.heldCoins} reserved hain.`,
+    );
+  }
+  const startsAt = values.startsAt !== undefined ? values.startsAt : current.startsAt;
+  const endsAt = values.endsAt !== undefined ? values.endsAt : current.endsAt;
+  if (startsAt && endsAt && endsAt <= startsAt) {
+    throw httpsError("invalid-argument", "End date must be after the start date.");
+  }
+  const set: Record<string, any> = { ...values, updatedAt: now() };
+  if (current.kind !== "package_bonus" && current.kind !== "free_rewards") delete set.perUserLimit;
+  // Raising/lowering the total is re-checked in SQL against what is committed
+  // NOW, so a purchase landing between the read above and this write cannot
+  // leave the budget below what it has already paid.
+  const conds: any[] = [eq(schema.promoBudgets.id, id), ne(schema.promoBudgets.status, "closed")];
+  if (values.totalCoins !== undefined) {
+    conds.push(sql`${schema.promoBudgets.spentCoins} <= ${values.totalCoins}`);
+  }
+  const res = await getDb(c.env).update(schema.promoBudgets).set(set).where(and(...conds)).run();
+  if (res.meta.changes === 0) throw httpsError("failed-precondition", "Budget badal gaya hai. Refresh karke dobara try karo.");
+  await logAudit(c, "promo-budget.update", "promo_budget", id, {
+    before: { totalCoins: current.totalCoins, status: current.status, startsAt: current.startsAt, endsAt: current.endsAt, perUserLimit: current.perUserLimit, name: current.name },
+    after: values,
+    reason,
+  });
+  return c.json({ success: true, budget: await getBudget(c.env, id) });
+});
+
+function rangeFromQuery(c: any): { from: number | null; to: number | null } {
+  const parse = (v?: string) => {
+    if (!v) return null;
+    const n = /^\d+$/.test(v) ? Number(v) : Date.parse(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  return { from: parse(c.req.query("from")), to: parse(c.req.query("to")) };
+}
+
+adminRoute.get("/coin-economy", async (c) => {
+  requireFullAdmin(c);
+  const [overview, budgets, approval] = await Promise.all([
+    coinEconomyOverview(c.env, rangeFromQuery(c)),
+    listBudgets(c.env),
+    approvalPasswordStatus(c.env),
+  ]);
+  return c.json({ ...overview, budgetList: budgets, approvalPassword: approval });
+});
+
+// Send the coin report to the admin alert email right now (preview / test).
+adminRoute.post("/coin-economy/report", async (c) => {
+  requireFullAdmin(c);
+  const cfg = await getAppConfig(c.env);
+  const to = String(cfg?.adminAlertEmail || "");
+  if (!to) throw httpsError("failed-precondition", "Pehle App Settings me 'Admin alert email' set karo.");
+  const body = await c.req.json<any>().catch(() => ({}));
+  const days = body?.period === "weekly" ? 7 : 1;
+  const end = Date.now();
+  const r = await buildCoinReport(c.env, end - days * 24 * 60 * 60 * 1000, end, days === 7 ? "Weekly coin report (manual)" : "Daily coin report (manual)");
+  const sent = await sendEmail(c.env, { to, ...r });
+  if (!sent) throw httpsError("unavailable", "Email nahi gaya. Integrations me email provider check karo.");
+  return c.json({ success: true, to });
+});
+
+adminRoute.post("/coin-economy/alerts/run", async (c) => {
+  requireFullAdmin(c);
+  return c.json(await runCoinAlerts(c.env));
+});
+
+adminRoute.get("/coin-economy/contests", async (c) => {
+  requireFullAdmin(c);
+  return c.json(await contestPnl(c.env, boundedQueryInt(c.req.query("limit"), 200, 1, 500)));
+});
+
+adminRoute.get("/coin-economy/packages", async (c) => {
+  requireFullAdmin(c);
+  return c.json(await packagePnl(c.env));
+});
+
+adminRoute.get("/coin-economy/users/:uid", async (c) => {
+  requireFullAdmin(c);
+  const statement = await userStatement(c.env, c.req.param("uid"), boundedQueryInt(c.req.query("limit"), 300, 1, 2000));
+  if (!statement) throw httpsError("not-found", "User not found (uid ya username dalo).");
+  return c.json(statement);
+});
+
+// ======================= SCHEDULED / SEGMENTED NOTIFICATIONS ==============
+adminRoute.get("/scheduled-notifications", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.scheduledNotifications).orderBy(desc(schema.scheduledNotifications.sendAt)).limit(100).all();
+  return c.json(
+    rows.map((r) => ({
+      ...r,
+      sendAt: r.sendAt ? new Date(r.sendAt).toISOString() : null,
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
+      sentAt: r.sentAt ? new Date(r.sentAt).toISOString() : null,
+    })),
+  );
+});
+
+adminRoute.post("/scheduled-notifications", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const b = await c.req.json<any>();
+  if (!b.title || !b.body) throw httpsError("invalid-argument", "title and body are required.");
+  const sendAt = b.sendAt ? new Date(b.sendAt).getTime() : now();
+  const id = newId();
+  const admin = c.get("user");
+  await db.insert(schema.scheduledNotifications).values({
+    id,
+    title: b.title,
+    body: b.body,
+    image: b.image || null,
+    segment: b.segment || null,
+    sendAt,
+    status: "pending",
+    recipients: 0,
+    createdBy: admin?.uid ?? null,
+    createdAt: now(),
+  });
+  await logAudit(c, "notification.schedule", "scheduled_notification", id, { sendAt: b.sendAt, segment: b.segment });
+  return c.json({ success: true, id });
+});
+
+adminRoute.delete("/scheduled-notifications/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  await db.update(schema.scheduledNotifications).set({ status: "cancelled" }).where(and(eq(schema.scheduledNotifications.id, id), eq(schema.scheduledNotifications.status, "pending")));
+  await logAudit(c, "notification.schedule.cancel", "scheduled_notification", id);
+  return c.json({ message: "Scheduled notification cancelled" });
+});
+
+// ======================= BANNED WORDS (auto-moderation) =====================
+adminRoute.get("/banned-words", async (c) => {
+  const db = getDb(c.env);
+  const rows = await db.select().from(schema.bannedWords).orderBy(schema.bannedWords.word).all();
+  return c.json(rows.map((r) => r.word));
+});
+
+adminRoute.post("/banned-words", async (c) => {
+  const db = getDb(c.env);
+  const { word } = await c.req.json<any>();
+  const w = String(word || "").trim().toLowerCase();
+  if (!w) throw httpsError("invalid-argument", "word is required.");
+  await db.insert(schema.bannedWords).values({ word: w, createdAt: now() }).onConflictDoNothing();
+  await logAudit(c, "banned-word.add", "banned_word", w);
+  return c.json({ success: true });
+});
+
+adminRoute.delete("/banned-words/:word", async (c) => {
+  const db = getDb(c.env);
+  const w = decodeURIComponent(c.req.param("word")).toLowerCase();
+  await db.delete(schema.bannedWords).where(eq(schema.bannedWords.word, w));
+  await logAudit(c, "banned-word.remove", "banned_word", w);
+  return c.json({ message: "Removed" });
+});
+
+// ======================= USER PROFILE EDIT + GRANT =========================
+adminRoute.patch("/users/:id/profile", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const b = await c.req.json<any>();
+  const set: any = { updatedAt: now() };
+  if (b.fullName !== undefined) {
+    const fullName = String(b.fullName).trim();
+    if (fullName.length > 80) throw httpsError("invalid-argument", "Full name must be at most 80 characters.");
+    set.fullName = fullName;
+  }
+  if (b.username !== undefined) {
+    // This used to be a bare `.toLowerCase()`, bypassing the length, charset and
+    // reserved-name policy that signup enforces — an admin could set a username
+    // of "support" or "admin", which is a phishing vector in the app's own DMs.
+    set.username = validateUsername(b.username);
+    // And it must still be globally unique.
+    await assertIdentifiersAvailable(c.env, id, { username: set.username });
+
+    /**
+     * An admin rename releases a handle exactly like a self-service one, so it has to
+     * be recorded exactly like one.
+     *
+     * Without this the old handle is freed with NO hold and NO redirect — and this
+     * endpoint is how support renames the accounts most worth impersonating. A creator
+     * whose handle is on posters and in bios gets renamed here, and the name is
+     * claimable by anyone in the next second, inheriting all of that traffic.
+     */
+    const cur = await db
+      .select({ username: schema.users.username })
+      .from(schema.users)
+      .where(eq(schema.users.uid, id))
+      .get();
+    await recordUsernameTransition(c.env, id, cur?.username ?? null, set.username);
+  }
+  if (b.bio !== undefined) {
+    const bio = String(b.bio);
+    if (bio.length > 500) throw httpsError("invalid-argument", "Bio must be at most 500 characters.");
+    set.bio = bio;
+  }
+  if (b.verified !== undefined) set.verified = !!b.verified;
+  if (b.featured !== undefined) set.featured = !!b.featured;
+  await db.update(schema.users).set(set).where(eq(schema.users.uid, id));
+  // The public profile is served from a shared cache entry, so writing the row is
+  // not enough: without this the app keeps serving the pre-edit copy until the
+  // TTL lapses. Granting a blue check and seeing nothing change in the app is
+  // exactly how that looks from the outside.
+  //
+  // `c` is passed so the purge reaches this colo immediately; without it the call
+  // would delete a KV key that nothing reads any more and invalidate nothing at all.
+  await invalidateUserCaches(c.env, [id], c).catch((e) =>
+    console.error("[admin] profile cache invalidation failed", id, e),
+  );
+  await logAudit(c, "user.profile-edit", "user", id, set);
+  return c.json({ message: "Profile updated" });
+});
+
+// Grant XP and/or a badge to a user (coins go through /wallet).
+adminRoute.post("/users/:id/grant", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const { xp, badge, reason } = await c.req.json<any>();
+  // XP was accepted as any number: NaN, Infinity, fractions and huge values all
+  // went straight into the leaderboard. A grant is repeatable by design, so an
+  // Idempotency-Key makes a double-click a no-op.
+  let xpDelta = 0;
+  if (xp !== undefined && xp !== null && xp !== 0) {
+    const parsed = Number(xp);
+    if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 1_000_000) {
+      throw httpsError("invalid-argument", "xp must be a whole number between 1 and 1,000,000.");
+    }
+    xpDelta = parsed;
+  }
+  const badgeName = badge == null ? null : String(badge).trim();
+  if (badgeName !== null && (badgeName.length === 0 || badgeName.length > 60)) {
+    throw httpsError("invalid-argument", "badge must be 1–60 characters.");
+  }
+  if (!xpDelta && !badgeName) throw httpsError("invalid-argument", "Provide xp and/or a badge to grant.");
+  // An XP grant is an audited adjustment on the XP ledger (lib/xpService.ts):
+  // it needs a reason, like every other manual correction.
+  const why = typeof reason === "string" ? reason.trim() : "";
+  if (xpDelta && (why.length < 3 || why.length > 300)) {
+    throw httpsError("invalid-argument", "reason is required for an XP grant (3-300 characters).");
+  }
+
+  const user = await db.select({ xp: schema.users.xp, badges: schema.users.badges }).from(schema.users).where(eq(schema.users.uid, id)).get();
+  if (!user) throw httpsError("not-found", "User not found.");
+
+  const idem = await enforceAdminIdempotency(c, "user.grant", id);
+  try {
+    let xpResult: { applied: boolean; delta: number } | null = null;
+    if (xpDelta) {
+      xpResult = await awardXp(c.env, {
+        uid: id,
+        action: "admin_adjustment",
+        // Derived from the Idempotency-Key when sent, so a retry after a later
+        // failure is absorbed by the ledger's primary key.
+        eventId: `admin_xp:${id}:${c.req.header("Idempotency-Key") || newId()}`,
+        amount: xpDelta,
+        sourceType: "admin",
+        reason: why,
+        actor: c.get("user")?.uid ?? "server",
+        ts: now(),
+      });
+    }
+    if (badgeName) {
+      const badges = ((user.badges as unknown as string[]) || []).slice();
+      if (!badges.includes(badgeName)) badges.push(badgeName);
+      await db.update(schema.users).set({ badges: badges as any, updatedAt: now() }).where(eq(schema.users.uid, id));
+    }
+    await logAudit(c, "user.grant", "user", id, {
+      xp: xpDelta,
+      xpApplied: xpResult?.delta ?? 0,
+      before: user.xp ?? 0,
+      after: (user.xp ?? 0) + (xpResult?.delta ?? 0),
+      reason: why || null,
+      badge: badgeName,
+    });
+    return c.json({ message: "Granted" });
+  } catch (e) {
+    await idem?.finish(false);
+    throw e;
+  }
+});
+
+// ======================= ADMINS (role management) =========================
+adminRoute.get("/admins", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const rows = await db
+    .select({ uid: schema.users.uid, email: schema.users.email, username: schema.users.username, fullName: schema.users.fullName, role: schema.users.role, profileImageUrl: schema.users.profileImageUrl })
+    .from(schema.users)
+    .where(inArray(schema.users.role, ["admin", "moderator", "superadmin"]))
+    .all();
+  return c.json(rows);
+});
+
+// ======================= LEADERBOARD =======================
+adminRoute.get("/leaderboard", async (c) => {
+  // Full admins only: every user's coin balance.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const metric = c.req.query("metric") || "monthlyWins";
+  const col: Record<string, any> = {
+    monthlyWins: schema.users.monthlyWins,
+    wins: schema.users.wins,
+    xp: schema.users.xp,
+    dpcoin: schema.users.dpcoin,
+    totalVotesReceived: schema.users.totalVotesReceived,
+    followersCount: schema.users.followersCount,
+  };
+  const orderCol = col[metric] || schema.users.monthlyWins;
+  const rows = await db
+    .select({
+      uid: schema.users.uid,
+      username: schema.users.username,
+      fullName: schema.users.fullName,
+      profileImageUrl: schema.users.profileImageUrl,
+      verified: schema.users.verified,
+      level: schema.users.level,
+      xp: schema.users.xp,
+      wins: schema.users.wins,
+      monthlyWins: schema.users.monthlyWins,
+      dpcoin: schema.users.dpcoin,
+      totalVotesReceived: schema.users.totalVotesReceived,
+      followersCount: schema.users.followersCount,
+    })
+    .from(schema.users)
+    .orderBy(desc(orderCol))
+    .limit(50)
+    .all();
+  // Level is derived from XP (lib/gamification.ts#levelForXp), never the frozen column.
+  const gs = await getGamification(c.env);
+  return c.json(rows.map((r) => ({ ...r, level: levelForXp(r.xp ?? 0, gs), verified: !!r.verified })));
+});
+
+// ======================= MESSAGES MODERATION =======================
+adminRoute.get("/messages", async (c) => {
+  // Full admins only: a plaintext dump of private direct messages.
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 300);
+
+  // Message bodies live in per-chat ChatArchive DOs, so there is no single table
+  // to ORDER BY created_at across. A chat's `updated_at` bumps on every message,
+  // so the globally most-recent messages are in the most-recently-active chats:
+  // pull the recent page from the top `limit` chats, merge, and take the newest
+  // `limit`. That is enough to surface the top `limit` even if they all sit in
+  // one chat (it would be chat #1). Bounded by design; this is a rare admin read.
+  const chats = await db
+    .select({ id: schema.chats.id })
+    .from(schema.chats)
+    .orderBy(desc(schema.chats.updatedAt))
+    .limit(limit)
+    .all();
+  const perChat = await Promise.all(
+    chats.map((ch) => recentChatMessages(c.env, ch.id, limit).catch(() => [])),
+  );
+  const merged = perChat
+    .flat()
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, limit);
+
+  // One batched lookup for the sender usernames rather than a join per message.
+  const senderIds = [...new Set(merged.map((m) => m.senderId))];
+  const users = senderIds.length
+    ? await db
+        .select({ uid: schema.users.uid, username: schema.users.username })
+        .from(schema.users)
+        .where(inArray(schema.users.uid, senderIds))
+        .all()
+    : [];
+  const nameByUid = new Map(users.map((u) => [u.uid, u.username]));
+
+  // Reading other people's private conversations is exactly the kind of access
+  // that must leave a trace. Every other destructive/sensitive action here is
+  // audited; this read was not, so there was no record of who looked at what.
+  await logAudit(c, "message.read", "message", null, { count: merged.length, limit });
+  return c.json(
+    merged.map((m) => ({
+      id: m.id,
+      chatId: m.chatId,
+      senderId: m.senderId,
+      text: m.text,
+      createdAt: m.createdAt ? new Date(m.createdAt).toISOString() : null,
+      username: nameByUid.get(m.senderId) ?? null,
+    })),
+  );
+});
+
+adminRoute.delete("/messages/:chatId/:id", async (c) => {
+  // Full admins only: deletes a private message. `chatId` is required now that a
+  // message lives in its chat's DO — the id alone no longer locates it.
+  requireFullAdmin(c);
+  const chatId = c.req.param("chatId");
+  const id = c.req.param("id");
+  await deleteChatMessage(c.env, chatId, id);
+  await logAudit(c, "message.delete", "message", id, { chatId });
+  return c.json({ message: "Message deleted" });
+});
+
+// ======================= ANALYTICS =======================
+adminRoute.get("/analytics", async (c) => {
+  const db = getDb(c.env);
+  const nowMs = now();
+  const day = 86400000;
+  const cnt = async (tbl: any, col: any, since: number) =>
+    (await db.select({ v: count() }).from(tbl).where(gte(col, since)).get())?.v ?? 0;
+  const sum = async (col: any, tbl: any, since: number, statusOk?: any) =>
+    (await db.select({ v: sql<number>`COALESCE(SUM(${col}),0)` }).from(tbl).where(statusOk ? and(gte(tbl.createdAt, since), statusOk) : gte(tbl.createdAt, since)).get())?.v ?? 0;
+  // Range variants ([since, until)) for previous-period deltas.
+  const cntRange = async (tbl: any, col: any, since: number, until: number) =>
+    (await db.select({ v: count() }).from(tbl).where(and(gte(col, since), lt(col, until))).get())?.v ?? 0;
+  const sumRange = async (col: any, tbl: any, since: number, until: number, statusOk?: any) =>
+    (await db.select({ v: sql<number>`COALESCE(SUM(${col}),0)` }).from(tbl).where(statusOk ? and(gte(tbl.createdAt, since), lt(tbl.createdAt, until), statusOk) : and(gte(tbl.createdAt, since), lt(tbl.createdAt, until))).get())?.v ?? 0;
+  const votersRange = async (since: number, until: number) =>
+    (await db.select({ v: sql<number>`COUNT(DISTINCT ${schema.votes.voterUid})` }).from(schema.votes).where(and(gte(schema.votes.createdAt, since), lt(schema.votes.createdAt, until))).get())?.v ?? 0;
+
+  const totalUsers = (await db.select({ v: count() }).from(schema.users).get())?.v ?? 0;
+  const newUsersToday = await cnt(schema.users, schema.users.createdAt, nowMs - day);
+  const newUsers7d = await cnt(schema.users, schema.users.createdAt, nowMs - 7 * day);
+  const newUsers30d = await cnt(schema.users, schema.users.createdAt, nowMs - 30 * day);
+
+  // Active users (proxy): distinct voters in the window.
+  const dau = (await db.select({ v: sql<number>`COUNT(DISTINCT ${schema.votes.voterUid})` }).from(schema.votes).where(gte(schema.votes.createdAt, nowMs - day)).get())?.v ?? 0;
+  const mau = (await db.select({ v: sql<number>`COUNT(DISTINCT ${schema.votes.voterUid})` }).from(schema.votes).where(gte(schema.votes.createdAt, nowMs - 30 * day)).get())?.v ?? 0;
+
+  // `revenue*` are COIN counts (payments.amount is coins) — the dashboard cards
+  // are labelled "Coins Sold". `revenue*Inr` are the real rupee figures.
+  const revenueToday = await sum(schema.payments.amount, schema.payments, nowMs - day, eq(schema.payments.status, "success"));
+  const revenue7d = await sum(schema.payments.amount, schema.payments, nowMs - 7 * day, eq(schema.payments.status, "success"));
+  const revenue30d = await sum(schema.payments.amount, schema.payments, nowMs - 30 * day, eq(schema.payments.status, "success"));
+  const paiseToInr = (v: number) => roundFiat(Number(v || 0) / 100);
+  const revenueTodayInr = paiseToInr(
+    await sum(schema.payments.amountPaise, schema.payments, nowMs - day, eq(schema.payments.status, "success")),
+  );
+  const revenue7dInr = paiseToInr(
+    await sum(schema.payments.amountPaise, schema.payments, nowMs - 7 * day, eq(schema.payments.status, "success")),
+  );
+  const revenue30dInr = paiseToInr(
+    await sum(schema.payments.amountPaise, schema.payments, nowMs - 30 * day, eq(schema.payments.status, "success")),
+  );
+
+  const matchesToday = await cnt(schema.contestMatches, schema.contestMatches.createdAt, nowMs - day);
+  const votesToday = await cnt(schema.votes, schema.votes.createdAt, nowMs - day);
+  const postsToday = await cnt(schema.posts, schema.posts.createdAt, nowMs - day);
+  const activeMatches = (await db.select({ v: count() }).from(schema.contestMatches).where(eq(schema.contestMatches.status, "active")).get())?.v ?? 0;
+  const completedMatches = (await db.select({ v: count() }).from(schema.contestMatches).where(eq(schema.contestMatches.status, "completed")).get())?.v ?? 0;
+
+  // Previous-period comparators so the dashboard can show honest deltas:
+  //   * "today" cards compare against yesterday (24-48h ago),
+  //   * weekly momentum compares the last 7 days against the 7 days before that.
+  const newUsersYesterday = await cntRange(schema.users, schema.users.createdAt, nowMs - 2 * day, nowMs - day);
+  const votesYesterday = await cntRange(schema.votes, schema.votes.createdAt, nowMs - 2 * day, nowMs - day);
+  const dauYesterday = await votersRange(nowMs - 2 * day, nowMs - day);
+  const revenueYesterday = await sumRange(schema.payments.amount, schema.payments, nowMs - 2 * day, nowMs - day, eq(schema.payments.status, "success"));
+  const newUsersPrev7d = await cntRange(schema.users, schema.users.createdAt, nowMs - 14 * day, nowMs - 7 * day);
+  const revenuePrev7d = await sumRange(schema.payments.amount, schema.payments, nowMs - 14 * day, nowMs - 7 * day, eq(schema.payments.status, "success"));
+
+  return c.json(withoutRevenueForModerators(c, {
+    totalUsers, newUsersToday, newUsers7d, newUsers30d,
+    dau, mau,
+    revenueToday, revenue7d, revenue30d,
+    revenueTodayInr, revenue7dInr, revenue30dInr,
+    matchesToday, votesToday, postsToday,
+    activeMatches, completedMatches,
+    // deltas
+    newUsersYesterday, votesYesterday, dauYesterday, revenueYesterday,
+    newUsersPrev7d, revenuePrev7d,
+  }));
+});
+
+// ======================= OPS (manual cron triggers) =======================
+adminRoute.post("/ops/resolve-contests", async (c) => {
+  requireFullAdmin(c);
+  await resolveContests(c.env);
+  await logAudit(c, "ops.resolve-contests", "ops", null);
+  return c.json({ message: "Contest resolver ran" });
+});
+
+adminRoute.post("/ops/hall-of-fame", async (c) => {
+  requireFullAdmin(c);
+  // Safe to re-run: each (period, rank, uid) payout is claimed in
+  // `idempotency_keys` inside the crediting transaction, so a second click pays
+  // nobody twice. `skipped` tells the admin how many were already settled.
+  const body = await c.req.json<any>().catch(() => ({}));
+  const period = typeof body?.period === "string" && /^\d{4}-\d{2}$/.test(body.period) ? body.period : undefined;
+  const result = await monthlyHallOfFame(c.env, period);
+  await logAudit(c, "ops.hall-of-fame", "ops", null, result);
+  return c.json({ message: `Hall of Fame settled for ${result.period}`, ...result });
+});
+
+
+// ======================= VIDEO MIGRATION (legacy R2 MP4 -> Qencode HLS) =======================
+/**
+ * Enqueue one resumable batch of existing raw R2 videos for encoding by Qencode.
+ *
+ * Driven by `apps/admin-panel/scripts/migrate-videos-to-qencode.mjs`. Lives here
+ * rather than in the script so the Qencode key and R2 credentials never leave
+ * the Worker.
+ *
+ * Safe to re-run: enqueued rows are marked `migrating`, and `mediaUrl` is not
+ * repointed until the encode is `ready` (applyEncodeResult does that), so
+ * playback keeps working from the original throughout.
+ */
+adminRoute.post("/videos/migrate-batch", async (c) => {
+  requireFullAdmin(c);
+  const body = await c.req.json<any>().catch(() => ({}));
+  const target = ["stories", "matches", "all"].includes(body?.target) ? body.target : "all";
+  const limit = Number(body?.limit) || 10;
+
+  let result;
+  try {
+    result = await runVideoBackfillBatch(c.env, { limit, target, callbackOrigin: new URL(c.req.url).origin });
+  } catch (e: any) {
+    throw httpsError("failed-precondition", e?.message || "Video migration failed.");
+  }
+
+  await logAudit(c, "videos.migrate-batch", "videos", null, {
+    target,
+    limit,
+    enqueued: result.enqueued,
+    failed: result.failed,
+  });
+  return c.json(result);
+});
+
+/** Migration progress, for the script's summary output and for spot checks. */
+adminRoute.get("/videos/migration-status", async (c) => {
+  const db = getDb(c.env);
+  const byStatus = await db
+    .select({ status: schema.videos.status, count: count() })
+    .from(schema.videos)
+    .groupBy(schema.videos.status)
+    .all();
+  const pendingStories = await db
+    .select({ count: count() })
+    .from(schema.stories)
+    .where(and(isNull(schema.stories.videoProvider), eq(schema.stories.mediaType, "video")))
+    .get();
+  const pendingMatches = await db
+    .select({ count: count() })
+    .from(schema.contestMatches)
+    .where(and(isNull(schema.contestMatches.videoProvider), eq(schema.contestMatches.type, "video")))
+    .get();
+
+  return c.json({
+    videosByStatus: byStatus,
+    pending: {
+      stories: pendingStories?.count ?? 0,
+      matches: pendingMatches?.count ?? 0,
+    },
+  });
+});
+
+
+// ======================= PRIZE CLAIMS (physical prizes) =======================
+/**
+ * The fulfilment queue for physical prizes (migration 0042).
+ *
+ * Full admins only, and not because of the money — there is none here — but because
+ * every row carries a winner's home address and phone number. That is the most
+ * sensitive data this panel holds, so the LIST view deliberately returns only a
+ * masked one-line summary (`summariseDeliveryAddress`: city, state, PIN, masked
+ * phone). The full address is available from the single-claim endpoint below, which
+ * is the screen an operator is on when they are actually packing a parcel.
+ *
+ * The alternative — shipping the whole address in the list — means every operator
+ * who opens the queue, and every log line or screenshot of it, carries a home
+ * address that nobody needed in order to work the queue.
+ */
+const PRIZE_CLAIM_STATUSES = [
+  "unclaimed",
+  "submitted",
+  "approved",
+  "shipped",
+  "delivered",
+  "cancelled",
+] as const;
+type PrizeClaimStatus = (typeof PRIZE_CLAIM_STATUSES)[number];
+
+/**
+ * Which transitions are legal.
+ *
+ * A state machine rather than a free-form status field, because the timestamps have
+ * to mean something: `shipped_at` on a claim that never had an address is a lie an
+ * admin cannot later untangle, and "delivered" before "approved" hides whether
+ * anyone ever checked the address. `unclaimed` is absent as a TARGET on purpose —
+ * only settlement creates that state, and moving back to it would orphan an address
+ * the winner already gave us.
+ */
+const PRIZE_CLAIM_TRANSITIONS: Record<PrizeClaimStatus, PrizeClaimStatus[]> = {
+  unclaimed: ["cancelled"],
+  submitted: ["approved", "cancelled"],
+  approved: ["shipped", "cancelled"],
+  shipped: ["delivered", "cancelled"],
+  delivered: [],
+  cancelled: [],
+};
+
+adminRoute.get("/prize-claims", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const status = c.req.query("status");
+  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 500);
+  const conds: any[] = [];
+  if (status && (PRIZE_CLAIM_STATUSES as readonly string[]).includes(status)) {
+    conds.push(eq(schema.prizeClaims.status, status));
+  }
+
+  const rows = await db
+    .select({
+      id: schema.prizeClaims.id,
+      matchId: schema.prizeClaims.matchId,
+      contestId: schema.prizeClaims.contestId,
+      uid: schema.prizeClaims.uid,
+      status: schema.prizeClaims.status,
+      productTitle: schema.prizeClaims.productTitle,
+      productImageUrl: schema.prizeClaims.productImageUrl,
+      productValue: schema.prizeClaims.productValue,
+      recipientName: schema.prizeClaims.recipientName,
+      phone: schema.prizeClaims.phone,
+      city: schema.prizeClaims.city,
+      state: schema.prizeClaims.state,
+      postalCode: schema.prizeClaims.postalCode,
+      courier: schema.prizeClaims.courier,
+      trackingNumber: schema.prizeClaims.trackingNumber,
+      createdAt: schema.prizeClaims.createdAt,
+      submittedAt: schema.prizeClaims.submittedAt,
+      shippedAt: schema.prizeClaims.shippedAt,
+      deliveredAt: schema.prizeClaims.deliveredAt,
+      username: schema.users.username,
+      fullName: schema.users.fullName,
+    })
+    .from(schema.prizeClaims)
+    .leftJoin(schema.users, eq(schema.users.uid, schema.prizeClaims.uid))
+    .where(conds.length ? and(...conds) : (undefined as any))
+    .orderBy(desc(schema.prizeClaims.createdAt))
+    .limit(limit)
+    .all();
+
+  return c.json(
+    rows.map(({ recipientName, phone, city, state, postalCode, ...row }) => ({
+      ...row,
+      // Masked summary only — see the note above this route.
+      deliverySummary: row.status === "unclaimed"
+        ? null
+        : summariseDeliveryAddress({ recipientName, phone, city, state, postalCode }),
+      hasAddress: !!recipientName,
+    })),
+  );
+});
+
+/** One claim, WITH the full delivery address. The packing screen. */
+adminRoute.get("/prize-claims/:id", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const row = await db
+    .select()
+    .from(schema.prizeClaims)
+    .where(eq(schema.prizeClaims.id, c.req.param("id")))
+    .get();
+  if (!row) throw httpsError("not-found", "Prize claim not found.");
+
+  // Reading a home address is itself worth recording. If an address is ever
+  // misused, the audit log is the only thing that can say who saw it.
+  await logAudit(c, "prize.claim.view", "prize-claim", row.id, { uid: row.uid });
+
+  return c.json({
+    ...row,
+    // Pre-formatted so the panel does not assemble a shipping label itself and
+    // quietly disagree with the app about field order.
+    addressBlock: row.recipientName ? formatDeliveryAddress(row) : null,
+  });
+});
+
+/**
+ * Advance a claim: approve, ship (with courier + tracking), deliver, or cancel.
+ *
+ * The status change is a compare-and-swap on the CURRENT status, so two operators
+ * working the queue at once cannot both move the same claim — the second gets a
+ * `failed-precondition` telling them to refresh, rather than silently overwriting
+ * the first one's decision and its timestamp.
+ */
+async function returnProductPrizeToBudget(env: any, matchId: string, productTitle: string | null, ts: number): Promise<void> {
+  const resId = matchReservationId(matchId);
+  const used = `EXISTS (SELECT 1 FROM promo_reservations WHERE id = ? AND status = 'used' AND ref_type = 'match')`;
+  const res = await env.DB.prepare(`SELECT budget_id, coins FROM promo_reservations WHERE id = ? AND status = 'used'`)
+    .bind(resId)
+    .first();
+  if (!res || !(Number(res.coins) > 0)) return;
+  const coins = Number(res.coins);
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE promo_budgets SET spent_coins = MAX(0, spent_coins - ?), updated_at = ? WHERE id = ? AND ${used}`,
+    ).bind(coins, ts, res.budget_id, resId),
+    platformLedgerStatement(env, {
+      id: `pl:product_prize_reversal:${matchId}`,
+      kind: "product_prize_reversal",
+      coins,
+      budgetId: res.budget_id,
+      matchId,
+      description: `Prize claim cancelled${productTitle ? ` ("${productTitle}")` : ""}: ${coins} coins back to the budget`,
+      ts,
+    }, used, [resId]),
+    env.DB.prepare(`UPDATE promo_reservations SET status = 'released', updated_at = ? WHERE id = ? AND status = 'used'`)
+      .bind(ts, resId),
+  ]);
+}
+
+adminRoute.post("/prize-claims/:id/status", async (c) => {
+  requireFullAdmin(c);
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const body = await c.req.json<any>();
+
+  const next = String(body?.status || "");
+  if (!(PRIZE_CLAIM_STATUSES as readonly string[]).includes(next)) {
+    throw httpsError("invalid-argument", `status must be one of: ${PRIZE_CLAIM_STATUSES.join(", ")}.`);
+  }
+  const nextStatus = next as PrizeClaimStatus;
+
+  const claim = await db.select().from(schema.prizeClaims).where(eq(schema.prizeClaims.id, id)).get();
+  if (!claim) throw httpsError("not-found", "Prize claim not found.");
+
+  const current = (claim.status || "unclaimed") as PrizeClaimStatus;
+  const allowed = PRIZE_CLAIM_TRANSITIONS[current] ?? [];
+  if (!allowed.includes(nextStatus)) {
+    throw httpsError(
+      "failed-precondition",
+      allowed.length
+        ? `A ${current} claim can only move to: ${allowed.join(", ")}.`
+        : `A ${current} claim is final and cannot be changed.`,
+    );
+  }
+
+  const ts = now();
+  const set: Record<string, any> = { status: nextStatus, updatedAt: ts };
+
+  if (nextStatus === "shipped") {
+    // Refused rather than defaulted. "Shipped" with no courier is a status the
+    // winner can see and act on, and the only two things it needs to be actionable
+    // are who is carrying it and under what number.
+    const courier = String(body?.courier || "").trim();
+    const tracking = String(body?.trackingNumber || "").trim();
+    if (courier.length < 2 || courier.length > 80) {
+      throw httpsError("invalid-argument", "Enter the courier name.");
+    }
+    if (tracking.length < 4 || tracking.length > 120) {
+      throw httpsError("invalid-argument", "Enter the tracking number.");
+    }
+    set.courier = courier;
+    set.trackingNumber = tracking;
+    set.shippedAt = ts;
+  }
+  if (nextStatus === "approved") set.approvedAt = ts;
+  if (nextStatus === "delivered") set.deliveredAt = ts;
+  if (nextStatus === "cancelled") {
+    // A cancellation takes a prize away from someone who won it, so it has to say
+    // why — for the winner's notification and for whoever asks about it later.
+    const note = String(body?.adminNote || "").trim();
+    if (note.length < 4 || note.length > 500) {
+      throw httpsError("invalid-argument", "A reason is required when cancelling a prize claim.");
+    }
+    set.adminNote = note;
+    set.cancelledAt = ts;
+  } else if (typeof body?.adminNote === "string" && body.adminNote.trim()) {
+    set.adminNote = body.adminNote.trim().slice(0, 500);
+  }
+
+  // Compare-and-swap on the status we validated against.
+  const updated = await db
+    .update(schema.prizeClaims)
+    .set(set)
+    .where(and(eq(schema.prizeClaims.id, id), eq(schema.prizeClaims.status, current)))
+    .run();
+  if (updated.meta.changes === 0) {
+    throw httpsError("failed-precondition", "This claim changed while you were working on it. Refresh and try again.");
+  }
+  // A cancelled product was never handed over, so the coins its product_prize
+  // budget paid for it (lib/promoBudget.ts) go back to that budget, with a
+  // reversal row in the platform ledger. Gated on the reservation still being
+  // `used`, and that flip comes last, so this can only ever run once.
+  if (nextStatus === "cancelled" && claim.matchId) {
+    await returnProductPrizeToBudget(c.env, claim.matchId, claim.productTitle ?? null, ts);
+  }
+
+  // Best-effort, and after the write: the winner is told what happened to their
+  // prize, but a push failure must not roll back a fulfilment step an operator has
+  // already physically taken.
+  const productTitle = claim.productTitle || "your prize";
+  const message: Record<PrizeClaimStatus, { title: string; body: string } | null> = {
+    unclaimed: null,
+    submitted: null,
+    approved: {
+      title: "Prize confirmed ✅",
+      body: `Your address for ${productTitle} is confirmed. We are packing it now.`,
+    },
+    shipped: {
+      title: "Prize shipped 📦",
+      body: `${productTitle} is on its way via ${set.courier}. Tracking: ${set.trackingNumber}`,
+    },
+    delivered: {
+      title: "Prize delivered 🎉",
+      body: `${productTitle} has been marked delivered. Enjoy!`,
+    },
+    cancelled: {
+      title: "Prize claim cancelled",
+      body: `Your claim for ${productTitle} was cancelled. ${set.adminNote}`,
+    },
+  };
+  const note = message[nextStatus];
+  if (note) {
+    c.executionCtx.waitUntil(
+      createNotification(c.env, claim.uid, {
+        title: note.title,
+        body: note.body,
+        type: "prize-claim",
+        targetId: `prize:${claim.matchId}`,
+      }).catch((e) => console.error("[prize] claim notification failed (continuing)", id, e)),
+    );
+  }
+
+  await logAudit(c, "prize.claim.status", "prize-claim", id, {
+    from: current,
+    to: nextStatus,
+    courier: set.courier ?? null,
+    trackingNumber: set.trackingNumber ?? null,
+  });
+  return c.json({ success: true, id, status: nextStatus });
+});

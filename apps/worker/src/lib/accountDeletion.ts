@@ -1,0 +1,1389 @@
+import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import type { Env } from "../types";
+import { getDb, schema } from "../db";
+import { httpsError } from "./http";
+import { deleteAuthUser } from "./firebaseAdmin";
+import { deleteMediaByUrl } from "./mediaDelete";
+import { deleteVideoObjects } from "./qencode";
+import { newId, now } from "./ids";
+import { invalidateBlockCache } from "./blocks";
+import { deleteChatMessagesBySender } from "./chatArchive";
+import {
+  delCache,
+  feedSeenKey,
+  followersCacheKey,
+  followingCacheKey,
+  invalidateAuthState,
+  userCacheKey,
+} from "./cache";
+import { purgeShared, type EdgeCtx } from "./edgeCache";
+import { purgeUsernameHistory } from "./userIdentifiers";
+import { getAppConfig } from "./settings";
+import { publish } from "./publish";
+import { sendEmail } from "./email";
+import { accountDeletionScheduledEmail } from "./emailTemplates";
+import { DELETED_STATUS, PENDING_DELETION_STATUS, parseGraceDays } from "./accountStatus";
+import { isContestStoryType, purgeVsCompositesForUser } from "./matchStories";
+
+/**
+ * Self-service account deletion.
+ *
+ * Both app stores require an in-app way to delete an account. The first version
+ * of this file did the whole thing inside a single request, and three properties
+ * of that turned out to be wrong in ways worth spelling out, because the shape
+ * of the current code is a direct response to each.
+ *
+ * 1. IT REFUSED. A pending payout or an unfinished contest made the request throw
+ *    `failed-precondition`, and the client hid its own delete button while that
+ *    was true. So the one flow the stores mandate could be unavailable for days
+ *    with no recourse. A deletion request is now always ACCEPTED; a genuine
+ *    in-flight obligation moves `scheduled_for` instead of rejecting the user.
+ *
+ * 2. IT WAS INSTANT AND UNRECOVERABLE. One mistap, one stolen phone, one bad
+ *    evening, and the account was gone. There is now a grace period, and an
+ *    explicit cancellation path during it. The account is unusable and invisible
+ *    from the moment it is requested, so "deleted" is honest from the user's
+ *    point of view, but the data still exists until the grace period lapses.
+ *
+ * 3. IT WAS NOT RESUMABLE. The work spans two D1 batches plus R2, KV and
+ *    Firebase. A failure part-way left an account half-deleted, and nothing
+ *    recorded how far it had got — so nothing could finish it and nobody could
+ *    tell it had stalled. The purge is now a phase machine persisted on
+ *    `deletion_requests.phase`, driven by cron, and each phase is idempotent.
+ *
+ * What is NOT deleted, and why. This list is load-bearing: it is mirrored in the
+ * privacy policy (content/legal.ts) and asserted by test/accountDeletion.test.ts.
+ *
+ *  - `coin_transactions`, `payments`, `payment_orders`, `deposits`, `withdrawals`,
+ *    `promo_reservations`, `platform_ledger`
+ *    — financial records, retained for the period Indian tax and accounting law
+ *    requires, keyed by a uid that no longer resolves to a person.
+ *  - `votes`, `vote_xp_awards`, `contest_matches` — other people entered those
+ *    contests and their results depend on these rows. The match SURVIVES, but its
+ *    participant snapshot is anonymised and the entry media is destroyed (see
+ *    `anonymiseMatchSnapshots`), because a photograph of a face is personal data
+ *    no matter whose leaderboard it props up.
+ *  - `referrals` — the bonus ledger for the OTHER side of the referral.
+ *  - `admin_audit_log` — the record of admin actions, which must not be editable
+ *    by the subject of those actions.
+ *  - `account_deletions` — the compliance record of the deletion itself. Holds no
+ *    personal data.
+ *  - `verification_reward_claims` — one-way SHA-256 hashes of the email address
+ *    and mobile number that already earned the verification bonus, so deleting
+ *    and re-registering cannot claim it twice. No raw contact data.
+ *
+ * Everything else belonging to the user is destroyed.
+ */
+
+export { PENDING_DELETION_STATUS, DELETED_STATUS } from "./accountStatus";
+
+/** How long a deferral (live contest, pending payout) pushes the purge out by. */
+const DEFERRAL_RECHECK_MS = 24 * 60 * 60 * 1000;
+/** Give up automated retries after this many failed purge attempts. */
+const MAX_PURGE_ATTEMPTS = 5;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Something in flight that must settle before the data can be erased.
+ *
+ * Deliberately called a DEFERRAL and not a blocker. It delays the purge; it does
+ * not refuse the request. The distinction is the whole point of this rewrite —
+ * see note 1 in the file header.
+ */
+export type DeferralCode = "pending_payout" | "active_contest" | "pending_prize";
+
+export interface DeletionDeferral {
+  code: DeferralCode;
+  message: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface DeletionWarning {
+  code: "positive_balance";
+  message: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface DeletionRequestView {
+  status: "pending" | "processing" | "completed" | "cancelled";
+  reason: string | null;
+  requestedAt: number;
+  scheduledFor: number;
+  deferredReason: string | null;
+  deferredUntil: number | null;
+  balanceAtRequest: number;
+}
+
+export interface DeletionEligibility {
+  /**
+   * Always true. Retained ONLY because shipped app builds gate their delete
+   * button on this field, and a build that reads `false` renders a screen with
+   * no way forward — the exact bug this rewrite exists to fix. A deletion
+   * request is never refused, so nothing may set this to false again.
+   */
+  deletable: true;
+  /**
+   * Backwards-compatible alias for `deferrals`. Old builds render these as the
+   * reasons they cannot proceed; new builds render them as "when", not "whether".
+   */
+  blockers: DeletionDeferral[];
+  deferrals: DeletionDeferral[];
+  warnings: DeletionWarning[];
+  /** Coins that will be forfeited if the user proceeds: the total (DP coin + Diamond). */
+  balance: number;
+  /** The Diamond part of `balance` (users.locked_coins): never withdrawable. */
+  diamonds: number;
+  gracePeriodDays: number;
+  /** When the purge would run if the user requested deletion right now. */
+  wouldPurgeAt: number;
+  /** The user's existing request, if they already asked. */
+  request: DeletionRequestView | null;
+}
+
+/**
+ * Admin-configurable grace period, clamped.
+ *
+ * Parsing lives in lib/accountStatus.ts because content/legal.ts needs the same
+ * number to state it in the privacy policy, and two copies would drift.
+ */
+export async function gracePeriodDays(env: Env): Promise<number> {
+  const cfg = await getAppConfig(env).catch(() => null);
+  return parseGraceDays((cfg as any)?.accountDeletionGraceDays);
+}
+
+/**
+ * What stands between this account and erasure right now.
+ *
+ * A positive balance is a WARNING: the user is entitled to delete their account,
+ * they just need to be told the coins go with it. Money and contests actually in
+ * flight are DEFERRALS: the request is accepted and the purge waits.
+ */
+export async function checkDeletionEligibility(env: Env, uid: string): Promise<DeletionEligibility> {
+  const db = getDb(env);
+
+  const user = await db
+    .select({ balance: schema.users.dpcoin, locked: schema.users.lockedCoins, status: schema.users.status })
+    .from(schema.users)
+    .where(eq(schema.users.uid, uid))
+    .get();
+  if (!user) throw httpsError("not-found", "Account not found.");
+  if (user.status === DELETED_STATUS) {
+    throw httpsError("failed-precondition", "This account has already been deleted.");
+  }
+
+  const [deferrals, existing, graceDays] = await Promise.all([
+    findDeferrals(env, uid),
+    db.select().from(schema.deletionRequests).where(eq(schema.deletionRequests.uid, uid)).get(),
+    gracePeriodDays(env),
+  ]);
+
+  const balance = Number(user.balance || 0);
+  const diamonds = Math.min(Math.max(0, balance), Math.max(0, Number(user.locked || 0)));
+  const warnings: DeletionWarning[] = [];
+  if (balance > 0) {
+    warnings.push({
+      code: "positive_balance",
+      message: `Your remaining ${balance - diamonds} DP coin and ${diamonds} Diamond will be forfeited and cannot be recovered.`,
+      detail: { balance, diamonds },
+    });
+  }
+
+  const ts = now();
+  const graceEnd = ts + graceDays * DAY_MS;
+  const deferredTo = deferrals.length ? ts + DEFERRAL_RECHECK_MS : 0;
+
+  const active =
+    existing && (existing.status === "pending" || existing.status === "processing") ? existing : null;
+
+  return {
+    deletable: true,
+    blockers: deferrals,
+    deferrals,
+    warnings,
+    balance,
+    diamonds,
+    gracePeriodDays: graceDays,
+    wouldPurgeAt: Math.max(graceEnd, deferredTo),
+    request: active
+      ? {
+          status: active.status as DeletionRequestView["status"],
+          reason: active.reason ?? null,
+          requestedAt: active.requestedAt,
+          scheduledFor: active.scheduledFor,
+          deferredReason: active.deferredReason ?? null,
+          deferredUntil: active.deferredUntil ?? null,
+          balanceAtRequest: Number(active.balanceAtRequest || 0),
+        }
+      : null,
+  };
+}
+
+/** In-flight obligations that must settle before the data can be erased. */
+async function findDeferrals(env: Env, uid: string): Promise<DeletionDeferral[]> {
+  const db = getDb(env);
+  const deferrals: DeletionDeferral[] = [];
+
+  const pendingPayouts = await db
+    .select({ id: schema.withdrawals.id })
+    .from(schema.withdrawals)
+    .where(
+      and(
+        eq(schema.withdrawals.userId, uid),
+        inArray(schema.withdrawals.status, ["pending", "approved"]),
+      ),
+    )
+    .all();
+  if (pendingPayouts.length > 0) {
+    deferrals.push({
+      code: "pending_payout",
+      message:
+        "Your payout is still being processed. Your account will be deleted once it has been paid or rejected.",
+      detail: { withdrawals: pendingPayouts.length },
+    });
+  }
+
+  // A match this user is in has an opponent who paid to enter it. Participants
+  // live in the userA/userB JSON snapshots, so this is a JSON match rather than a
+  // column comparison.
+  const liveForUser = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM contest_matches
+      WHERE status IN ('waiting_for_opponent','active')
+        AND (json_extract(user_a, '$.uid') = ? OR json_extract(user_b, '$.uid') = ?)`,
+  )
+    .bind(uid, uid)
+    .first<{ n: number }>();
+  const liveCount = Number(liveForUser?.n || 0);
+  if (liveCount > 0) {
+    deferrals.push({
+      code: "active_contest",
+      message:
+        "You are in a contest that has not finished yet. Your account will be deleted once it is resolved.",
+      detail: { matches: liveCount },
+    });
+  }
+
+  // A physical prize that has not reached the winner yet.
+  //
+  // Exactly the same shape of obligation as a pending payout, and deferred for the
+  // same reason: erasure scrubs the delivery address (phaseContent), and scrubbing
+  // the address of a parcel that is packed or already with a courier makes it
+  // undeliverable and untraceable. `unclaimed` is NOT included — nobody is waiting
+  // on us there, the winner simply never supplied an address, and deferring on it
+  // would postpone erasure indefinitely for a prize that may never be claimed.
+  const openClaims = await db
+    .select({ id: schema.prizeClaims.id })
+    .from(schema.prizeClaims)
+    .where(
+      and(
+        eq(schema.prizeClaims.uid, uid),
+        inArray(schema.prizeClaims.status, ["submitted", "approved", "shipped"]),
+      ),
+    )
+    .all();
+  if (openClaims.length > 0) {
+    deferrals.push({
+      code: "pending_prize",
+      message:
+        "A prize you won is still on its way. Your account will be deleted once it has been delivered.",
+      detail: { prizeClaims: openClaims.length },
+    });
+  }
+
+  return deferrals;
+}
+
+// ---------------------------------------------------------------------------
+// Request / cancel
+// ---------------------------------------------------------------------------
+
+export interface RequestDeletionResult {
+  scheduledFor: number;
+  gracePeriodDays: number;
+  deferrals: DeletionDeferral[];
+  forfeitedCoins: number;
+  /** True when the request already existed — this call was a no-op refresh. */
+  alreadyRequested: boolean;
+}
+
+/**
+ * Accept a deletion request and start the clock.
+ *
+ * The account is taken out of service IMMEDIATELY — `status` flips to
+ * `pending_deletion`, which hides it from every public read path and rejects
+ * every mutating action except cancelling. That is what makes it honest to tell
+ * the user their account is gone while the data still exists for the grace
+ * period. `isBlocked` is deliberately NOT set: the user must still be able to
+ * sign in, because signing in is how they cancel.
+ */
+export async function requestAccountDeletion(
+  env: Env,
+  uid: string,
+  opts: { reason?: string; source?: "app" | "web" | "admin" } = {},
+  /** Request context, so the cache purge reaches this colo. See `invalidateUserCaches`. */
+  c?: EdgeCtx,
+): Promise<RequestDeletionResult> {
+  const db = getDb(env);
+  const eligibility = await checkDeletionEligibility(env, uid);
+  const ts = now();
+  const graceDays = eligibility.gracePeriodDays;
+
+  const existing = await db
+    .select()
+    .from(schema.deletionRequests)
+    .where(eq(schema.deletionRequests.uid, uid))
+    .get();
+
+  if (existing && (existing.status === "pending" || existing.status === "processing")) {
+    // Idempotent: asking twice must not extend the wait, which would let a
+    // confused user push their own deletion out indefinitely.
+    return {
+      scheduledFor: existing.scheduledFor,
+      gracePeriodDays: graceDays,
+      deferrals: eligibility.deferrals,
+      forfeitedCoins: Number(existing.balanceAtRequest || 0),
+      alreadyRequested: true,
+    };
+  }
+
+  const scheduledFor = eligibility.wouldPurgeAt;
+  const reason = opts.reason ? String(opts.reason).slice(0, 500) : null;
+  const deferral = eligibility.deferrals[0] || null;
+
+  // Kept so cancelling can put the account back exactly as it was — see
+  // `cancelAccountDeletion` and migration 0057.
+  const before = await db
+    .select({ isPrivate: schema.users.isPrivate })
+    .from(schema.users)
+    .where(eq(schema.users.uid, uid))
+    .get();
+
+  const row = {
+    uid,
+    status: "pending" as const,
+    wasPrivate: !!before?.isPrivate,
+    reason,
+    requestedAt: ts,
+    scheduledFor,
+    deferredReason: deferral?.code ?? null,
+    deferredUntil: deferral ? scheduledFor : null,
+    phase: null,
+    mediaUrls: null,
+    attempts: 0,
+    lastError: null,
+    balanceAtRequest: eligibility.balance,
+    source: opts.source || "app",
+    cancelledAt: null,
+    completedAt: null,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  await db.batch([
+    // `onConflictDoUpdate` rather than insert: a previously CANCELLED request
+    // leaves a row behind, and a user is allowed to change their mind twice.
+    db
+      .insert(schema.deletionRequests)
+      .values(row)
+      .onConflictDoUpdate({ target: schema.deletionRequests.uid, set: row }),
+    db
+      .update(schema.users)
+      .set({ status: PENDING_DELETION_STATUS, isPrivate: true, fcmTokens: [], updatedAt: ts })
+      .where(eq(schema.users.uid, uid)),
+  ]);
+
+  // Out of every public listing and cached profile from this moment on.
+  await invalidateUserCaches(env, [uid], c);
+
+  // Confirm by email, with the date the deletion can still be cancelled by. The
+  // in-app notice disappears with the account it is attached to, so an email is
+  // the one record of "you asked to delete this, here's how to undo it" that
+  // survives — and the alarm for a deletion the owner did NOT request. Read the
+  // address AFTER the anonymise-nothing request write (the row is untouched
+  // here), best-effort so a mail hiccup never fails the request.
+  try {
+    const account = await db
+      .select({ email: schema.users.email })
+      .from(schema.users)
+      .where(eq(schema.users.uid, uid))
+      .get();
+    if (account?.email) {
+      const when = new Date(scheduledFor).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      });
+      await sendEmail(env, {
+        to: account.email,
+        ...accountDeletionScheduledEmail(when),
+      });
+    }
+  } catch (e) {
+    console.error("[accountDeletion] scheduled-deletion email failed", uid, e);
+  }
+
+  return {
+    scheduledFor,
+    gracePeriodDays: graceDays,
+    deferrals: eligibility.deferrals,
+    forfeitedCoins: eligibility.balance,
+    alreadyRequested: false,
+  };
+}
+
+/**
+ * Stop a pending deletion and put the account back into service.
+ *
+ * Only valid while nothing has been destroyed yet. Once the purge has started
+ * touching data (`status = 'processing'`) there is nothing left to restore, and
+ * pretending otherwise would be the worst possible answer.
+ */
+export async function cancelAccountDeletion(
+  env: Env,
+  uid: string,
+  c?: EdgeCtx,
+): Promise<{ cancelled: boolean }> {
+  const db = getDb(env);
+  const existing = await db
+    .select()
+    .from(schema.deletionRequests)
+    .where(eq(schema.deletionRequests.uid, uid))
+    .get();
+
+  if (!existing || existing.status === "cancelled") {
+    // Idempotent: a double tap, or a client retrying, is not an error.
+    return { cancelled: false };
+  }
+  if (existing.status === "completed") {
+    throw httpsError("failed-precondition", "This account has already been deleted.");
+  }
+  if (existing.status === "processing") {
+    throw httpsError(
+      "failed-precondition",
+      "Your account is already being deleted and can no longer be restored.",
+    );
+  }
+
+  const ts = now();
+  await db.batch([
+    db
+      .update(schema.deletionRequests)
+      .set({ status: "cancelled", cancelledAt: ts, updatedAt: ts })
+      .where(eq(schema.deletionRequests.uid, uid)),
+    // Back to `active`, and back to the privacy the user had chosen. `isPrivate`
+    // was forced on at request time; since migration 0057 the prior value is on
+    // the request row. A NULL (request made before 0057) means it is unknown, so
+    // the account stays private — the choice that cannot leak anything — and
+    // the user can switch it off.
+    db
+      .update(schema.users)
+      .set({
+        status: "active",
+        ...(existing.wasPrivate === null || existing.wasPrivate === undefined ? {} : { isPrivate: !!existing.wasPrivate }),
+        updatedAt: ts,
+      })
+      .where(eq(schema.users.uid, uid)),
+  ]);
+
+  await invalidateUserCaches(env, [uid], c);
+  return { cancelled: true };
+}
+
+// ---------------------------------------------------------------------------
+// The purge
+// ---------------------------------------------------------------------------
+
+/** Ordered phases. Each is idempotent so a retry can safely re-run the current one. */
+const PHASES = ["snapshots", "media", "content", "social", "auth", "done"] as const;
+export type DeletionPhase = (typeof PHASES)[number];
+
+export interface DeletionResult {
+  uid: string;
+  deletedAt: number;
+  /** Media objects removed (or attempted). */
+  mediaUrls: string[];
+  forfeitedCoins: number;
+}
+
+/**
+ * Run the purge for one account, from wherever it last got to.
+ *
+ * Ordering is not arbitrary. `snapshots` runs first because it is the phase that
+ * makes the identity disappear — every later phase is cleanup that can be
+ * retried without the user's name being visible in the meantime. Media URLs are
+ * captured in that same first phase and persisted on the request row, because
+ * the rows holding them are deleted two phases later.
+ */
+export async function executeAccountDeletion(
+  env: Env,
+  uid: string,
+  reason?: string,
+): Promise<DeletionResult> {
+  const db = getDb(env);
+
+  let request = await db
+    .select()
+    .from(schema.deletionRequests)
+    .where(eq(schema.deletionRequests.uid, uid))
+    .get();
+
+  const startTs = now();
+
+  // A direct purge (admin action, or a legacy client calling `deleteAccount`
+  // with the grace period configured to zero) has no request row yet.
+  if (!request) {
+    const balance =
+      Number(
+        (
+          await db
+            .select({ balance: schema.users.dpcoin })
+            .from(schema.users)
+            .where(eq(schema.users.uid, uid))
+            .get()
+        )?.balance || 0,
+      ) || 0;
+    const row = {
+      uid,
+      status: "processing" as const,
+      reason: reason ? String(reason).slice(0, 500) : null,
+      requestedAt: startTs,
+      scheduledFor: startTs,
+      deferredReason: null,
+      deferredUntil: null,
+      phase: null,
+      mediaUrls: null,
+      attempts: 0,
+      lastError: null,
+      balanceAtRequest: balance,
+      source: "app" as const,
+      cancelledAt: null,
+      completedAt: null,
+      createdAt: startTs,
+      updatedAt: startTs,
+    };
+    await db
+      .insert(schema.deletionRequests)
+      .values(row)
+      .onConflictDoUpdate({ target: schema.deletionRequests.uid, set: row });
+    request = await db
+      .select()
+      .from(schema.deletionRequests)
+      .where(eq(schema.deletionRequests.uid, uid))
+      .get();
+  }
+  if (!request) throw httpsError("not-found", "Account not found.");
+
+  if (request.status === "completed") {
+    return {
+      uid,
+      deletedAt: request.completedAt || request.updatedAt,
+      mediaUrls: request.mediaUrls || [],
+      forfeitedCoins: Number(request.balanceAtRequest || 0),
+    };
+  }
+
+  await db
+    .update(schema.deletionRequests)
+    .set({
+      status: "processing",
+      attempts: (request.attempts || 0) + 1,
+      updatedAt: startTs,
+    })
+    .where(eq(schema.deletionRequests.uid, uid));
+
+  const effectiveReason = reason ?? request.reason ?? undefined;
+  let phase = (request.phase as DeletionPhase | null) ?? PHASES[0];
+  let mediaUrls: string[] = request.mediaUrls || [];
+
+  try {
+    while (phase !== "done") {
+      switch (phase) {
+        case "snapshots":
+          mediaUrls = await phaseSnapshots(env, uid);
+          break;
+        case "media":
+          await phaseMedia(env, uid, mediaUrls);
+          break;
+        case "content":
+          await phaseContent(env, uid);
+          break;
+        case "social":
+          await phaseSocial(env, uid);
+          break;
+        case "auth":
+          await phaseAuth(env, uid, effectiveReason);
+          break;
+      }
+      phase = PHASES[PHASES.indexOf(phase) + 1];
+      await db
+        .update(schema.deletionRequests)
+        .set({
+          phase,
+          // Persisted here rather than inside the phase so the write happens once
+          // per phase transition instead of once per collected URL.
+          mediaUrls: phase === "media" ? mediaUrls : undefined,
+          updatedAt: now(),
+        })
+        .where(eq(schema.deletionRequests.uid, uid));
+    }
+  } catch (e: any) {
+    // Record where it stopped, so the next cron tick resumes instead of
+    // restarting, and so a stalled deletion is visible to an admin rather than
+    // living only in a log line.
+    const message = String(e?.message || e).slice(0, 1000);
+    await db
+      .update(schema.deletionRequests)
+      .set({ status: "pending", phase, lastError: message, updatedAt: now() })
+      .where(eq(schema.deletionRequests.uid, uid))
+      .catch(() => {});
+    console.error("[accountDeletion] purge failed", uid, phase, e);
+    throw e;
+  }
+
+  const completedAt = now();
+  await db
+    .update(schema.deletionRequests)
+    .set({ status: "completed", phase: "done", completedAt, lastError: null, updatedAt: completedAt })
+    .where(eq(schema.deletionRequests.uid, uid));
+
+  return {
+    uid,
+    deletedAt: completedAt,
+    mediaUrls,
+    forfeitedCoins: await readForfeitedCoins(env, uid),
+  };
+}
+
+/**
+ * What was ACTUALLY forfeited, read back from the ledger.
+ *
+ * Not `balance_at_request`: that is the figure quoted to the user when they
+ * asked, and a contest can settle in their favour during the grace period. The
+ * ledger row is the only value that matches the balance the purge actually
+ * zeroed, and it is also the one that survives a resumed purge — a local
+ * variable would not.
+ */
+async function readForfeitedCoins(env: Env, uid: string): Promise<number> {
+  const row = await getDb(env)
+    .select({ amount: schema.coinTransactions.amount })
+    .from(schema.coinTransactions)
+    .where(eq(schema.coinTransactions.id, `account_deletion:${uid}`))
+    .get();
+  return Math.abs(Number(row?.amount || 0));
+}
+
+/**
+ * Legacy name, kept because callers and tests reference it.
+ *
+ * Semantics are unchanged from the original implementation: purge NOW, all the
+ * way through, and throw if something in flight makes that unsafe. The grace
+ * period lives in `requestAccountDeletion`, not here.
+ */
+export async function deleteOwnAccount(
+  env: Env,
+  uid: string,
+  reason?: string,
+): Promise<DeletionResult> {
+  const deferrals = await findDeferrals(env, uid);
+  if (deferrals.length > 0) {
+    throw httpsError("failed-precondition", deferrals.map((d) => d.message).join(" "));
+  }
+  return executeAccountDeletion(env, uid, reason);
+}
+
+/**
+ * Phase 1 — make the identity disappear, and capture what to purge later.
+ *
+ * Everything that renders a name or a face is rewritten here: the `users` row,
+ * the participant snapshots inside `contest_matches`, and the cached member list
+ * inside `chats`. The last two are JSON blobs rather than foreign keys, so no
+ * amount of anonymising the `users` row reaches them — which is exactly how the
+ * original implementation left a deleted user's real name and photo sitting in
+ * every conversation and every battle they had ever been in.
+ */
+async function phaseSnapshots(env: Env, uid: string): Promise<string[]> {
+  const db = getDb(env);
+  const ts = now();
+
+  const media = new Set<string>();
+  const user = await db
+    .select({ avatar: schema.users.profileImageUrl, balance: schema.users.dpcoin, locked: schema.users.lockedCoins })
+    .from(schema.users)
+    .where(eq(schema.users.uid, uid))
+    .get();
+  if (user?.avatar) media.add(user.avatar);
+  for (const row of await db
+    .select({ url: schema.posts.mediaUrl })
+    .from(schema.posts)
+    .where(eq(schema.posts.userId, uid))
+    .all()) {
+    if (row.url) media.add(row.url);
+  }
+  for (const row of await db
+    .select({ url: schema.stories.mediaUrl, type: schema.stories.type })
+    .from(schema.stories)
+    .where(eq(schema.stories.userId, uid))
+    .all()) {
+    // Contest stories do not own their media: the entry is collected from the
+    // match snapshot below, and a VS composite is handled by
+    // purgeVsCompositesForUser (it is shared with the other participant).
+    if (row.url && !isContestStoryType(row.type)) media.add(row.url);
+  }
+  // Every battle card of theirs shows this user's face, so each one is destroyed
+  // and every story displaying it — the opponent's too — is removed.
+  for (const url of await purgeVsCompositesForUser(env, uid)) media.add(url);
+
+  const balance = Number(user?.balance || 0);
+  const suffix = uid.slice(-6).toLowerCase().replace(/[^a-z0-9]/g, "") || newId().slice(0, 6);
+  const anonUsername = `deleted_${suffix}`;
+
+  // Forfeiting the balance is a balance change, so it needs a ledger row like
+  // every other one. Without it a per-user replay of `coin_transactions` would
+  // not sum to the stored balance, and that reconciliation is what the
+  // platform-liability figure depends on. Deterministic id, so a resumed or
+  // retried purge cannot record the forfeiture twice.
+  // Any non-zero balance or Diamond part is written off with a ledger row,
+  // including a negative balance left by a clawback shortfall: the purge zeroes
+  // both columns, and the two ledger invariants must still hold afterwards.
+  const forfeitLocked = Number(user?.locked || 0);
+  const forfeitLedger =
+    balance !== 0 || forfeitLocked !== 0
+      ? db
+          .insert(schema.coinTransactions)
+          .values({
+            id: `account_deletion:${uid}`,
+            uid,
+            amount: -balance,
+            // The Diamonds (locked_coins) go with the rest of the balance.
+            lockedDelta: -forfeitLocked,
+            type: "account_deletion_forfeit",
+            description: "DP coin and Diamond forfeited on account deletion",
+            createdAt: ts,
+          })
+          .onConflictDoNothing()
+      : null;
+
+  await db.batch([
+    ...(forfeitLedger ? [forfeitLedger] : []),
+    // Every personal field cleared. `isBlocked` + `status` also make any
+    // still-valid Firebase ID token useless immediately, because requireAuth
+    // re-checks D1 on every request.
+    db
+      .update(schema.users)
+      .set({
+        email: null,
+        phone: null,
+        username: anonUsername,
+        fullName: "Deleted user",
+        profileImageUrl: null,
+        bio: null,
+        dob: null,
+        gender: null,
+        occupation: null,
+        coordinates: null,
+        extra: null,
+        fcmTokens: [],
+        notificationPrefs: null,
+        referralCode: null,
+        referredBy: null,
+        equippedBadge: null,
+        cosmetics: null,
+        isBlocked: true,
+        status: DELETED_STATUS,
+        isPrivate: true,
+        dpcoin: 0,
+        lockedCoins: 0,
+        updatedAt: ts,
+      })
+      .where(eq(schema.users.uid, uid)),
+  ] as any);
+
+  // The account is now blocked + deleted; drop any cached auth-state (paid tier)
+  // so the terminal status is enforced immediately rather than after the TTL.
+  await invalidateAuthState(env, uid);
+
+  await anonymiseMatchSnapshots(env, uid, media);
+  await anonymiseChatSnapshots(env, uid);
+
+  // Any encoded video this user owns, including contest-entry videos and
+  // abandoned uploads that never got attached to anything — neither is reachable
+  // from `posts` or `stories`, so collecting only those two would leave paid-for
+  // footage of a deleted user's face in the bucket indefinitely.
+  for (const row of await db
+    .select({
+      id: schema.videos.id,
+      playbackUrl: schema.videos.playbackUrl,
+      mp4Url: schema.videos.mp4Url,
+    })
+    .from(schema.videos)
+    .where(eq(schema.videos.ownerUid, uid))
+    .all()) {
+    if (row.playbackUrl) media.add(row.playbackUrl);
+    else if (row.mp4Url) media.add(row.mp4Url);
+    // A row that never reached `ready` has no URL at all; its id is the only
+    // handle on it, so it is purged directly in the media phase.
+  }
+
+  return [...media];
+}
+
+/**
+ * Anonymise this user's participant snapshots inside `contest_matches`.
+ *
+ * The match row itself is retained: other people entered these contests, voted
+ * in them and were paid out of them, and deleting the row would orphan all of
+ * that. But the snapshot carries `username`, `profilePic`, `caption` and
+ * `mediaUrl`, and those are personal data — a photograph of a face does not stop
+ * being personal data because it is propping up someone else's win record. So
+ * the row survives with the identity stripped and the entry media destroyed.
+ *
+ * `json_set` rather than a read-modify-write: the update has to be atomic
+ * against the settlement path, which rewrites the same column.
+ */
+async function anonymiseMatchSnapshots(env: Env, uid: string, media: Set<string>): Promise<void> {
+  for (const side of ["user_a", "user_b"] as const) {
+    const rows = await env.DB.prepare(
+      `SELECT id, json_extract(${side}, '$.mediaUrl') AS media_url
+         FROM contest_matches
+        WHERE json_extract(${side}, '$.uid') = ?`,
+    )
+      .bind(uid)
+      .all<{ id: string; media_url: string | null }>();
+
+    for (const row of rows.results || []) {
+      if (row.media_url) media.add(row.media_url);
+    }
+    if (!(rows.results || []).length) continue;
+
+    await env.DB.prepare(
+      `UPDATE contest_matches
+          SET ${side} = json_set(
+                ${side},
+                '$.username',   'Deleted user',
+                '$.profilePic', json('null'),
+                '$.mediaUrl',   json('null'),
+                '$.caption',    json('null')
+              )
+        WHERE json_extract(${side}, '$.uid') = ?`,
+    )
+      .bind(uid)
+      .run();
+  }
+}
+
+/**
+ * Anonymise this user's entry in every conversation's cached member list, and
+ * scrub their words from the thread preview.
+ *
+ * `messages` are deleted in the content phase, but the THREAD survives — the
+ * other participant is entitled to their side of it. `chats.users_data` caches
+ * each member's display name and photo at the time the chat was created, so
+ * without this the counterparty's inbox kept showing the deleted user's real
+ * name and avatar forever, and `last_message` kept showing a sentence they had
+ * asked to have erased.
+ *
+ * Done in JS rather than SQL because `users_data` is a JSON ARRAY and rewriting
+ * one element needs its index; the number of conversations per user is small and
+ * bounded by how many people they have actually talked to.
+ */
+async function anonymiseChatSnapshots(env: Env, uid: string): Promise<void> {
+  const db = getDb(env);
+  // Reads the membership SOURCE OF TRUTH (chats.users), not the chat_members
+  // index. This is a privacy-completeness sweep that runs once per deletion, so
+  // the scan cost is irrelevant — and it must find EVERY chat carrying this user's
+  // name/photo snapshot, which is a guarantee the authoritative JSON array gives
+  // and a derived index cannot (a rollout gap or a writer bug could leave it
+  // short). The chat is KEPT and scrubbed, so its chat_members edge stays too — the
+  // deleted user remains a "Deleted user" participant. The hot per-request paths
+  // use chat_members (D1_R2_LOAD_AUDIT.md §4).
+  const rows = await env.DB.prepare(
+    `SELECT id, users_data, last_message FROM chats
+      WHERE EXISTS (SELECT 1 FROM json_each(chats.users) WHERE json_each.value = ?)`,
+  )
+    .bind(uid)
+    .all<{ id: string; users_data: string | null; last_message: string | null }>();
+
+  const ts = now();
+  const updates: any[] = [];
+
+  for (const row of rows.results || []) {
+    let usersData: any = null;
+    let lastMessage: any = null;
+    try {
+      usersData = row.users_data ? JSON.parse(row.users_data) : null;
+    } catch {
+      usersData = null;
+    }
+    try {
+      lastMessage = row.last_message ? JSON.parse(row.last_message) : null;
+    } catch {
+      lastMessage = null;
+    }
+
+    let changed = false;
+    if (Array.isArray(usersData)) {
+      usersData = usersData.map((entry: any) => {
+        if (!entry || entry.uid !== uid) return entry;
+        changed = true;
+        return { uid, displayName: "Deleted user", photoURL: null };
+      });
+    }
+    // The preview only needs scrubbing when the last word in the thread was
+    // theirs. Someone else's message is someone else's data.
+    if (lastMessage && lastMessage.senderId === uid) {
+      lastMessage = { ...lastMessage, text: "Message deleted", senderId: uid };
+      changed = true;
+    }
+    if (!changed) continue;
+
+    updates.push(
+      db
+        .update(schema.chats)
+        .set({ usersData, lastMessage, updatedAt: ts })
+        .where(eq(schema.chats.id, row.id)),
+    );
+  }
+
+  // Chunked: D1 caps how many statements one batch may carry, and a heavy user
+  // can be in more conversations than that.
+  for (let i = 0; i < updates.length; i += 50) {
+    await db.batch(updates.slice(i, i + 50) as any);
+  }
+}
+
+/** Phase 2 — destroy the storage objects. Best-effort per object, never fatal. */
+async function phaseMedia(env: Env, uid: string, urls: string[]): Promise<void> {
+  await purgeDeletedAccountMedia(env, uid, urls);
+
+  // Rows that never produced a URL (upload abandoned, encode never finished)
+  // are only reachable by id: their output folder and raw source.
+  const db = getDb(env);
+  const orphans = await db
+    .select({ id: schema.videos.id, sourceKey: schema.videos.sourceKey })
+    .from(schema.videos)
+    .where(eq(schema.videos.ownerUid, uid))
+    .all();
+  for (const row of orphans) {
+    await deleteVideoObjects(env, row.id, row.sourceKey).catch((e) =>
+      console.error("[accountDeletion] video delete failed", row.id, e),
+    );
+  }
+  await db
+    .delete(schema.videos)
+    .where(eq(schema.videos.ownerUid, uid))
+    .catch((e) => console.error("[accountDeletion] videos row cleanup failed", uid, e));
+}
+
+/** Phase 3 — the user's own content. */
+async function phaseContent(env: Env, uid: string): Promise<void> {
+  const db = getDb(env);
+  await db.batch([
+    db.delete(schema.posts).where(eq(schema.posts.userId, uid)),
+    db.delete(schema.stories).where(eq(schema.stories.userId, uid)),
+    db.delete(schema.postComments).where(eq(schema.postComments.userId, uid)),
+    db.delete(schema.matchComments).where(eq(schema.matchComments.userId, uid)),
+    // Blog comments are the only content the user leaves on a PUBLIC,
+    // search-indexed page, so missing them here would be the most visible
+    // possible failure of "delete my account".
+    db.delete(schema.blogComments).where(eq(schema.blogComments.userId, uid)),
+    db.delete(schema.postLikes).where(eq(schema.postLikes.userId, uid)),
+    db.delete(schema.commentLikes).where(eq(schema.commentLikes.userId, uid)),
+    db.delete(schema.matchLikes).where(eq(schema.matchLikes.userId, uid)),
+    db.delete(schema.matchReactions).where(eq(schema.matchReactions.userId, uid)),
+    db.delete(schema.bookmarks).where(eq(schema.bookmarks.userId, uid)),
+    db.delete(schema.highlights).where(eq(schema.highlights.userId, uid)),
+    db.delete(schema.storyViews).where(eq(schema.storyViews.viewerId, uid)),
+    db.delete(schema.messages).where(eq(schema.messages.senderId, uid)),
+    // Announcement popup targeting + per-user snooze state. Pure engagement
+    // metadata (who an announcement was aimed at, and when this user last
+    // dismissed it) — no reason to keep it once the account is gone.
+    db.delete(schema.announcementTargets).where(eq(schema.announcementTargets.uid, uid)),
+    db.delete(schema.announcementDismissals).where(eq(schema.announcementDismissals.uid, uid)),
+    // Prize claims are SCRUBBED, not deleted — the same choice `phaseSnapshots`
+    // makes for the users row, and for the same reason. The row records that a
+    // prize was awarded and where it got to, which is an accounting fact about the
+    // business rather than personal data. The delivery address, phone and name are
+    // the personal part, and those are what go.
+    //
+    // By the time this runs, nothing is in flight: `findDeferrals` pushes the purge
+    // out while a claim is submitted / approved / shipped, so the only claims
+    // reachable here are unclaimed, delivered or cancelled.
+    db
+      .update(schema.prizeClaims)
+      .set({
+        recipientName: null,
+        phone: null,
+        addressLine1: null,
+        addressLine2: null,
+        landmark: null,
+        city: null,
+        state: null,
+        postalCode: null,
+        country: null,
+        notes: null,
+      })
+      .where(eq(schema.prizeClaims.uid, uid)),
+  ]);
+
+  // Message BODIES now live in per-chat ChatArchive Durable Objects, not the D1
+  // `messages` table (the delete above only clears any legacy D1 seed rows). So
+  // the authoritative deletion is per-chat: enumerate every conversation this
+  // user is in (from the source-of-truth `chats.users` array, same read the
+  // snapshot anonymiser uses) and tell each chat's DO to drop this sender's
+  // messages. Best-effort and non-fatal — an unreachable DO must not strand the
+  // whole deletion — and it dovetails with anonymiseChatSnapshots, which scrubs
+  // the surviving preview if the last word was theirs.
+  await purgeUserMessagesFromArchives(env, uid);
+}
+
+/**
+ * Delete every message `uid` sent, across all their conversations, from the
+ * per-chat ChatArchive DOs. Best-effort per chat.
+ */
+async function purgeUserMessagesFromArchives(env: Env, uid: string): Promise<void> {
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT id FROM chats
+        WHERE EXISTS (SELECT 1 FROM json_each(chats.users) WHERE json_each.value = ?)`,
+    )
+      .bind(uid)
+      .all<{ id: string }>();
+    await Promise.all(
+      (rows.results ?? []).map((row) => deleteChatMessagesBySender(env, row.id, uid)),
+    );
+  } catch (e) {
+    console.error("[accountDeletion] message archive purge failed (continuing)", uid, e);
+  }
+}
+
+/** Phase 4 — social graph, activity trail, and the relations other users cache. */
+async function phaseSocial(env: Env, uid: string): Promise<void> {
+  const db = getDb(env);
+
+  // Read the counterparties BEFORE the rows go: each of them holds a KV-cached
+  // relations blob that still lists this uid, and that cache outlives the rows.
+  // Without invalidating it, a deleted account keeps being filtered out of their
+  // feed — or keeps appearing in their blocked list — until the TTL expires.
+  //
+  // Outgoing mutes are deliberately absent: a mute is one-way and only the
+  // muter's own cache records it, so the people THIS user muted have nothing
+  // cached about them.
+  const [blockedByThisUser, blockersOfThisUser, mutersOfThisUser, followers, following] =
+    await Promise.all([
+      db
+        .select({ uid: schema.userBlocks.blockedId })
+        .from(schema.userBlocks)
+        .where(eq(schema.userBlocks.blockerId, uid))
+        .all(),
+      db
+        .select({ uid: schema.userBlocks.blockerId })
+        .from(schema.userBlocks)
+        .where(eq(schema.userBlocks.blockedId, uid))
+        .all(),
+      db
+        .select({ uid: schema.userMutes.muterId })
+        .from(schema.userMutes)
+        .where(eq(schema.userMutes.mutedId, uid))
+        .all(),
+      db
+        .select({ uid: schema.follows.followerId })
+        .from(schema.follows)
+        .where(eq(schema.follows.followingId, uid))
+        .all(),
+      db
+        .select({ uid: schema.follows.followingId })
+        .from(schema.follows)
+        .where(eq(schema.follows.followerId, uid))
+        .all(),
+    ]);
+
+  const staleRelationCaches = new Set<string>(
+    [...blockedByThisUser, ...blockersOfThisUser, ...mutersOfThisUser].map((r) => r.uid),
+  );
+
+  await db.batch([
+    // Reward enrolment + reminder state. (The hashed identifier claims in
+    // verification_reward_claims are deliberately RETAINED — see the header.)
+    db.delete(schema.verificationRewards).where(eq(schema.verificationRewards.uid, uid)),
+    db.delete(schema.follows).where(eq(schema.follows.followerId, uid)),
+    db.delete(schema.follows).where(eq(schema.follows.followingId, uid)),
+    // Pending follow requests both ways (migration 0057), and the "wants to
+    // follow you" rows this account left in other people's notifications —
+    // otherwise an owner could still "Confirm" a deleted account.
+    db.delete(schema.followRequests).where(eq(schema.followRequests.requesterId, uid)),
+    db.delete(schema.followRequests).where(eq(schema.followRequests.targetId, uid)),
+    db
+      .delete(schema.notifications)
+      .where(and(eq(schema.notifications.actorId, uid), eq(schema.notifications.type, "follow_request"))),
+    db.delete(schema.profileVisits).where(eq(schema.profileVisits.userId, uid)),
+    db.delete(schema.profileVisits).where(eq(schema.profileVisits.visitorId, uid)),
+    db.delete(schema.notifications).where(eq(schema.notifications.recipientId, uid)),
+    db.delete(schema.shares).where(eq(schema.shares.userId, uid)),
+    db.delete(schema.supportTickets).where(eq(schema.supportTickets.userId, uid)),
+    // Blocks and mutes in BOTH directions. Because the `users` row survives
+    // anonymisation these do not fall out of anyone's list on their own: another
+    // user's Blocked & Muted screen kept showing a permanent, un-actionable
+    // "Deleted user" entry, and unblocking it was the only way to clear it.
+    db.delete(schema.userBlocks).where(eq(schema.userBlocks.blockerId, uid)),
+    db.delete(schema.userBlocks).where(eq(schema.userBlocks.blockedId, uid)),
+    db.delete(schema.userMutes).where(eq(schema.userMutes.muterId, uid)),
+    db.delete(schema.userMutes).where(eq(schema.userMutes.mutedId, uid)),
+    // Restrict / hide-story-from (migration 0067), both directions.
+    db.delete(schema.userRestricts).where(eq(schema.userRestricts.restricterId, uid)),
+    db.delete(schema.userRestricts).where(eq(schema.userRestricts.restrictedId, uid)),
+    db.delete(schema.userStoryHides).where(eq(schema.userStoryHides.ownerId, uid)),
+    db.delete(schema.userStoryHides).where(eq(schema.userStoryHides.hiddenUid, uid)),
+    // Their own "Not interested" history (it names other creators).
+    db.delete(schema.feedDismissals).where(eq(schema.feedDismissals.viewerUid, uid)),
+    // Gamification (migration 0070): progress, cosmetics and unclaimed rewards
+    // are personal and serve no one else. The XP ledger (user_xp_events), season
+    // results and review flags are RETAINED — see the deletion test's list.
+    db.delete(schema.userXpDaily).where(eq(schema.userXpDaily.uid, uid)),
+    db.delete(schema.userAchievements).where(eq(schema.userAchievements.uid, uid)),
+    db.delete(schema.userInventory).where(eq(schema.userInventory.uid, uid)),
+    db.delete(schema.questClaims).where(eq(schema.questClaims.uid, uid)),
+    db.delete(schema.rewardGrants).where(eq(schema.rewardGrants.uid, uid)),
+    // Every notification naming them as the actor in someone else's inbox. Only
+    // follow-request notifications were removed, so likes, comments and follows by
+    // a deleted account stayed in other people's lists. (Reports they filed are
+    // kept: they are moderation evidence about someone else's behaviour.)
+    db.delete(schema.notifications).where(eq(schema.notifications.actorId, uid)),
+  ]);
+
+  // Denormalised counters on the people who followed (or were followed by) this
+  // account now overcount by one. Left un-repaired, every profile this user
+  // touched advertises a follower who cannot be listed.
+  const counterFixes: any[] = [];
+  for (const row of followers) {
+    counterFixes.push(
+      db
+        .update(schema.users)
+        .set({ followingCount: sql`MAX(COALESCE(following_count, 0) - 1, 0)` })
+        .where(eq(schema.users.uid, row.uid)),
+    );
+  }
+  for (const row of following) {
+    counterFixes.push(
+      db
+        .update(schema.users)
+        .set({ followersCount: sql`MAX(COALESCE(followers_count, 0) - 1, 0)` })
+        .where(eq(schema.users.uid, row.uid)),
+    );
+  }
+  for (let i = 0; i < counterFixes.length; i += 50) {
+    await db.batch(counterFixes.slice(i, i + 50) as any).catch((e) =>
+      console.error("[accountDeletion] follower counter repair failed", uid, e),
+    );
+  }
+
+  // Best-effort: a stale cache expires on its own TTL, so a KV hiccup must not
+  // fail a deletion whose D1 work has already committed.
+  const counterparties = [
+    ...staleRelationCaches,
+    ...followers.map((r) => r.uid),
+    ...following.map((r) => r.uid),
+  ];
+  await invalidateBlockCache(env, uid, ...staleRelationCaches).catch((e) =>
+    console.error("[accountDeletion] block cache invalidation failed", uid, e),
+  );
+  // No request context here by construction — this is the cron purge — so the edge
+  // tier converges on its 30s TTL rather than being purged. Recorded as a limit of
+  // this path in `invalidateUserCaches`.
+  await invalidateUserCaches(env, [uid, ...counterparties]).catch((e) =>
+    console.error("[accountDeletion] profile cache invalidation failed", uid, e),
+  );
+}
+
+/**
+ * Phase 5 — remove the login, write the compliance record, drop live connections.
+ *
+ * The Firebase delete is what makes the deletion real to the user: until it
+ * happens the identity can still obtain an ID token, and only the D1 `isBlocked`
+ * check stands between that token and the API.
+ */
+async function phaseAuth(env: Env, uid: string, reason: string | undefined): Promise<void> {
+  const db = getDb(env);
+  const ts = now();
+
+  await db
+    .insert(schema.accountDeletions)
+    .values({
+      uid,
+      reason: reason ? String(reason).slice(0, 500) : null,
+      forfeitedCoins: await readForfeitedCoins(env, uid),
+      createdAt: ts,
+    })
+    .onConflictDoNothing();
+
+  // Tell any open socket to go away, so a session that is mid-poll does not keep
+  // rendering a signed-in shell for an account that no longer exists.
+  await publish(env, `user:${uid}`, { type: "account_deleted" }).catch(() => {});
+  await delCache(env, feedSeenKey(uid)).catch(() => {});
+
+  // Released handles must stop leading here. `/@theirOldHandle` redirects to whatever
+  // handle the releasing account holds now (see lib/userIdentifiers.ts
+  // `resolveUsername`), so leaving these rows would point old links at an anonymised
+  // profile — a link that resolves to a deleted person is worse than one that 404s,
+  // and deletion is meant to make them unreachable. Also frees those names for reuse,
+  // since the hold window's purpose ends with the account.
+  await purgeUsernameHistory(env, uid);
+
+  try {
+    await deleteAuthUser(env, uid);
+  } catch (e) {
+    // Deliberately NOT fatal: the D1 account is already anonymised and blocked,
+    // so the user cannot use the app either way, and failing here would roll the
+    // phase machine back over work that has committed.
+    //
+    // But it MUST be visible. A lingering Firebase identity is a real loose end,
+    // and `app.onError` does not log anything for a request that succeeded, so
+    // without this row the only trace would be a console line nobody reads.
+    console.error("[accountDeletion] Firebase auth delete failed", uid, e);
+    await db
+      .insert(schema.errorLogs)
+      .values({
+        id: newId(),
+        level: "error",
+        message: `Firebase auth delete failed for deleted account ${uid}`,
+        stack: String((e as any)?.stack || (e as any)?.message || e).slice(0, 4000),
+        path: "cron:purgeScheduledDeletions",
+        createdAt: ts,
+      })
+      .catch(() => {});
+  }
+}
+
+/** Delete the storage objects collected during the purge. Best-effort. */
+export async function purgeDeletedAccountMedia(env: Env, uid: string, urls: string[]): Promise<void> {
+  for (const url of urls) {
+    try {
+      // The collected urls come from this user's rows, which can name other
+      // people's media (a reposted story). Only this user's uploads go.
+      await deleteMediaByUrl(env, url, uid);
+    } catch (e) {
+      console.error("[accountDeletion] media delete failed", url, e);
+    }
+  }
+}
+
+/**
+ * Drop every cached view of a user's profile and connection lists.
+ *
+ * The public profile is served from a SHARED cache entry, so anonymising the D1 row
+ * is not enough on its own — the cache keeps serving the real name, photo and bio
+ * until its TTL lapses. Counterparties are included because their follower and
+ * following pages cache a page that named this account.
+ *
+ * ---------------------------------------------------------------------------
+ * Why the context argument is not optional decoration
+ * ---------------------------------------------------------------------------
+ * `cache:user:*` and the connection lists are served from the Cloudflare Cache API
+ * and NOT from KV (see lib/edgeCache.ts). A bare `delCache` therefore deletes a key
+ * nothing reads: the invalidation becomes a no-op and the pre-purge row keeps being
+ * served for the full TTL, in every colo.
+ *
+ * That is not a cosmetic staleness. `/read/users/:id` builds its payload by spreading
+ * the whole `users` row, which includes `email` and `phone`, so a purge whose
+ * invalidation does nothing means a stranger can still read a deleted account's real
+ * name, photo, bio, email and phone number. The read-side `status` guard cannot
+ * intercept it either, because the CACHED copy carries the pre-purge status — which
+ * is exactly why the write guard was always paired with an invalidation rather than
+ * relied on alone.
+ *
+ * So every caller that has a request context MUST pass it. The cron purge genuinely
+ * has none (there is no request, so no origin to derive a cache key from) and is
+ * TTL-bound by construction; that is a recorded limit of the purge path, not an
+ * oversight.
+ */
+export async function invalidateUserCaches(
+  env: Env,
+  uids: string[],
+  c?: EdgeCtx,
+): Promise<void> {
+  const unique = [...new Set(uids.filter(Boolean))];
+  if (!unique.length) return;
+  await purgeShared(
+    c ?? env,
+    ...unique.flatMap((u) => [userCacheKey(u), followersCacheKey(u), followingCacheKey(u)]),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cron sweep
+// ---------------------------------------------------------------------------
+
+export interface DueDeletionsResult {
+  purged: number;
+  deferred: number;
+  failed: number;
+  abandoned: number;
+}
+
+/**
+ * Purge every request whose grace period has lapsed.
+ *
+ * Deliberately capped per tick. A purge touches D1, R2, KV and Firebase,
+ * and a Worker invocation has a subrequest budget — draining an unbounded queue
+ * in one tick would fail the whole batch rather than the one account that did
+ * not fit, and cron would then retry that same failing batch forever.
+ */
+export async function purgeScheduledDeletions(env: Env, limit = 5): Promise<DueDeletionsResult> {
+  const db = getDb(env);
+  const ts = now();
+  const result: DueDeletionsResult = { purged: 0, deferred: 0, failed: 0, abandoned: 0 };
+
+  const due = await db
+    .select()
+    .from(schema.deletionRequests)
+    .where(
+      and(
+        inArray(schema.deletionRequests.status, ["pending", "processing"]),
+        lte(schema.deletionRequests.scheduledFor, ts),
+      ),
+    )
+    .orderBy(schema.deletionRequests.scheduledFor)
+    .limit(limit)
+    .all();
+
+  for (const request of due) {
+    // A purge that has already started must finish, even if a deferral appeared
+    // afterwards: the data it would have protected is already gone.
+    if (!request.phase) {
+      if ((request.attempts || 0) >= MAX_PURGE_ATTEMPTS) {
+        // Stop burning cron budget on something that needs a human. The row keeps
+        // its `last_error`, and the admin deletions view surfaces it.
+        result.abandoned++;
+        continue;
+      }
+      const deferrals = await findDeferrals(env, request.uid).catch(() => []);
+      if (deferrals.length > 0) {
+        await db
+          .update(schema.deletionRequests)
+          .set({
+            scheduledFor: ts + DEFERRAL_RECHECK_MS,
+            deferredReason: deferrals[0].code,
+            deferredUntil: ts + DEFERRAL_RECHECK_MS,
+            updatedAt: ts,
+          })
+          .where(eq(schema.deletionRequests.uid, request.uid));
+        result.deferred++;
+        continue;
+      }
+    }
+
+    try {
+      // Media is purged inside the phase machine, not here, so a retry resumes
+      // from the persisted URL list rather than re-deriving it from rows that no
+      // longer exist.
+      await executeAccountDeletion(env, request.uid, request.reason ?? undefined);
+      result.purged++;
+    } catch (e) {
+      // `executeAccountDeletion` has already recorded the phase and the error on
+      // the row, so this tick just moves on to the next account.
+      result.failed++;
+    }
+  }
+
+  return result;
+}

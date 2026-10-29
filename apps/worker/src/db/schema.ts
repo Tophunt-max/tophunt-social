@@ -1,0 +1,2160 @@
+/**
+ * D1 (SQLite) schema — relational model derived from the former Firestore
+ * collections. Nested/variable maps (userA/userB, stats, coordinates, data)
+ * are stored as JSON text columns.
+ *
+ * Timestamps are stored as INTEGER epoch-millis for easy comparison in cron
+ * jobs (expiresAt, createdAt, etc.).
+ */
+import { sql } from "drizzle-orm";
+import { sqliteTable, text, integer, real, index, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
+
+// ---------------------------------------------------------------------------
+// users  (was: users/{uid})
+// ---------------------------------------------------------------------------
+export const users = sqliteTable(
+  "users",
+  {
+    uid: text("uid").primaryKey(),
+    email: text("email"),
+    username: text("username"), // lowercase, unique
+    fullName: text("full_name"),
+    profileImageUrl: text("profile_image_url"),
+    dob: text("dob"),
+    phone: text("phone"),
+    /**
+     * Has this identifier been PROVEN to belong to the account holder?
+     * (migration 0040)
+     *
+     * Set only by the OTP change flow in lib/identifierChange.ts. Recorded but
+     * deliberately not yet enforced — see the migration for why gating on it
+     * needs its own rollout.
+     */
+    emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
+    phoneVerified: integer("phone_verified", { mode: "boolean" }).notNull().default(false),
+    emailVerifiedAt: integer("email_verified_at"),
+    phoneVerifiedAt: integer("phone_verified_at"),
+    occupation: text("occupation"),
+    gender: text("gender"),
+    platform: text("platform").default("unknown"),
+    coordinates: text("coordinates", { mode: "json" }),
+    role: text("role").default("user"), // 'user' | 'admin'
+    status: text("status").default("active"),
+    isBlocked: integer("is_blocked", { mode: "boolean" }).default(false),
+    /**
+     * Sessions that authenticated before this instant are no longer valid.
+     *
+     * EPOCH SECONDS, not milliseconds — it is compared against the `auth_time` JWT
+     * claim, which is in whole seconds, and mixing the units silently rejects a
+     * legitimate brand-new session (see migration 0044). It is also the unit
+     * Firebase's own `validSince` takes.
+     *
+     * NULL means nothing has ever been revoked, which is every pre-0044 row.
+     * See lib/sessionRevocation.ts.
+     */
+    tokensValidAfter: integer("tokens_valid_after"),
+    bio: text("bio"),
+    isPrivate: integer("is_private", { mode: "boolean" }).default(false),
+    authProvider: text("auth_provider"),
+    /**
+     * Epoch MILLISECONDS of the user's last realtime connection or disconnection
+     * (migration 0051). Stamped when a `user:<uid>` WebSocket opens (they came
+     * online) and when it closes (they went offline), so it doubles as the
+     * "last seen" timestamp shown in a chat header. NULL for anyone who has never
+     * connected since this shipped. Not the same unit as `tokensValidAfter`
+     * (that one is seconds) — this is compared against `Date.now()`.
+     */
+    lastSeenAt: integer("last_seen_at"),
+    // Any profile fields without a dedicated column (facebook/twitter/instagram, etc.)
+    extra: text("extra", { mode: "json" }),
+
+    // currency + gamification
+    dpcoin: real("dpcoin").default(0), // primary currency (was Dpcoin)
+    /** Play-only promo coins inside `dpcoin` (migration 0068): spendable on entry fees, never withdrawable. */
+    lockedCoins: real("locked_coins").notNull().default(0),
+    xp: integer("xp").default(0),
+    level: integer("level").default(1),
+    badges: text("badges", { mode: "json" }).$type<string[]>().default([]),
+    equippedBadge: text("equipped_badge"),
+    streak: integer("streak").default(0),
+    lastDailyClaim: integer("last_daily_claim"),
+    /** Level the user was last told about (migration 0070). NULL = not synced yet. */
+    levelSeen: integer("level_seen"),
+    /** Equipped cosmetics + pinned achievements, JSON (migration 0070, lib/cosmetics.ts). */
+    cosmetics: text("cosmetics", { mode: "json" }),
+
+    // denormalized counters (were users.stats.* / top-level counts)
+    followersCount: integer("followers_count").default(0),
+    followingCount: integer("following_count").default(0),
+    postsCount: integer("posts_count").default(0),
+    wins: integer("wins").default(0),
+    monthlyWins: integer("monthly_wins").default(0),
+    totalVotesReceived: integer("total_votes_received").default(0),
+    contestsJoined: integer("contests_joined").default(0),
+
+    // FCM registration tokens (array json)
+    fcmTokens: text("fcm_tokens", { mode: "json" }).$type<string[]>().default([]),
+    /**
+     * Per-category notification preferences + quiet hours. See
+     * lib/notificationPrefs.ts for the shape and defaults.
+     *
+     * Deliberately a JSON column on `users` rather than its own table:
+     * createNotification() already reads users.fcmTokens for every
+     * notification, so prefs come along in that same query at no extra cost.
+     */
+    notificationPrefs: text("notification_prefs", { mode: "json" }),
+
+    signupCompleted: integer("signup_completed", { mode: "boolean" }).default(false),
+    // admin flags
+    verified: integer("verified", { mode: "boolean" }).default(false),
+    featured: integer("featured", { mode: "boolean" }).default(false),
+    // referral program
+    referralCode: text("referral_code"),
+    referredBy: text("referred_by"),
+    /** Device the account last acted from — referral fraud checks only (migration 0063). */
+    deviceId: text("device_id"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    // Unique to guarantee no two accounts share an identifier. SQLite treats
+    // NULLs as distinct, so users without a phone/email still coexist. The
+    // actual DB-level enforcement is applied by migration 0012 (as PARTIAL
+    // unique indexes `WHERE <col> IS NOT NULL`); these declarations keep the
+    // Drizzle model in sync for drizzle-kit/introspection.
+    usernameIdx: uniqueIndex("idx_users_username").on(t.username),
+    emailIdx: uniqueIndex("idx_users_email").on(t.email),
+    phoneIdx: uniqueIndex("idx_users_phone").on(t.phone),
+    // Referral codes are unique so a code can never resolve to the wrong account.
+    // DB-level enforcement is applied by migration 0046 (NULLs stay distinct).
+    referralCodeIdx: uniqueIndex("idx_users_referral_code").on(t.referralCode),
+    monthlyWinsIdx: index("idx_users_monthly_wins").on(t.monthlyWins),
+    // Public read paths exclude accounts that are pending deletion or already
+    // anonymised. Before migration 0039 `status` was never queried, so that
+    // filter would have turned every user listing into a table scan.
+    statusIdx: index("idx_users_status").on(t.status),
+    xpIdx: index("idx_users_xp").on(t.xp),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// follows  (was: users/{uid}/followers subcollection + following[])
+// ---------------------------------------------------------------------------
+export const follows = sqliteTable(
+  "follows",
+  {
+    followerId: text("follower_id").notNull(),
+    followingId: text("following_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.followerId, t.followingId] }),
+    followingIdx: index("idx_follows_following").on(t.followingId),
+    // Composite indexes for ordered, keyset-paginated connection lists
+    // (routes/read.ts). Match the WHERE + ORDER BY created_at of each direction
+    // so SQLite serves the page from the index without a sort (migration 0015).
+    followingCreatedIdx: index("idx_follows_following_created").on(t.followingId, t.createdAt),
+    followerCreatedIdx: index("idx_follows_follower_created").on(t.followerId, t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// onboarding_daily  (migration 0058) — anonymous first-launch intro funnel.
+// ---------------------------------------------------------------------------
+export const onboardingDaily = sqliteTable(
+  "onboarding_daily",
+  {
+    day: text("day").notNull(),
+    event: text("event").notNull(),
+    slide: integer("slide").notNull(),
+    platform: text("platform").notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.day, t.event, t.slide, t.platform] }) }),
+);
+
+// ---------------------------------------------------------------------------
+// follow_requests  (migration 0057) — pending follows of PRIVATE accounts.
+// Confirming one moves it into `follows`; nothing else reads this table, so a
+// pending request can never count as a follow by accident.
+// ---------------------------------------------------------------------------
+export const followRequests = sqliteTable(
+  "follow_requests",
+  {
+    requesterId: text("requester_id").notNull(),
+    targetId: text("target_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.requesterId, t.targetId] }),
+    targetCreatedIdx: index("idx_follow_requests_target_created").on(t.targetId, t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// user_blocks / user_mutes  (migration 0032)
+//
+// Self-serve safety relations between two ordinary users. NOT the same thing as
+// `users.isBlocked`, which is an admin disabling an account.
+//
+// A block is MUTUAL and hard; a mute is ONE-WAY and soft. See lib/blocks.ts for
+// the enforcement rules and migration 0032 for why these are two tables.
+// ---------------------------------------------------------------------------
+export const userBlocks = sqliteTable(
+  "user_blocks",
+  {
+    blockerId: text("blocker_id").notNull(),
+    blockedId: text("blocked_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.blockerId, t.blockedId] }),
+    // Blocks are enforced in BOTH directions, so "who blocked me" is as hot as
+    // "who did I block" — but blocked_id is the trailing PK column and cannot
+    // serve that lookup on its own.
+    blockedIdx: index("idx_user_blocks_blocked").on(t.blockedId),
+  }),
+);
+
+export const userMutes = sqliteTable(
+  "user_mutes",
+  {
+    muterId: text("muter_id").notNull(),
+    mutedId: text("muted_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  // One-way: only the muter's own reads consult this, so the leading-column
+  // primary key covers every query and no reverse index is needed.
+  (t) => ({ pk: primaryKey({ columns: [t.muterId, t.mutedId] }) }),
+);
+
+// Restrict (migration 0067): the restricted account's comments on the
+// restricter's content are visible only to the commenter (and the restricter),
+// and none of their activity notifies the restricter. One-way and silent.
+export const userRestricts = sqliteTable(
+  "user_restricts",
+  {
+    restricterId: text("restricter_id").notNull(),
+    restrictedId: text("restricted_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.restricterId, t.restrictedId] }),
+    restrictedIdx: index("idx_user_restricts_restricted").on(t.restrictedId),
+  }),
+);
+
+// Hide my story from one account (migration 0067). Read by the hidden side
+// ("which owners hide from me"), hence the reverse index.
+export const userStoryHides = sqliteTable(
+  "user_story_hides",
+  {
+    ownerId: text("owner_id").notNull(),
+    hiddenUid: text("hidden_uid").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.ownerId, t.hiddenUid] }),
+    hiddenIdx: index("idx_user_story_hides_hidden").on(t.hiddenUid),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// feed_dismissals  (migration 0065) — "Not interested" on a feed card.
+// Read only by the viewer's own For You / Following ranking (routes/read.ts).
+// ---------------------------------------------------------------------------
+export const feedDismissals = sqliteTable(
+  "feed_dismissals",
+  {
+    viewerUid: text("viewer_uid").notNull(),
+    matchId: text("match_id").notNull(),
+    creatorA: text("creator_a"),
+    creatorB: text("creator_b"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.viewerUid, t.matchId] }),
+    viewerCreatedIdx: index("idx_feed_dismissals_viewer_created").on(t.viewerUid, t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// contests  (was: contests/{contestId} — admin templates)
+// ---------------------------------------------------------------------------
+export const contests = sqliteTable("contests", {
+  id: text("id").primaryKey(),
+  title: text("title"),
+  type: text("type").default("photo"), // photo | video
+  status: text("status").default("live"),
+  totalEntryFee: real("total_entry_fee").default(0),
+  rewardCoins: real("reward_coins").default(0),
+  voteDurationDays: integer("vote_duration_days").default(1),
+  autoCancelHours: integer("auto_cancel_hours").default(24),
+  minVotes: integer("min_votes").default(0),
+  bannerUrl: text("banner_url"), // contest photo/banner shown in the user app
+  /**
+   * What the winner actually gets: "coins" | "product" (migration 0042).
+   *
+   * A contest awards one or the other, never both. When this is "product",
+   * `rewardCoins` MUST be 0 — a product prize deliberately does not travel through
+   * the coin path, because `assertPrizeFundedByPot` caps rewardCoins at the pot the
+   * two players funded and a phone has no coin value. Weakening that cap to
+   * describe a physical prize would remove the one rule protecting the coin supply,
+   * so the two prize kinds live in separate columns.
+   *
+   * The entry fees a product contest collects are simply retained — that is what
+   * pays for the product — and with rewardCoins at 0 the pot assertion is satisfied
+   * trivially rather than bypassed.
+   */
+  prizeType: text("prize_type").default("coins"),
+  prizeProductTitle: text("prize_product_title"),
+  prizeProductImageUrl: text("prize_product_image_url"),
+  /** Declared retail value, for display only. Never credited, never spendable. */
+  prizeProductValue: real("prize_product_value").default(0),
+  prizeProductDescription: text("prize_product_description"),
+  /** Promo budget (kind contest_prize) that pays the part of rewardCoins above the pot (migration 0068). */
+  subsidyBudgetId: text("subsidy_budget_id"),
+  /** Admin-only coin cost of a product prize (migration 0068). Never sent to the app. */
+  prizeCostCoins: real("prize_cost_coins").notNull().default(0),
+  // Validity window, epoch ms, both nullable (NULL = unbounded). These are the
+  // TEMPLATE's own lifetime — when it becomes joinable and when it stops being
+  // offered — and are not to be confused with voteDurationDays/autoCancelHours,
+  // which time an individual match. See migrations/0038_contest_validity.sql.
+  startsAt: integer("starts_at"),
+  endsAt: integer("ends_at"),
+  /** Optional level-based tournament eligibility (migration 0070). NULL = no limit. */
+  minLevel: integer("min_level"),
+  maxLevel: integer("max_level"),
+  extra: text("extra", { mode: "json" }), // any additional template fields
+  createdBy: text("created_by"),
+  createdAt: integer("created_at").notNull(),
+});
+
+// ---------------------------------------------------------------------------
+// contest_matches  (was: contestMatches/{matchId})
+// ---------------------------------------------------------------------------
+export const contestMatches = sqliteTable(
+  "contest_matches",
+  {
+    id: text("id").primaryKey(),
+    contestId: text("contest_id"),
+    status: text("status").notNull(), // waiting_for_opponent | active | completed | ended | cancelled
+    type: text("type").default("photo"),
+    title: text("title"),
+    entryFee: real("entry_fee").default(0),
+    isPrivate: integer("is_private", { mode: "boolean" }).default(false),
+    invitedUid: text("invited_uid"),
+    joinIdA: text("join_id_a"),
+    joinIdB: text("join_id_b"),
+    // participant snapshots (uid, username, profilePic, mediaUrl, mediaType, caption, votes, ...)
+    userA: text("user_a", { mode: "json" }),
+    userB: text("user_b", { mode: "json" }),
+    totalVotes: integer("total_votes").default(0),
+    likeCount: integer("like_count").default(0),
+    commentCount: integer("comment_count").default(0),
+    shareCount: integer("share_count").default(0),
+    winnerUid: text("winner_uid"),
+    rewardAmount: real("reward_amount").default(0),
+    // Immutable eligibility threshold captured when the match is created/activated.
+    minVotesRequired: integer("min_votes_required"),
+    // Immutable prize snapshot captured at match creation. Settlement pays THIS,
+    // not the live contest template, so editing a template can never change the
+    // prize of a match that is already in flight. NULL = legacy row, fall back
+    // to the template at settlement time.
+    prizeCoins: real("prize_coins"),
+    /**
+     * Product-prize half of that same immutable snapshot (migration 0042).
+     *
+     * Same contract as `prizeCoins` above and for the same reason: an admin editing
+     * the template must not be able to change what a battle already in flight is
+     * worth. NULL `prizeType` means "legacy row" and settlement falls back to the
+     * template, exactly as it does for a NULL `prizeCoins`.
+     */
+    prizeType: text("prize_type"),
+    prizeProductTitle: text("prize_product_title"),
+    prizeProductImageUrl: text("prize_product_image_url"),
+    prizeProductValue: real("prize_product_value"),
+    // Unique token used to make status + financial settlement one atomic D1 batch.
+    settlementId: text("settlement_id"),
+    /** Coins reserved from a promo budget on top of the pot (migration 0068). */
+    subsidyCoins: real("subsidy_coins").notNull().default(0),
+    subsidyBudgetId: text("subsidy_budget_id"),
+    /** Snapshot of the contest's admin-only product cost (migration 0068). */
+    prizeCostCoins: real("prize_cost_coins").notNull().default(0),
+    // { fire: n, heart: n, laugh: n } quick-reaction counters
+    reactions: text("reactions", { mode: "json" }),
+    endingSoonNotified: integer("ending_soon_notified", { mode: "boolean" }).default(false),
+    // Coarse marker for the R2 -> Qencode video backfill: 'r2' | 'migrating' |
+    // 'qencode' | null (not yet considered). Rows from the retired Bunny backfill
+    // may still say 'bunny'. Per-participant video identity lives in the userA/userB
+    // snapshots' mediaUrl; processing state lives in the `videos` table.
+    videoProvider: text("video_provider"),
+    /**
+     * One composite head-to-head image for this battle, for sharing outside the
+     * app (migration 0033). Produced by the joining client and recorded via the
+     * `setMatchVsImage` action, because the Worker cannot compose images.
+     *
+     * Always optional: generation needs a native capture module, so readers must
+     * fall back to rendering the two entries side by side themselves.
+     */
+    vsImageUrl: text("vs_image_url"),
+    /**
+     * Server-owned VS Story publication sub-state (migration 0055). Orthogonal to
+     * `status`, which must stay `active` while voting runs. See
+     * lib/vsPublication.ts for the state machine. NULL = not eligible.
+     */
+    vsStoryStatus: text("vs_story_status"),
+    vsStoryAttempts: integer("vs_story_attempts").notNull().default(0),
+    vsStoryClaim: text("vs_story_claim"),
+    vsStoryClaimedAt: integer("vs_story_claimed_at"),
+    vsStoryNextAt: integer("vs_story_next_at"),
+    vsStoryError: text("vs_story_error"),
+    vsStoryPublishedAt: integer("vs_story_published_at"),
+    vsImageMeta: text("vs_image_meta", { mode: "json" }),
+    /**
+     * Earliest time the composite may be deleted (migration 0056): end of voting
+     * plus a sharing grace window, extended whenever a share resolves it. The
+     * sweep never deletes before this, nor while a live Story references it.
+     */
+    vsImageRetainUntil: integer("vs_image_retain_until"),
+    /** Community moderation hold (migration 0060): set at N distinct reports, hides from feeds. */
+    moderationHoldAt: integer("moderation_hold_at"),
+    createdAt: integer("created_at").notNull(),
+    activatedAt: integer("activated_at"),
+    completedAt: integer("completed_at"),
+    expiresAt: integer("expires_at"),
+  },
+  (t) => ({
+    statusIdx: index("idx_matches_status").on(t.status),
+    expiresIdx: index("idx_matches_expires").on(t.expiresAt),
+    statusExpiresIdx: index("idx_matches_status_expires").on(t.status, t.expiresAt),
+    // /read/matches keyset page: WHERE status [AND created_at < ?] ORDER BY created_at DESC (0059).
+    statusCreatedIdx: index("idx_matches_status_created").on(t.status, t.createdAt),
+    vsImageRetainIdx: index("idx_matches_vs_image_retain")
+      .on(t.vsImageRetainUntil)
+      .where(sql`${t.vsImageUrl} IS NOT NULL`),
+    vsStoryDueIdx: index("idx_matches_vs_story_due")
+      .on(t.vsStoryStatus, t.vsStoryNextAt)
+      .where(sql`${t.vsStoryStatus} IN ('pending', 'processing')`),
+    settlementUnique: uniqueIndex("uniq_matches_settlement_id")
+      .on(t.settlementId)
+      .where(sql`${t.settlementId} IS NOT NULL`),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// votes  (was: votes/{matchId_voterUid}) — dedup + audit
+// ---------------------------------------------------------------------------
+export const votes = sqliteTable(
+  "votes",
+  {
+    id: text("id").primaryKey(), // `${matchId}_${voterUid}`
+    matchId: text("match_id").notNull(),
+    voterUid: text("voter_uid").notNull(),
+    votedForUid: text("voted_for_uid").notNull(),
+    deviceId: text("device_id"),
+    /**
+     * Voter IP, for fraud investigation only — never a blocking dedup key,
+     * because carrier NAT puts huge numbers of legitimate users behind one
+     * address. Without it the fraud view could only correlate device ids.
+     */
+    ip: text("ip"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    matchIdx: index("idx_votes_match").on(t.matchId),
+    matchIpIdx: index("idx_votes_match_ip").on(t.matchId, t.ip),
+    // voter_uid LEADING — the feed's affinity scan and the daily-task counts all
+    // filter by voter, which the (match_id, ...) indexes below cannot serve.
+    voterCreatedIdx: index("idx_votes_voter_created").on(t.voterUid, t.createdAt),
+    matchVoterUnique: uniqueIndex("uniq_votes_match_voter").on(t.matchId, t.voterUid),
+    matchDeviceUnique: uniqueIndex("uniq_votes_match_device")
+      .on(t.matchId, t.deviceId)
+      .where(sql`${t.deviceId} IS NOT NULL AND ${t.deviceId} <> ''`),
+  }),
+);
+
+// Exactly-once vote XP ledger. The DO checks/inserts this in the same D1 batch
+// as the XP increment, so actor retries cannot credit a voter twice.
+export const voteXpAwards = sqliteTable(
+  "vote_xp_awards",
+  {
+    matchId: text("match_id").notNull(),
+    voterUid: text("voter_uid").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.matchId, t.voterUid] }),
+    voterIdx: index("idx_vote_xp_awards_voter").on(t.voterUid, t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// coin_transactions  (consolidates coinTransactions + coin_transactions)
+// ---------------------------------------------------------------------------
+export const coinTransactions = sqliteTable(
+  "coin_transactions",
+  {
+    id: text("id").primaryKey(),
+    uid: text("uid").notNull(),
+    amount: real("amount").notNull(),
+    type: text("type").notNull(), // signup_bonus | contest_entry_fee | purchase | reward | admin_adjust ...
+    contestId: text("contest_id"),
+    matchId: text("match_id"),
+    description: text("description"),
+    /** How this row moved users.locked_coins (migration 0068). */
+    lockedDelta: real("locked_delta").notNull().default(0),
+    /** Promo budget that funded this row, if any. */
+    budgetId: text("budget_id"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    uidIdx: index("idx_txn_uid").on(t.uid),
+    createdIdx: index("idx_txn_created").on(t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// payments  (idempotency for top-ups)
+// ---------------------------------------------------------------------------
+export const payments = sqliteTable(
+  "payments",
+  {
+    id: text("id").primaryKey(), // paymentId
+    userId: text("user_id").notNull(),
+    /**
+     * LEGACY: this column holds COINS, not money, despite the name. Kept for
+     * backwards compatibility with existing rows and readers; new code should
+     * use `coins` (same value, honest name) and `amountPaise` (actual money).
+     */
+    amount: real("amount").notNull(),
+    /** Coins credited by this payment. */
+    coins: real("coins"),
+    /**
+     * What the user actually PAID, in integer paise. This is the only column
+     * revenue reporting reads — summing `amount` reported coin counts as rupees.
+     */
+    amountPaise: integer("amount_paise"),
+    source: text("source"), // razorpay | manual_deposit
+    status: text("status").default("success"), // success | refunded | disputed
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    statusCreatedIdx: index("idx_payments_status_created").on(t.status, t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// payment_orders  (persistent record of Razorpay orders for reconciliation)
+//
+// Created when the client calls `createOrder`; credited exactly once by EITHER
+// the client callback (`topup`) OR the server-to-server webhook — whichever
+// arrives first. The `status` CAS (created -> paid) is the idempotency guard so
+// a paid-but-not-credited order can be reconciled without double-crediting.
+// ---------------------------------------------------------------------------
+export const paymentOrders = sqliteTable(
+  "payment_orders",
+  {
+    orderId: text("order_id").primaryKey(), // Razorpay order id
+    userId: text("user_id").notNull(),
+    packageId: text("package_id"),
+    coins: real("coins").notNull(), // server-authoritative coins to credit (bonus INCLUDED)
+    bonusCoins: real("bonus_coins").default(0), // how much of `coins` was bonus — display/reporting only
+    /** Set when the bonus is platform-funded (promo budget) and credited as locked coins. */
+    budgetId: text("budget_id"),
+    amountPaise: integer("amount_paise").notNull(), // expected amount (paise)
+    currency: text("currency").notNull().default("INR"),
+    // created | paid | refunded | disputed | expired | failed
+    //
+    // Only `created` and `expired` may transition to `paid` — see
+    // CREDITABLE_ORDER_STATUSES in lib/coinOrders.ts. A refunded or disputed
+    // order must never be re-credited by a late duplicate webhook.
+    status: text("status").notNull().default("created"),
+    paymentId: text("payment_id"),
+    source: text("source"), // callback | webhook | reconciliation
+    creditedAt: integer("credited_at"),
+    // Clawback trail, written by the refund/dispute webhook.
+    refundedAt: integer("refunded_at"),
+    refundedAmountPaise: integer("refunded_amount_paise"),
+    clawedBackCoins: real("clawed_back_coins"),
+    /** Coins we could NOT recover (user had already spent them). Needs review. */
+    clawbackShortfall: real("clawback_shortfall"),
+    // Reconciliation bookkeeping so the sweeper never hammers the gateway.
+    reconcileAttempts: integer("reconcile_attempts").notNull().default(0),
+    reconciledAt: integer("reconciled_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    userIdx: index("idx_payment_orders_user").on(t.userId),
+    statusIdx: index("idx_payment_orders_status").on(t.status, t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// posts + engagement
+// ---------------------------------------------------------------------------
+export const posts = sqliteTable(
+  "posts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    mediaUrl: text("media_url"),
+    mediaType: text("media_type").default("photo"),
+    caption: text("caption"),
+    location: text("location"),
+    likeCount: integer("like_count").default(0),
+    commentCount: integer("comment_count").default(0),
+    isHidden: integer("is_hidden", { mode: "boolean" }).default(false),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ userIdx: index("idx_posts_user").on(t.userId) }),
+);
+
+export const postLikes = sqliteTable(
+  "post_likes",
+  {
+    postId: text("post_id").notNull(),
+    userId: text("user_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.postId, t.userId] }) }),
+);
+
+export const postComments = sqliteTable(
+  "post_comments",
+  {
+    id: text("id").primaryKey(),
+    postId: text("post_id").notNull(),
+    userId: text("user_id").notNull(),
+    text: text("text"),
+    parentId: text("parent_id"), // for replies
+    likeCount: integer("like_count").default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    postIdx: index("idx_comments_post").on(t.postId),
+    // Keyset thread page ORDER BY created_at DESC, id DESC (0059).
+    postCreatedIdx: index("idx_post_comments_post_created").on(t.postId, t.createdAt, t.id),
+  }),
+);
+
+export const commentLikes = sqliteTable(
+  "comment_likes",
+  {
+    commentId: text("comment_id").notNull(),
+    userId: text("user_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.commentId, t.userId] }) }),
+);
+
+// ---------------------------------------------------------------------------
+// stories  (was: stories/{storyId}, 24h TTL)
+// ---------------------------------------------------------------------------
+export const stories = sqliteTable(
+  "stories",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    username: text("username"),
+    avatarUrl: text("avatar_url"),
+    mediaUrl: text("media_url"),
+    mediaType: text("media_type").default("photo"),
+    visibility: text("visibility").default("public"),
+    overlayText: text("overlay_text"),
+    textPosition: text("text_position", { mode: "json" }),
+    mentions: text("mentions", { mode: "json" }).$type<string[]>(),
+    type: text("type"),
+    matchId: text("match_id"),
+    contestTitle: text("contest_title"),
+    // 'r2' | 'migrating' | 'qencode' | null. See contestMatches.videoProvider.
+    videoProvider: text("video_provider"),
+    // Music attached to the story. Resolved SERVER-SIDE from `musicTrackId` in
+    // createStory — never accepted from the client, because a client-supplied
+    // preview URL would be embedded as a media load in every viewer's browser.
+    // See migrations/0035_story_music.sql. Readers must treat a dead
+    // `musicPreviewUrl` as "no music" and still show the story.
+    musicTrackId: text("music_track_id"),
+    musicTitle: text("music_title"),
+    musicArtist: text("music_artist"),
+    musicArtworkUrl: text("music_artwork_url"),
+    musicPreviewUrl: text("music_preview_url"),
+    // Where in the track the story starts, in ms. NULL means from the beginning
+    // — the correct value for a story whose author never scrubbed, and for every
+    // row predating migration 0037. Readers treat NULL and 0 identically. Clamped
+    // in createStory against the window the story actually plays.
+    musicStartMs: integer("music_start_ms"),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => ({
+    userIdx: index("idx_stories_user").on(t.userId),
+    expiresIdx: index("idx_stories_expires").on(t.expiresAt),
+    // Lets the story feed's ORDER BY created_at DESC walk an index backwards
+    // instead of sorting every live story. See migration 0022 for why this is
+    // created_at alone rather than (expires_at, created_at).
+    createdIdx: index("idx_stories_created").on(t.createdAt),
+    // Migration 0055: one contest VS Story per (battle, owner), and match lookups
+    // for reference-aware cleanup of the shared composite.
+    contestVsOwnerUnique: uniqueIndex("uniq_stories_contest_vs_owner")
+      .on(t.matchId, t.userId)
+      .where(sql`${t.type} = 'contest_vs'`),
+    matchIdx: index("idx_stories_match").on(t.matchId).where(sql`${t.matchId} IS NOT NULL`),
+  }),
+);
+
+export const storyViews = sqliteTable(
+  "story_views",
+  {
+    storyId: text("story_id").notNull(),
+    viewerId: text("viewer_id").notNull(),
+    reaction: text("reaction"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.storyId, t.viewerId] }) }),
+);
+
+// ---------------------------------------------------------------------------
+// contest-match engagement (were contestMatches/{id}/likes|comments|reactions)
+// ---------------------------------------------------------------------------
+export const matchLikes = sqliteTable(
+  "match_likes",
+  {
+    matchId: text("match_id").notNull(),
+    userId: text("user_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.matchId, t.userId] }) }),
+);
+
+export const matchComments = sqliteTable(
+  "match_comments",
+  {
+    id: text("id").primaryKey(),
+    matchId: text("match_id").notNull(),
+    userId: text("user_id").notNull(),
+    text: text("text"),
+    parentId: text("parent_id"),
+    likeCount: integer("like_count").default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    matchIdx: index("idx_match_comments_match").on(t.matchId),
+    // Keyset thread page ORDER BY created_at DESC, id DESC (0059).
+    matchCreatedIdx: index("idx_match_comments_match_created").on(t.matchId, t.createdAt, t.id),
+  }),
+);
+
+export const matchReactions = sqliteTable(
+  "match_reactions",
+  {
+    matchId: text("match_id").notNull(),
+    userId: text("user_id").notNull(),
+    type: text("type").notNull(), // fire | heart | laugh
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.matchId, t.userId, t.type] }) }),
+);
+
+// ---------------------------------------------------------------------------
+// bookmarks (was users/{uid}/bookmarks/{matchId})
+// ---------------------------------------------------------------------------
+export const bookmarks = sqliteTable(
+  "bookmarks",
+  {
+    userId: text("user_id").notNull(),
+    matchId: text("match_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.matchId] }),
+    // "Who saved this battle", for the ending-soon reminder (migration 0067).
+    matchIdx: index("idx_bookmarks_match").on(t.matchId),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// highlights (was users/{uid}/highlights/{id})
+// ---------------------------------------------------------------------------
+export const highlights = sqliteTable(
+  "highlights",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name"),
+    coverImageUrl: text("cover_image_url"),
+    storyIds: text("story_ids", { mode: "json" }).$type<string[]>(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ userIdx: index("idx_highlights_user").on(t.userId) }),
+);
+
+// ---------------------------------------------------------------------------
+// notifications  (was: notifications/{userId}/items/{id})
+// ---------------------------------------------------------------------------
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    recipientId: text("recipient_id").notNull(),
+    title: text("title"),
+    body: text("body"),
+    type: text("type"),
+    targetId: text("target_id"),
+    image: text("image"),
+    data: text("data", { mode: "json" }),
+    read: integer("read", { mode: "boolean" }).default(false),
+    /**
+     * "Shown in the list" vs `read` = "opened". Lets the bell badge clear on
+     * view without marking every item read.
+     */
+    seen: integer("seen", { mode: "boolean" }).default(false),
+
+    // --- collapsing / actor grouping (migration 0018) ---
+    /** Most recent actor — drives the avatar and the leading name. */
+    actorId: text("actor_id"),
+    /** A few recent actors for display: [{ uid, username, avatarUrl }]. */
+    actors: text("actors", { mode: "json" }).$type<NotificationActor[]>(),
+    /** Distinct actors folded into this row; 1 for non-collapsible types. */
+    actorCount: integer("actor_count").default(1),
+    /**
+     * Grouping handle, normally `{type}:{targetId}`. Doubles as the idempotency
+     * handle — a retried event resolves to the same key and is absorbed rather
+     * than duplicated. NULL for types that must never collapse.
+     */
+    collapseKey: text("collapse_key"),
+    /**
+     * NOTE: `createdAt` is bumped on collapse, i.e. it means LAST ACTIVITY for
+     * collapsible types. That keeps the existing created_at ordering, cursor
+     * pagination and index working while still letting a re-activated
+     * notification rise to the top. `updatedAt` is audit-only.
+     */
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at"),
+  },
+  (t) => ({
+    recipientIdx: index("idx_notif_recipient").on(t.recipientId, t.createdAt),
+    // Partial index for the polled unread-count query (migration 0016): indexes
+    // only unread rows so COUNT(*) WHERE recipient_id=? AND read=0 is index-only.
+    unreadIdx: index("idx_notif_unread").on(t.recipientId).where(sql`${t.read} = 0`),
+    // Partial index for the polled BADGE count, which counts UNSEEN rows
+    // (migration 0019). Mirrors idx_notif_unread but for `seen`.
+    unseenIdx: index("idx_notif_unseen").on(t.recipientId).where(sql`${t.seen} = 0`),
+    // Collapse lookup: WHERE recipient_id = ? AND collapse_key = ?
+    collapseIdx: index("idx_notif_collapse").on(t.recipientId, t.collapseKey),
+    // Hard-retention prune WHERE created_at < ? (0059) — without it the hourly prune scanned the table.
+    createdIdx: index("idx_notifications_created").on(t.createdAt),
+  }),
+);
+
+/** A single actor shown on a grouped notification. */
+export interface NotificationActor {
+  uid: string;
+  username: string | null;
+  avatarUrl: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// chats + messages
+// ---------------------------------------------------------------------------
+export const chats = sqliteTable(
+  "chats",
+  {
+    id: text("id").primaryKey(),
+    users: text("users", { mode: "json" }).$type<string[]>(),
+    usersData: text("users_data", { mode: "json" }),
+    lastMessage: text("last_message", { mode: "json" }),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  // Serves the ORDER BY updated_at DESC of /read/chats. Membership is no longer
+  // tested with json_each on this table — the indexed `chat_members` join
+  // (below) does that now — so this index carries the sort for the join's page.
+  (t) => ({ updatedIdx: index("idx_chats_updated").on(t.updatedAt) }),
+);
+
+/**
+ * Indexed chat membership — replaces the EXISTS(json_each(chats.users)) scans
+ * (D1_R2_LOAD_AUDIT.md §4). Membership is immutable: written when a chat is
+ * created, deleted with the chat, never otherwise mutated (no group chats).
+ *
+ * `(user_id, chat_id)` PK serves the hot "my chats" seek; `idx_chat_members_chat`
+ * serves the reverse "members of this chat" lookup used on delete. See migration
+ * 0045_chat_members.sql for the one-time backfill from the legacy JSON arrays.
+ */
+export const chatMembers = sqliteTable(
+  "chat_members",
+  {
+    userId: text("user_id").notNull(),
+    chatId: text("chat_id").notNull(),
+    // Per-member unread counter for the inbox badge (migration 0049). Bumped for
+    // every recipient on sendMessage, reset to 0 on markChatRead. Kept in D1 (not
+    // derived from the per-chat message DO) so the inbox badge costs no extra
+    // round-trip — it rides the existing chat_members join.
+    unreadCount: integer("unread_count").notNull().default(0),
+    // "Delete chat" for this member only (migration 0066): history and the inbox
+    // entry start after this time. Null = never cleared.
+    clearedAt: integer("cleared_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.chatId] }),
+    chatIdx: index("idx_chat_members_chat").on(t.chatId),
+  }),
+);
+
+export const messages = sqliteTable(
+  "messages",
+  {
+    id: text("id").primaryKey(),
+    chatId: text("chat_id").notNull(),
+    senderId: text("sender_id").notNull(),
+    text: text("text"),
+    read: integer("read", { mode: "boolean" }).default(false),
+    // Message kind + optional media URL (migration 0050). Message bodies live in
+    // the per-chat ChatArchive Durable Object now; these columns exist on the D1
+    // mirror so a legacy row seeded into a DO carries its kind, and the DO-read
+    // fallback in /read/chats/:id/messages returns media messages too.
+    type: text("type").notNull().default("text"), // 'text' | 'image'
+    mediaUrl: text("media_url"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ chatIdx: index("idx_messages_chat").on(t.chatId, t.createdAt) }),
+);
+
+// ---------------------------------------------------------------------------
+// shares / profile visits / moderation
+// ---------------------------------------------------------------------------
+export const shares = sqliteTable(
+  "shares",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id"),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    createdAt: integer("created_at").notNull(),
+  },
+  // Had no index at all, while the daily-tasks screen COUNT(*)s by user+date.
+  (t) => ({ userCreatedIdx: index("idx_shares_user_created").on(t.userId, t.createdAt) }),
+);
+
+export const profileVisits = sqliteTable(
+  "profile_visits",
+  {
+    userId: text("user_id").notNull(),
+    visitorId: text("visitor_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.visitorId] }),
+    // visitor_id is the TRAILING primary-key column, so the feed's "profiles
+    // this user visited" lookup could not use the PK and scanned the table.
+    visitorIdx: index("idx_profile_visits_visitor").on(t.visitorId, t.createdAt),
+  }),
+);
+
+export const reports = sqliteTable("reports", {
+  id: text("id").primaryKey(),
+  reporterId: text("reporter_id"),
+  targetType: text("target_type"),
+  targetId: text("target_id"),
+  reason: text("reason"),
+  // 'open' | 'dismissed' | 'actioned' (content removed; migration 0067).
+  status: text("status").default("open"),
+  createdAt: integer("created_at").notNull(),
+  // When an admin dismissed or actioned it (migration 0067). Null while open.
+  resolvedAt: integer("resolved_at"),
+});
+
+export const supportTickets = sqliteTable("support_tickets", {
+  id: text("id").primaryKey(),
+  userId: text("user_id"),
+  subject: text("subject"),
+  message: text("message"),
+  status: text("status").default("open"),
+  adminReply: text("admin_reply"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+// ---------------------------------------------------------------------------
+// admin_notifications  (admin panel activity feed: new reports/support tickets)
+// ---------------------------------------------------------------------------
+export const adminNotifications = sqliteTable(
+  "admin_notifications",
+  {
+    id: text("id").primaryKey(),
+    title: text("title"),
+    message: text("message"),
+    link: text("link"),
+    /**
+     * Who should see this: "finance" (payouts, clawbacks, chargebacks, cron
+     * failures — full admins only) or "moderation" (reports, support — anyone
+     * with panel access, including moderators). Defaults to the stricter value.
+     */
+    scope: text("scope").notNull().default("finance"),
+    isRead: integer("is_read", { mode: "boolean" }).default(false),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    createdIdx: index("idx_admin_notif_created").on(t.createdAt),
+    scopeIdx: index("idx_admin_notif_scope").on(t.scope, t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// announcements  (admin-authored in-app POPUPS — see migration 0047)
+//
+// Distinct from the appConfig.announcement banner (one global message) and from
+// `notifications` (append-only per-user history). A popup is stateful: active
+// for a targeted audience, dismissible, and re-shown after a per-announcement
+// snooze window. Targeting + dismissal live in the two tables below.
+// ---------------------------------------------------------------------------
+export const announcements = sqliteTable(
+  "announcements",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    /** Optional call-to-action opened when the popup is tapped. */
+    link: text("link"),
+    /** Optional hero image URL shown above the text. */
+    image: text("image"),
+    /** Master on/off — an inactive announcement is never served. */
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    /** 'all' -> everyone; 'users' -> only uids in announcementTargets. */
+    targetType: text("target_type").notNull().default("all"),
+    /** Hours the popup stays hidden after a close, then re-appears. */
+    snoozeHours: integer("snooze_hours").notNull().default(24),
+    /** Higher shows first when several are active for one user. */
+    priority: integer("priority").notNull().default(0),
+    /** Optional schedule window (epoch ms); NULL = unbounded on that side. */
+    startAt: integer("start_at"),
+    endAt: integer("end_at"),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    activeIdx: index("idx_announcements_active").on(t.isActive, t.priority, t.createdAt),
+  }),
+);
+
+/** Explicit per-user targeting; only consulted when targetType = 'users'. */
+export const announcementTargets = sqliteTable(
+  "announcement_targets",
+  {
+    announcementId: text("announcement_id").notNull(),
+    uid: text("uid").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.announcementId, t.uid] }),
+    uidIdx: index("idx_announcement_targets_uid").on(t.uid),
+  }),
+);
+
+/**
+ * Per-user dismissal / snooze state — the heart of the 24h behaviour.
+ *
+ * The user endpoint shows an announcement only when it has no dismissal row OR
+ * now() >= snoozedUntil. Server-side so the snooze is consistent across a
+ * user's devices and reinstalls.
+ */
+export const announcementDismissals = sqliteTable(
+  "announcement_dismissals",
+  {
+    announcementId: text("announcement_id").notNull(),
+    uid: text("uid").notNull(),
+    snoozedUntil: integer("snoozed_until").notNull(),
+    dismissedAt: integer("dismissed_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.announcementId, t.uid] }),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// blog_posts  (editorial blog + imported tophunt.in archive posts)
+// ---------------------------------------------------------------------------
+export const blogPosts = sqliteTable(
+  "blog_posts",
+  {
+    id: text("id").primaryKey(),
+    slug: text("slug").notNull(), // URL permalink (unique via index below)
+    title: text("title").notNull(),
+    excerpt: text("excerpt"), // short summary for list cards
+    content: text("content"), // full HTML body
+    coverImageUrl: text("cover_image_url"), // featured image (Wayback URL or R2)
+    category: text("category"),
+    tags: text("tags", { mode: "json" }).$type<string[]>().default([]),
+    author: text("author").default("TopHunt"),
+    status: text("status").default("published"), // 'published' | 'draft'
+    // SEO (must never be missing — populated from source or derived from content):
+    metaTitle: text("meta_title"),
+    metaDescription: text("meta_description"),
+    // PROVENANCE ONLY — never emitted as rel=canonical.
+    //
+    // This is the permalink the archive importer read off the archived WordPress
+    // page, and the edge Worker used to serve it verbatim as the canonical tag.
+    // Sampled against production that disagreed with `/sitemap.xml` on 40 of 40
+    // posts: 35 differed only by a trailing slash, and 5 pointed at urls that do
+    // not exist (de-duplicated "-2" slugs kept the original permalink; placeholder
+    // titles produced canonicals like `/tcl-is-a-global-top-____-tv-brand/`, which
+    // serves "Not found" with noindex). A canonical aimed at a noindex 404 does not
+    // demote a post, it removes it — Search Console indexed 92 of 4,475 urls.
+    //
+    // The Worker now always self-canonicalises to `https://tophunt.in/<slug>`, the
+    // same string the sitemap advertises, so the two cannot drift. This column is
+    // kept because it is genuine provenance and it is the fallback dedup key for
+    // re-imports (`originalUrl || canonicalUrl` in lib/importerTask.ts) — do NOT
+    // "normalise" it to the serving url, which would destroy both of those.
+    canonicalUrl: text("canonical_url"),
+    // Provenance for imports + dedup:
+    source: text("source").default("admin"), // 'admin' | 'archive'
+    originalUrl: text("original_url"), // original tophunt.in permalink (import dedup key)
+    contentHash: text("content_hash"), // sha256 of normalized text (dedup)
+    viewCount: integer("view_count").default(0),
+    // Original publish date if it could be confidently determined; otherwise
+    // NULL (we never fall back to the Wayback capture date).
+    publishedAt: integer("published_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    slugIdx: index("idx_blog_slug").on(t.slug),
+    statusPublishedIdx: index("idx_blog_status_published").on(t.status, t.publishedAt),
+    categoryIdx: index("idx_blog_category").on(t.category),
+    originalUrlIdx: index("idx_blog_original_url").on(t.originalUrl),
+    contentHashIdx: index("idx_blog_content_hash").on(t.contentHash),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// music catalogue  (curated soundtracks for the story picker)
+// ---------------------------------------------------------------------------
+// Read at runtime INSTEAD of calling the provider. The picker's first version
+// asked Apple's iTunes Search API for "Top Hits" whenever it opened, which worked
+// from a laptop and returned nothing from the deployed Worker: that API throttles
+// per source IP and a Worker's egress is shared, so the response was "200 OK,
+// zero results" and the sheet came up empty. See migrations/0036_music_catalog.sql.
+export const musicCategories = sqliteTable("music_categories", {
+  key: text("key").primaryKey(),
+  label: text("label").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+export const musicTracks = sqliteTable(
+  "music_tracks",
+  {
+    // The provider's track id — the same value a client sends as `musicTrackId`,
+    // so a curated pick needs no outbound lookup when a story is created.
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    artist: text("artist").notNull(),
+    artworkUrl: text("artwork_url"),
+    // Apple's public 30-second preview. We host no audio; this is a link, and it
+    // can rotate — readers must treat a dead one as "no music".
+    previewUrl: text("preview_url").notNull(),
+    category: text("category").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    // Retire a track without deleting a row that live stories still reference.
+    isActive: integer("is_active").notNull().default(1),
+  },
+  (t) => ({
+    categoryIdx: index("idx_music_tracks_category").on(t.category, t.isActive, t.sortOrder),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// blog_comments  (reader comments on a blog article)
+// ---------------------------------------------------------------------------
+// Deliberately NOT `post_comments`: that table's `post_id` refers to the in-app
+// social feed (`posts`), whose denormalised `comment_count` and delete-cascade
+// are keyed on that meaning. See migrations/0034_blog_comments.sql for the full
+// reasoning, including why there is no `blog_posts.comment_count` and no
+// `parent_id`.
+export const blogComments = sqliteTable(
+  "blog_comments",
+  {
+    id: text("id").primaryKey(),
+    postId: text("post_id").notNull(), // blog_posts.id
+    userId: text("user_id").notNull(),
+    text: text("text"),
+    likeCount: integer("like_count").default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    postIdx: index("idx_blog_comments_post").on(t.postId, t.createdAt),
+    userIdx: index("idx_blog_comments_user").on(t.userId),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// blog_import_log  (per-URL state for the resumable Wayback archive importer)
+// ---------------------------------------------------------------------------
+export const blogImportLog = sqliteTable(
+  "blog_import_log",
+  {
+    id: text("id").primaryKey(),
+    url: text("url").notNull(), // canonical original tophunt.in URL (unique)
+    status: text("status").notNull().default("pending"), // pending|imported|updated|skipped|duplicate|failed
+    error: text("error"),
+    postId: text("post_id"),
+    imagesTotal: integer("images_total").default(0),
+    imagesMissing: integer("images_missing").default(0),
+    attempts: integer("attempts").default(0),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    urlIdx: uniqueIndex("idx_blog_import_url").on(t.url),
+    statusIdx: index("idx_blog_import_status").on(t.status),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// withdrawals  (cash payout requests against Dpcoin balance)
+// ---------------------------------------------------------------------------
+export const withdrawals = sqliteTable(
+  "withdrawals",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    amount: real("amount").notNull(), // Dpcoins requested
+    /** Risk review computed at request time (migration 0068): low | medium | high, and the reasons (JSON array). */
+    riskLevel: text("risk_level"),
+    riskFlags: text("risk_flags", { mode: "json" }),
+    cashAmount: real("cash_amount").default(0), // NET ₹ actually paid (after the platform fee)
+    /** coins × payout rate at request time (migration 0062). */
+    grossAmount: real("gross_amount"),
+    /** Platform fee deducted from the payout, ₹ (lib/withdrawalFee.ts). */
+    feeAmount: real("fee_amount").notNull().default(0),
+    /** JSON of the fee rule used, locked at request time. */
+    feeDetail: text("fee_detail"),
+    method: text("method").default("upi"), // upi | bank | paytm ...
+    accountDetails: text("account_details"), // UPI id / bank details
+    status: text("status").notNull().default("pending"), // pending | approved | rejected | paid
+    adminNote: text("admin_note"),
+    processedBy: text("processed_by"), // admin uid who actioned it
+    /**
+     * Bank reference (UTR / RRN / NEFT ref) for the actual transfer. Required to
+     * mark a payout paid: without it, "we marked it paid" and "the bank sent it"
+     * were unrelated facts and no outgoing rupee could be reconciled against a
+     * statement. Unique across withdrawals.
+     */
+    payoutRef: text("payout_ref"),
+    paidAt: integer("paid_at"),
+    // true = coins were already deducted (escrowed) at request time. Legacy rows
+    // (created before this model) are 0 and are deducted on admin approval.
+    reserved: integer("reserved", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    statusIdx: index("idx_withdrawals_status").on(t.status, t.createdAt),
+    userIdx: index("idx_withdrawals_user").on(t.userId),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// referrals  (referral bonus ledger; one row per referred user)
+// ---------------------------------------------------------------------------
+export const referrals = sqliteTable(
+  "referrals",
+  {
+    id: text("id").primaryKey(),
+    referrerUid: text("referrer_uid").notNull(),
+    referredUid: text("referred_uid").notNull().unique(),
+    bonus: real("bonus").default(0),
+    createdAt: integer("created_at").notNull(),
+    /** pending | review | rewarded | rejected | expired (migration 0063, lib/referralProgram.ts). */
+    status: text("status").notNull().default("rewarded"),
+    code: text("code"),
+    referrerReward: real("referrer_reward").notNull().default(0),
+    refereeReward: real("referee_reward").notNull().default(0),
+    qualifyAction: text("qualify_action"),
+    qualifiedAt: integer("qualified_at"),
+    rewardedAt: integer("rewarded_at"),
+    expiresAt: integer("expires_at"),
+    rejectReason: text("reject_reason"),
+    /** IP the code was applied from, and why it is held for review (migration 0068). */
+    ip: text("ip"),
+    holdReason: text("hold_reason"),
+    deviceId: text("device_id"),
+    decidedBy: text("decided_by"),
+    updatedAt: integer("updated_at"),
+  },
+  (t) => ({ referrerIdx: index("idx_referrals_referrer").on(t.referrerUid) }),
+);
+
+// ---------------------------------------------------------------------------
+// daily_task_claims  (one row per user/task/UTC-day)
+// ---------------------------------------------------------------------------
+export const dailyTaskClaims = sqliteTable(
+  "daily_task_claims",
+  {
+    uid: text("uid").notNull(),
+    taskId: text("task_id").notNull(),
+    day: integer("day").notNull(), // days since epoch (UTC)
+    reward: real("reward").default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.uid, t.taskId, t.day] }) }),
+);
+
+// ---------------------------------------------------------------------------
+// deposits  (manual QR/UPI top-up requests, admin-approved)
+// ---------------------------------------------------------------------------
+export const deposits = sqliteTable(
+  "deposits",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    amount: real("amount").notNull(), // coins to credit on approval (bonus INCLUDED)
+    payAmount: real("pay_amount").default(0), // INR paid
+    packageId: text("package_id"), // coin_packages.id this deposit was priced from
+    bonusCoins: real("bonus_coins").default(0), // how much of `amount` was bonus — display/reporting only
+    /** Set when the bonus is platform-funded (promo budget) and credited as locked coins. */
+    budgetId: text("budget_id"),
+    method: text("method").default("qr"), // qr | upi | bank
+    utr: text("utr"), // user-entered bank transaction reference
+    screenshotUrl: text("screenshot_url"),
+    status: text("status").notNull().default("pending"), // pending | approved | rejected
+    adminNote: text("admin_note"),
+    processedBy: text("processed_by"),
+    /**
+     * When the coins actually landed (migration 0053).
+     *
+     * Written in the SAME batch as the wallet credit, so `status = 'approved' AND
+     * credited_at IS NULL` is the fingerprint of a deposit that was claimed but
+     * never paid. The approval is now atomic, which makes that state impossible —
+     * this column is what lets `computeMoneyHealth` keep proving it.
+     */
+    creditedAt: integer("credited_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    statusIdx: index("idx_deposits_status").on(t.status, t.createdAt),
+    userIdx: index("idx_deposits_user").on(t.userId),
+    creditedIdx: index("idx_deposits_credited").on(t.status, t.creditedAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// admin_audit_log  (accountability: who did what admin action, when)
+// ---------------------------------------------------------------------------
+export const adminAuditLog = sqliteTable(
+  "admin_audit_log",
+  {
+    id: text("id").primaryKey(),
+    adminUid: text("admin_uid"),
+    adminEmail: text("admin_email"),
+    action: text("action").notNull(), // e.g. user.block, wallet.adjust
+    targetType: text("target_type"), // user | contest | match | withdrawal ...
+    targetId: text("target_id"),
+    detail: text("detail", { mode: "json" }), // extra context
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    createdIdx: index("idx_audit_created").on(t.createdAt),
+    actionIdx: index("idx_audit_action").on(t.action),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// error_logs  (server error trail surfaced in the admin panel)
+// Persisted from app.onError so admins can triage without the Cloudflare
+// dashboard. Pruned by retention in the cron. Errors are rare -> low write load.
+// ---------------------------------------------------------------------------
+export const errorLogs = sqliteTable(
+  "error_logs",
+  {
+    id: text("id").primaryKey(),
+    level: text("level").notNull().default("error"), // error | warn
+    message: text("message").notNull(),
+    stack: text("stack"),
+    requestId: text("request_id"),
+    path: text("path"),
+    method: text("method"),
+    status: integer("status"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    createdIdx: index("idx_error_logs_created").on(t.createdAt),
+    levelIdx: index("idx_error_logs_level").on(t.level),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// integration_secrets  (panel-managed third-party credentials, ENCRYPTED)
+//
+// API keys for the SMS gateway, email provider, payment gateway and video CDN
+// used to be Cloudflare secrets only, so changing a provider or rotating a key
+// meant CLI access and a deploy. They are now settable from the admin panel —
+// but stored as AES-256-GCM ciphertext, with the encryption key itself remaining
+// a Cloudflare secret. The database alone therefore reveals nothing, and the API
+// never returns a stored value: only a fingerprint and a masked hint.
+// ---------------------------------------------------------------------------
+export const integrationSecrets = sqliteTable("integration_secrets", {
+  /** Credential name from the allow-list in lib/integrations.ts. */
+  name: text("name").primaryKey(),
+  ciphertext: text("ciphertext").notNull(),
+  iv: text("iv").notNull(),
+  /** Short SHA-256 prefix, so an admin can confirm WHICH value is stored. */
+  fingerprint: text("fingerprint"),
+  /** Masked display form, e.g. `••••3f9a`. */
+  hint: text("hint"),
+  updatedBy: text("updated_by"),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+// ---------------------------------------------------------------------------
+// account_deletions  (compliance record for self-service account deletion)
+// The users row is anonymised rather than deleted, because the ledger, contest
+// history and votes reference the uid and must be retained. This table records
+// that the deletion happened and holds no personal data.
+// ---------------------------------------------------------------------------
+export const accountDeletions = sqliteTable(
+  "account_deletions",
+  {
+    uid: text("uid").primaryKey(),
+    reason: text("reason"),
+    forfeitedCoins: real("forfeited_coins").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    createdIdx: index("idx_account_deletions_created").on(t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// deletion_requests  (migration 0039) — the account-deletion state machine
+//
+// `account_deletions` above records that an account WAS purged. This records
+// that one was ASKED to be, which is a different and longer-lived fact:
+//
+//   - A request is always accepted. Deletion used to be REFUSED outright while a
+//     payout or contest was in flight, and the client hid its delete button in
+//     response — so the one flow both app stores mandate could simply be
+//     unavailable. Now the request is recorded and `scheduled_for` moves.
+//   - There is a grace period. Signing in during it cancels the request, which
+//     is the only defence against a mistap or a stolen phone destroying an
+//     account irreversibly.
+//   - `phase` makes the purge resumable. The work spans two D1 batches plus R2,
+//     KV and Firebase; a failure part-way used to leave an account half
+//     deleted with nothing recording how far it got.
+// ---------------------------------------------------------------------------
+export const deletionRequests = sqliteTable(
+  "deletion_requests",
+  {
+    uid: text("uid").primaryKey(),
+    /** pending | processing | completed | cancelled */
+    status: text("status").notNull().default("pending"),
+    reason: text("reason"),
+    requestedAt: integer("requested_at").notNull(),
+    /** When the purge becomes due. Only ever pushed further out, never pulled in. */
+    scheduledFor: integer("scheduled_for").notNull(),
+    /** Machine-readable code for why the purge has not run yet (see DeferralCode). */
+    deferredReason: text("deferred_reason"),
+    deferredUntil: integer("deferred_until"),
+    /** Resumable progress: snapshots | media | content | social | auth | done */
+    phase: text("phase"),
+    /**
+     * Storage objects to purge, captured in the first phase while the rows that
+     * reference them still exist — the `posts` / `stories` rows are deleted two
+     * phases later, so without this a crash in between would orphan the objects.
+     */
+    mediaUrls: text("media_urls", { mode: "json" }).$type<string[]>(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    /** Balance when the request was made, so the quoted forfeiture is stable. */
+    balanceAtRequest: real("balance_at_request").notNull().default(0),
+    /** app | web | admin */
+    source: text("source").notNull().default("app"),
+    /**
+     * `users.is_private` when the request was made (migration 0057), restored on
+     * cancel. NULL on older requests: their prior value is unknown, so cancel
+     * leaves the account private.
+     */
+    wasPrivate: integer("was_private", { mode: "boolean" }),
+    cancelledAt: integer("cancelled_at"),
+    completedAt: integer("completed_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    dueIdx: index("idx_deletion_requests_due").on(t.status, t.scheduledFor),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// hall_of_fame_awards  (the settled monthly winner set — migration 0052)
+//
+// The payout used to derive its top 3 live from `users.monthly_wins` and then
+// reset that counter, so re-running a past period paid whoever led the CURRENT
+// month instead. Recording the set makes a re-run a replay rather than a fresh
+// derivation. See the migration for the full account.
+// ---------------------------------------------------------------------------
+export const hallOfFameAwards = sqliteTable(
+  "hall_of_fame_awards",
+  {
+    /** 'YYYY-MM' of the settled month. */
+    period: text("period").notNull(),
+    uid: text("uid").notNull(),
+    /** 1 | 2 | 3 — payload, not key: one user can hold only one rank per month. */
+    rank: integer("rank").notNull(),
+    /** Coins promised for that rank, frozen so a later reward change cannot move it. */
+    reward: real("reward").notNull().default(0),
+    /** `monthly_wins` the rank was awarded for. Audit only — the counter is reset. */
+    wins: real("wins").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.period, t.uid] }),
+    periodIdx: index("idx_hof_awards_period").on(t.period, t.rank),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// cron_runs  (cron heartbeat + duration metric + failure trail)
+// One row per scheduled-job run. Without this a cron that stops firing is
+// invisible, and a job that throws only leaves a console.error behind while
+// settlement/refunds/payouts quietly stop.
+// ---------------------------------------------------------------------------
+export const cronRuns = sqliteTable(
+  "cron_runs",
+  {
+    id: text("id").primaryKey(),
+    job: text("job").notNull(),
+    ok: integer("ok", { mode: "boolean" }).notNull().default(true),
+    durationMs: integer("duration_ms"),
+    detail: text("detail", { mode: "json" }),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    jobCreatedIdx: index("idx_cron_runs_job_created").on(t.job, t.createdAt),
+    // Serves the retention prune `DELETE ... WHERE created_at < ?`
+    // (lib/ops.ts). The composite above leads with `job`, so a bare created_at
+    // predicate could not use it and full-scanned the table every 10 min — the
+    // largest rows_read source on the account (migration 0048).
+    createdIdx: index("idx_cron_runs_created").on(t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// ad_reward_claims  (rewarded-ad daily cap, enforced in D1)
+// The cap used to live only in an eventually-consistent KV counter that failed
+// OPEN on error, so concurrent claims all read the same count and all credited.
+// One row per claim + a COUNT(*) guard inside the crediting transaction makes
+// the cap exact.
+// ---------------------------------------------------------------------------
+export const adRewardClaims = sqliteTable(
+  "ad_reward_claims",
+  {
+    id: text("id").primaryKey(),
+    uid: text("uid").notNull(),
+    day: integer("day").notNull(), // UTC day bucket
+    provider: text("provider"),
+    reward: real("reward").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    uidDayIdx: index("idx_ad_reward_uid_day").on(t.uid, t.day),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// idempotency_keys  (atomic, transactional replay protection)
+// Replaces the KV read-then-write claim, which failed OPEN on any KV error and
+// let two simultaneous requests both through. A primary key in D1 is atomic by
+// construction; `nonce` identifies WHICH request won the claim, so a replay is
+// distinguishable from a first attempt even inside the same millisecond.
+// Pruned by retention in the cron.
+// ---------------------------------------------------------------------------
+// verification_rewards  (migration 0054) — enrolment in the signup
+// verification bonus, plus server-side reminder state. See lib/verificationReward.ts.
+export const verificationRewards = sqliteTable(
+  "verification_rewards",
+  {
+    uid: text("uid").primaryKey(),
+    registrationReward: integer("registration_reward").notNull().default(0),
+    registrationLedgerId: text("registration_ledger_id"),
+    completionReward: integer("completion_reward").notNull().default(0),
+    completionLedgerId: text("completion_ledger_id"),
+    completedAt: integer("completed_at"),
+    promptCount: integer("prompt_count").notNull().default(0),
+    lastPromptAt: integer("last_prompt_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    completedIdx: index("idx_verification_rewards_completed").on(t.completedAt),
+  }),
+);
+
+// verification_reward_claims (migration 0054) — one completion bonus per
+// canonical email / phone (hashed), across all accounts, forever.
+export const verificationRewardClaims = sqliteTable(
+  "verification_reward_claims",
+  {
+    identifierHash: text("identifier_hash").primaryKey(),
+    kind: text("kind").notNull(),
+    uid: text("uid").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    uidIdx: index("idx_verification_reward_claims_uid").on(t.uid),
+  }),
+);
+
+export const idempotencyKeys = sqliteTable(
+  "idempotency_keys",
+  {
+    key: text("key").primaryKey(),
+    nonce: text("nonce").notNull(),
+    scope: text("scope"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    createdIdx: index("idx_idempotency_created").on(t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// coin_packages  (admin-managed top-up store items)
+// ---------------------------------------------------------------------------
+export const coinPackages = sqliteTable(
+  "coin_packages",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    coins: real("coins").notNull().default(0),
+    bonusCoins: real("bonus_coins").notNull().default(0),
+    priceInr: real("price_inr").notNull().default(0),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** Promo budget (kind package_bonus) that pays this package's bonus coins (migration 0068). */
+    budgetId: text("budget_id"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({ activeIdx: index("idx_coin_packages_active").on(t.active, t.sortOrder) }),
+);
+
+// ---------------------------------------------------------------------------
+// scheduled_notifications  (scheduled / segmented broadcasts, sent by cron)
+// ---------------------------------------------------------------------------
+export const scheduledNotifications = sqliteTable(
+  "scheduled_notifications",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    image: text("image"),
+    segment: text("segment", { mode: "json" }), // { platform?, minLevel? }
+    sendAt: integer("send_at").notNull(),
+    status: text("status").notNull().default("pending"), // pending | sent | cancelled
+    recipients: integer("recipients").default(0),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at").notNull(),
+    sentAt: integer("sent_at"),
+  },
+  (t) => ({ statusIdx: index("idx_sched_notif_status").on(t.status, t.sendAt) }),
+);
+
+// ---------------------------------------------------------------------------
+// banned_words  (auto-moderation word list)
+// ---------------------------------------------------------------------------
+export const bannedWords = sqliteTable("banned_words", {
+  word: text("word").primaryKey(),
+  createdAt: integer("created_at").notNull(),
+});
+
+// ---------------------------------------------------------------------------
+// settings  (was: settings/{docId}: appConfig, gamification)
+// ---------------------------------------------------------------------------
+export const settings = sqliteTable("settings", {
+  id: text("id").primaryKey(), // 'appConfig' | 'gamification'
+  data: text("data", { mode: "json" }).notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+
+// ---------------------------------------------------------------------------
+// videos  (Qencode encode state — MEDIA_ARCHITECTURE.md)
+//
+// Keyed by OUR uuid, which also names the R2 output folder `videos/<id>/`. The
+// Qencode job handle lives in `job_id`, and the raw upload Qencode pulls from in
+// `source_key`. (Migration 0017 created this table for Bunny Stream; 0069 added
+// the two Qencode columns.)
+//
+// Content links back by URL, not by a foreign key: a playback URL is
+// {R2_PUBLIC_BASE_URL}/videos/{id}/playlist.m3u8, so the id is recoverable from
+// the existing stories.mediaUrl / userA.mediaUrl values. That is what lets
+// contest matches — which hold TWO participant videos in JSON — work without any
+// participant-snapshot migration.
+// ---------------------------------------------------------------------------
+export const videos = sqliteTable(
+  "videos",
+  {
+    /** Our video id (uuid). Also the R2 folder: `videos/<id>/`. */
+    id: text("id").primaryKey(),
+    /** Bunny-era column (library id). Unused by Qencode; kept for old rows. */
+    libraryId: text("library_id"),
+    ownerUid: text("owner_uid").notNull(),
+    // 'qencode' for every new row. Legacy rows may say 'bunny' (DB default from
+    // migration 0017, which cannot be changed in place).
+    provider: text("provider").notNull().default("bunny"),
+    /** Qencode task_token. Null until the encode job has been started. */
+    jobId: text("job_id"),
+    /** R2 key of the raw upload Qencode encodes from. Deleted after the encode. */
+    sourceKey: text("source_key"),
+    /** uploading | processing | ready | failed */
+    status: text("status").notNull().default("uploading"),
+    /**
+     * What the video is attached to. Null until the story / contest entry is
+     * created, which is how orphaned uploads are found.
+     */
+    targetType: text("target_type"), // story | contest_entry
+    targetId: text("target_id"),
+    /** 'A' | 'B' — which participant of a contest match this video belongs to. */
+    targetSide: text("target_side"),
+    thumbnailUrl: text("thumbnail_url"),
+    durationSec: integer("duration_sec"),
+    /** Written on the 'ready' webhook so clients never construct URLs. */
+    playbackUrl: text("playback_url"),
+    mp4Url: text("mp4_url"),
+    /** Original R2 object, when this row came from the Phase 3 backfill. */
+    r2SourceUrl: text("r2_source_url"),
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    ownerIdx: index("idx_videos_owner").on(t.ownerUid, t.createdAt),
+    statusIdx: index("idx_videos_status").on(t.status),
+    targetIdx: index("idx_videos_target").on(t.targetType, t.targetId),
+  }),
+);
+
+
+// ---------------------------------------------------------------------------
+// broadcast_jobs  (resumable admin broadcast fan-out — migration 0018)
+//
+// The previous implementation loaded every uid into memory and then did an
+// insert + a WebSocket publish + an FCM call per user inside one request, which
+// cannot survive a real user table within a Worker's CPU/time limits.
+//
+// A job row is drained by cron a page at a time using KEYSET pagination on
+// users.uid (the primary key): resumable, no OFFSET scan, one page in memory.
+// ---------------------------------------------------------------------------
+export const broadcastJobs = sqliteTable(
+  "broadcast_jobs",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    image: text("image"),
+    /** Notification type written for each recipient (usually "admin"). */
+    type: text("type").notNull().default("admin"),
+    data: text("data", { mode: "json" }),
+    /** { platform?, minLevel? } */
+    segment: text("segment", { mode: "json" }),
+    /** pending | running | done | cancelled | failed */
+    status: text("status").notNull().default("pending"),
+    /** Keyset cursor — the last users.uid processed. NULL = not started. */
+    cursor: text("cursor"),
+    processed: integer("processed").notNull().default(0),
+    failed: integer("failed").notNull().default(0),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    finishedAt: integer("finished_at"),
+    errorMessage: text("error_message"),
+  },
+  (t) => ({
+    statusIdx: index("idx_broadcast_jobs_status").on(t.status, t.createdAt),
+  }),
+);
+
+
+// ---------------------------------------------------------------------------
+// prize_claims  (migration 0042)
+// ---------------------------------------------------------------------------
+/**
+ * One row per won PHYSICAL prize, and the delivery details needed to send it.
+ *
+ * Created by settlement, never by the winner. The row IS the record that something
+ * is owed, so it has to exist whether or not the winner ever opens the app again —
+ * and it is inserted inside `settleWinner`'s atomic batch, under the same
+ * `settlement_id` gate as the status change, so a claim can never exist for a match
+ * this resolver did not win.
+ *
+ * `id` is deterministic (`prize_claim:<matchId>`), which is what makes that INSERT
+ * exactly-once under replay. `uniq_prize_claims_match` says the same thing a second
+ * way, at the level a human reading the schema can see.
+ *
+ * Coin prizes do NOT appear here. They are credited straight to the wallet with a
+ * `coin_transactions` row, which is its own receipt; a claim would be a second,
+ * redundant state machine over money that has already moved.
+ */
+export const prizeClaims = sqliteTable(
+  "prize_claims",
+  {
+    /** `prize_claim:<matchId>` — deterministic, so the insert is idempotent. */
+    id: text("id").primaryKey(),
+    matchId: text("match_id").notNull(),
+    contestId: text("contest_id"),
+    /** The winner. Every read filters on it; submit requires it to equal the caller. */
+    uid: text("uid").notNull(),
+    /**
+     * unclaimed — won, no delivery details yet. The winner must act.
+     * submitted  — details supplied, waiting on an admin.
+     * approved   — admin accepted the address; being packed.
+     * shipped    — handed to a courier; `courier` / `trackingNumber` are set.
+     * delivered  — terminal, successful.
+     * cancelled  — terminal, unsuccessful. `adminNote` says why.
+     */
+    status: text("status").notNull().default("unclaimed"),
+
+    // Product snapshot, copied from the match at settlement. Denormalised on
+    // purpose: this records what was PROMISED, and must survive the contest
+    // template being edited or deleted long afterwards.
+    productTitle: text("product_title").notNull(),
+    productImageUrl: text("product_image_url"),
+    productValue: real("product_value").default(0),
+
+    // Supplied by the winner. PII — purged by accountDeletion and included in
+    // accountExport. See lib/deliveryAddress.ts for validation and masking.
+    recipientName: text("recipient_name"),
+    phone: text("phone"),
+    addressLine1: text("address_line1"),
+    addressLine2: text("address_line2"),
+    landmark: text("landmark"),
+    city: text("city"),
+    state: text("state"),
+    postalCode: text("postal_code"),
+    country: text("country"),
+    notes: text("notes"),
+
+    // Admin-only fulfilment fields.
+    courier: text("courier"),
+    trackingNumber: text("tracking_number"),
+    adminNote: text("admin_note"),
+
+    createdAt: integer("created_at").notNull(),
+    submittedAt: integer("submitted_at"),
+    approvedAt: integer("approved_at"),
+    shippedAt: integer("shipped_at"),
+    deliveredAt: integer("delivered_at"),
+    cancelledAt: integer("cancelled_at"),
+    updatedAt: integer("updated_at"),
+  },
+  (t) => ({
+    matchUnique: uniqueIndex("uniq_prize_claims_match").on(t.matchId),
+    uidIdx: index("idx_prize_claims_uid").on(t.uid, t.status),
+    statusIdx: index("idx_prize_claims_status").on(t.status, t.createdAt),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// username_history  (migration 0043)
+//
+// Released usernames, so `/@handle` can never silently change owner.
+//
+// The public profile url is `/@username`, and a username is mutable — so without
+// this a rename would (a) break every shared link and (b) free the handle for
+// immediate re-registration, after which those links open a DIFFERENT PERSON.
+// The second is the dangerous one, and it is the gap Instagram's own scheme has.
+// Since this product moves wallets and prize payouts, "the profile a shared link
+// opens is who you think it is" is a security property.
+//
+// Resolution is always CURRENT OWNER FIRST; a row here only answers when nobody
+// holds the handle now, so it is a fallback and never an override. See the
+// migration for the full reasoning, and lib/userIdentifiers.ts for the hold window.
+// ---------------------------------------------------------------------------
+export const usernameHistory = sqliteTable(
+  "username_history",
+  {
+    /** The released handle, lowercased. One row per handle — a later release wins. */
+    usernameLower: text("username_lower").primaryKey(),
+    /** The account that released it. */
+    uid: text("uid").notNull(),
+    /** Epoch ms. Drives the hold window, so it is a timestamp and not a flag. */
+    releasedAt: integer("released_at").notNull(),
+  },
+  (t) => ({
+    // Read by `purgeUsernameHistory` on account deletion.
+    uidIdx: index("idx_username_history_uid").on(t.uid),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Coin economy (migration 0068): promo budgets, reservations, platform ledger.
+// ---------------------------------------------------------------------------
+export const promoBudgets = sqliteTable(
+  "promo_budgets",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(), // package_bonus | contest_prize
+    totalCoins: real("total_coins").notNull(),
+    spentCoins: real("spent_coins").notNull().default(0),
+    status: text("status").notNull().default("active"), // active | paused | closed
+    startsAt: integer("starts_at"),
+    endsAt: integer("ends_at"),
+    perUserLimit: real("per_user_limit"),
+    note: text("note"),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({ kindIdx: index("idx_promo_budgets_kind").on(t.kind, t.status) }),
+);
+
+export const promoReservations = sqliteTable(
+  "promo_reservations",
+  {
+    id: text("id").primaryKey(),
+    budgetId: text("budget_id").notNull(),
+    uid: text("uid"),
+    coins: real("coins").notNull(),
+    status: text("status").notNull().default("held"), // held | used | released
+    refType: text("ref_type").notNull(), // order | deposit | match
+    refId: text("ref_id").notNull(),
+    expiresAt: integer("expires_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    budgetIdx: index("idx_promo_res_budget").on(t.budgetId, t.status),
+    userIdx: index("idx_promo_res_user").on(t.budgetId, t.uid, t.status),
+  }),
+);
+
+export const platformLedger = sqliteTable(
+  "platform_ledger",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(), // promo_bonus | prize_subsidy | platform_fee | product_prize_fund
+    coins: real("coins").notNull(), // + platform income, - platform expense
+    budgetId: text("budget_id"),
+    contestId: text("contest_id"),
+    matchId: text("match_id"),
+    uid: text("uid"),
+    refId: text("ref_id"),
+    description: text("description"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    kindIdx: index("idx_platform_ledger_kind").on(t.kind, t.createdAt),
+    budgetIdx: index("idx_platform_ledger_budget").on(t.budgetId),
+    contestIdx: index("idx_platform_ledger_contest").on(t.contestId),
+  }),
+);
+
+
+// ---------------------------------------------------------------------------
+// Gamification (migration 0070). See lib/xpService.ts and GAMIFICATION.md.
+// ---------------------------------------------------------------------------
+export const userXpEvents = sqliteTable(
+  "user_xp_events",
+  {
+    id: text("id").primaryKey(),
+    uid: text("uid").notNull(),
+    action: text("action").notNull(),
+    delta: integer("delta").notNull(),
+    requested: integer("requested").notNull().default(0),
+    day: integer("day").notNull().default(0),
+    sourceType: text("source_type"),
+    sourceId: text("source_id"),
+    ruleVersion: integer("rule_version").notNull().default(1),
+    reverses: text("reverses"),
+    reason: text("reason"),
+    actor: text("actor"),
+    nonce: text("nonce"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    uidCreatedIdx: index("idx_xp_events_uid_created").on(t.uid, t.createdAt),
+    actionCreatedIdx: index("idx_xp_events_action_created").on(t.action, t.createdAt),
+    createdIdx: index("idx_xp_events_created").on(t.createdAt),
+  }),
+);
+
+export const userXpDaily = sqliteTable(
+  "user_xp_daily",
+  {
+    uid: text("uid").notNull(),
+    day: integer("day").notNull(),
+    action: text("action").notNull(),
+    xp: integer("xp").notNull().default(0),
+    events: integer("events").notNull().default(0),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.uid, t.day, t.action] }),
+    dayUidIdx: index("idx_xp_daily_day_uid").on(t.day, t.uid),
+  }),
+);
+
+export const achievementDefinitions = sqliteTable("achievement_definitions", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  icon: text("icon").notNull().default("trophy"),
+  category: text("category").notNull().default("general"),
+  rarity: text("rarity").notNull().default("common"),
+  metric: text("metric").notNull(),
+  threshold: integer("threshold").notNull().default(1),
+  xpReward: integer("xp_reward").notNull().default(0),
+  itemId: text("item_id"),
+  repeatable: integer("repeatable", { mode: "boolean" }).notNull().default(false),
+  maxTiers: integer("max_tiers").notNull().default(1),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
+  startsAt: integer("starts_at"),
+  endsAt: integer("ends_at"),
+  sort: integer("sort").notNull().default(0),
+  version: integer("version").notNull().default(1),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const userAchievements = sqliteTable(
+  "user_achievements",
+  {
+    uid: text("uid").notNull(),
+    achievementId: text("achievement_id").notNull(),
+    tier: integer("tier").notNull().default(1),
+    unlockedAt: integer("unlocked_at").notNull(),
+    xpAwarded: integer("xp_awarded").notNull().default(0),
+    eventId: text("event_id"),
+    source: text("source").notNull().default("progress"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.uid, t.achievementId, t.tier] }),
+    defIdx: index("idx_user_achievements_def").on(t.achievementId, t.unlockedAt),
+    uidIdx: index("idx_user_achievements_uid").on(t.uid, t.unlockedAt),
+  }),
+);
+
+export const rewardCatalog = sqliteTable("reward_catalog", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  rarity: text("rarity").notNull().default("common"),
+  asset: text("asset", { mode: "json" }).notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  sort: integer("sort").notNull().default(0),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const userInventory = sqliteTable(
+  "user_inventory",
+  {
+    uid: text("uid").notNull(),
+    itemId: text("item_id").notNull(),
+    source: text("source").notNull(),
+    sourceRef: text("source_ref"),
+    acquiredAt: integer("acquired_at").notNull(),
+    revokedAt: integer("revoked_at"),
+    revokeReason: text("revoke_reason"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.uid, t.itemId] }),
+    itemIdx: index("idx_user_inventory_item").on(t.itemId),
+  }),
+);
+
+export const rewardGrants = sqliteTable(
+  "reward_grants",
+  {
+    id: text("id").primaryKey(),
+    uid: text("uid").notNull(),
+    sourceType: text("source_type").notNull(),
+    sourceId: text("source_id").notNull(),
+    coins: integer("coins").notNull(),
+    status: text("status").notNull().default("claimable"),
+    note: text("note"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    claimedAt: integer("claimed_at"),
+  },
+  (t) => ({
+    uidIdx: index("idx_reward_grants_uid").on(t.uid, t.status),
+    statusIdx: index("idx_reward_grants_status").on(t.status, t.createdAt),
+  }),
+);
+
+export const questClaims = sqliteTable(
+  "quest_claims",
+  {
+    uid: text("uid").notNull(),
+    questId: text("quest_id").notNull(),
+    periodKey: text("period_key").notNull(),
+    xp: integer("xp").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.uid, t.questId, t.periodKey] }) }),
+);
+
+export const seasons = sqliteTable(
+  "seasons",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    startsAt: integer("starts_at").notNull(),
+    endsAt: integer("ends_at").notNull(),
+    startDay: integer("start_day").notNull(),
+    endDay: integer("end_day").notNull(),
+    status: text("status").notNull().default("scheduled"),
+    topN: integer("top_n").notNull().default(100),
+    rewards: text("rewards", { mode: "json" }).notNull(),
+    policyVersion: integer("policy_version").notNull().default(1),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    finalizedAt: integer("finalized_at"),
+  },
+  (t) => ({ statusIdx: index("idx_seasons_status").on(t.status, t.endDay) }),
+);
+
+export const seasonResults = sqliteTable(
+  "season_results",
+  {
+    seasonId: text("season_id").notNull(),
+    uid: text("uid").notNull(),
+    rank: integer("rank").notNull(),
+    xp: integer("xp").notNull(),
+    rewards: text("rewards", { mode: "json" }).notNull(),
+    rewardState: text("reward_state").notNull().default("pending"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.seasonId, t.uid] }),
+    rankIdx: index("idx_season_results_rank").on(t.seasonId, t.rank),
+  }),
+);
+
+export const xpFlags = sqliteTable(
+  "xp_flags",
+  {
+    id: text("id").primaryKey(),
+    uid: text("uid").notNull(),
+    kind: text("kind").notNull(),
+    detail: text("detail", { mode: "json" }),
+    status: text("status").notNull().default("open"),
+    createdAt: integer("created_at").notNull(),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: integer("reviewed_at"),
+    reviewNote: text("review_note"),
+  },
+  (t) => ({
+    statusIdx: index("idx_xp_flags_status").on(t.status, t.createdAt),
+    uidIdx: index("idx_xp_flags_uid").on(t.uid, t.createdAt),
+  }),
+);

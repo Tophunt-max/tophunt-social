@@ -1,0 +1,355 @@
+import React, { useState, useEffect } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from "react-native";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../../../../src/services/firebase/initFirebase";
+import { readApi } from "../../../../src/services/api";
+import {
+  New_Email_Icon,
+  Lock_Icon,
+  Eye_Open,
+  Eye_Close,
+  Checkmark_Icon,
+} from "../../../../assets/svgs";
+import { BackButton } from "@/src/components/ui/BackButton";
+import { useSignupStore } from "../../../../src/store/signup";
+import { isProfileComplete, markOnboardingComplete, markOnboardingIncomplete, onboardingDraftFor } from "@/src/lib/profileCompletion";
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { FormInput } from "@/src/components/inputs/FormInput";
+import { PrimaryButton } from "@/src/components/buttons/PrimaryButton";
+import { useToast } from "@/src/components/toast/ToastProvider";
+import { Colors } from '@/constants/theme';
+import { SocialAuthService } from "../../../../src/services/auth/socialAuth";
+import { postAuthDestination } from "@/src/lib/postAuthRedirect";
+import { friendlyAuthError } from "@/src/lib/authErrors";
+import { rememberAuthMethod } from "@/src/lib/lastAuthMethod";
+
+// Validation Schema
+const loginSchema = z.object({
+  email: z.string().email({ message: "Invalid email address" }),
+  password: z.string().min(6, { message: "Password must be at least 6 characters" }),
+});
+
+type LoginFormData = z.infer<typeof loginSchema>;
+
+export default function PasswordLoginScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const redirect = params.redirect as string | undefined;
+
+  const insets = useSafeAreaInsets();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const backgroundColor = isDark ? Colors.dark.background : Colors.light.background;
+  const textColor = isDark ? Colors.dark.text : Colors.light.text;
+  const { addToast } = useToast();
+  const signupStore = useSignupStore();
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+
+  const {
+    control,
+    handleSubmit,
+    setValue,
+    formState: { errors },
+  } = useForm<LoginFormData>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: "",
+      password: "",
+    },
+  });
+
+  useEffect(() => {
+    const loadRememberedUser = async () => {
+      try {
+        const savedEmail = await AsyncStorage.getItem("remembered_email");
+        if (savedEmail) {
+          setValue("email", savedEmail);
+          setRememberMe(true);
+        }
+      } catch (error) {
+        console.log("Error loading remembered user:", error);
+      }
+    };
+    loadRememberedUser();
+  }, [setValue]);
+
+  const onSignIn = async (data: LoginFormData) => {
+    setIsLoading(true);
+    try {
+      // 1. Firebase Sign In
+      const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
+      const user = userCredential.user;
+      void rememberAuthMethod("password");
+
+      // Soft email-verification reminder. Non-blocking on purpose: hard-blocking
+      // would lock out the entire existing (pre-verification) user base. Sensitive
+      // actions can gate on emailVerified separately.
+      if (!user.emailVerified) {
+        addToast("Please verify your email — check your inbox for the link.", "info");
+      }
+
+      // 2. Handle "Remember Me"
+      if (rememberMe) {
+        await AsyncStorage.setItem("remembered_email", data.email);
+      } else {
+        await AsyncStorage.removeItem("remembered_email");
+      }
+
+      // 3. Check Profile Status (from the Worker / D1)
+      const userData: any = await readApi(`/read/users/${user.uid}`).catch(() => null);
+
+      if (isProfileComplete(userData)) {
+          markOnboardingComplete(user.uid, userData);
+          addToast("Login successful!", "success");
+          // Sanitised rather than used as given: this used to be
+          // `router.replace(decodeURIComponent(redirect))`, so an absolute url in the
+          // query string would navigate off-site from a genuine TopHunt login page.
+          router.replace(postAuthDestination(redirect) as any);
+      } else {
+          // Profile Incomplete or User Record missing
+          markOnboardingIncomplete(user.uid);
+          signupStore.reset();
+          signupStore.setMultiple({
+              ...onboardingDraftFor(user, userData),
+              email: data.email,
+              authProvider: 'email'
+          });
+          addToast("Please complete your profile.", "info");
+          router.replace("/auth/signup/fill-profile");
+      }
+
+    } catch (error: any) {
+      console.error("Login error:", error);
+      addToast(friendlyAuthError(error, "Login nahi ho paya. Dobara try karo."), "error");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSocialLogin = async (provider: string) => {
+    try {
+        if (provider === "Google") {
+            await SocialAuthService.googleLogin(router, addToast, redirect);
+        } else if (provider === "Facebook") {
+            await SocialAuthService.facebookLogin(router, addToast, redirect);
+        } else if (provider === "Apple") {
+            await SocialAuthService.appleLogin(router, addToast, redirect);
+        }
+    } catch (error) {
+        // Handled in service
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <ScrollView
+        contentContainerStyle={{ flexGrow: 1 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View
+          style={[
+            styles.container,
+            { backgroundColor, paddingTop: insets.top, paddingBottom: insets.bottom },
+          ]}
+        >
+          {/* Header */}
+          <View style={styles.header}>
+            <BackButton size={24} color={textColor} style={styles.backButton} />
+          </View>
+
+          <View style={styles.contentContainer}>
+            <Text style={[styles.title, { color: textColor, fontFamily: 'Urbanist-Bold' }]}>
+              Login to Your Account
+            </Text>
+
+            {/* Email Input */}
+            <FormInput
+              control={control}
+              name="email"
+              placeholder="Email"
+              icon={<New_Email_Icon width={20} height={20} />}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              errorMessage={errors.email?.message}
+            />
+
+            {/* Password Input */}
+            <FormInput
+              control={control}
+              name="password"
+              placeholder="Password"
+              secureTextEntry={!showPassword}
+              icon={<Lock_Icon width={20} height={20} />}
+              rightIcon={
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                  {showPassword ? <Eye_Open width={20} height={20} /> : <Eye_Close width={20} height={20} />}
+                </TouchableOpacity>
+              }
+              errorMessage={errors.password?.message}
+            />
+
+            {/* Remember Me */}
+            <View style={styles.rememberMeContainer}>
+              <TouchableOpacity
+                style={styles.checkboxContainer}
+                onPress={() => setRememberMe(!rememberMe)}
+              >
+                <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+                  {rememberMe && (
+                    <Checkmark_Icon width={14} height={14} color="#fff" />
+                  )}
+                </View>
+                <Text style={[styles.rememberMeText, { color: textColor, fontFamily: 'Urbanist-SemiBold' }]}>
+                  Remember Me
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Sign In Button */}
+            <PrimaryButton
+              title="Sign in"
+              onPress={handleSubmit(onSignIn)}
+              isLoading={isLoading}
+            />
+
+            {/* Forgot Password */}
+            <TouchableOpacity
+              onPress={() => router.push("/auth/forgot-password")}
+              style={styles.forgotPasswordButton}
+            >
+              <Text style={styles.forgotPasswordText}>Forgot the password?</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: "center",
+    alignItems: "flex-start",
+  },
+  contentContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 20,
+  },
+  title: {
+    fontSize: 32,
+    marginBottom: 40,
+  },
+  rememberMeContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center", 
+    marginBottom: 24,
+    marginTop: 8
+  },
+  checkboxContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#FF4D67",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  checkboxChecked: {
+    backgroundColor: "#FF4D67",
+  },
+  rememberMeText: {
+    fontSize: 16,
+  },
+  forgotPasswordButton: {
+    alignItems: "center",
+    marginBottom: 40,
+    marginTop: 20
+  },
+  forgotPasswordText: {
+    color: "#FF4D67",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  dividerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    marginBottom: 30,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    fontSize: 16,
+    fontWeight: "500",
+  },
+  socialButtonsContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 20,
+    marginBottom: 30,
+  },
+  socialIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  footerContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  footerText: {
+    fontSize: 14,
+  },
+  signupText: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#FF4D67",
+  },
+});
