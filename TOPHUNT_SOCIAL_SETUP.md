@@ -30,7 +30,25 @@ It must never touch the live TopHunt production app (`api.tophunt.in`, `tophunt-
 - `apps/admin-panel/.env.production`: `VITE_API_URL` points to the new Worker.
 - `.github/workflows`: `uptime.yml` and `backup-d1.yml` schedules disabled (manual run only); `media-domain-backfill.yml` and `blog-link-backfill.yml` removed (they rewrote live production data).
 
+## Cloudflare resources (created 2026-10-29)
+
+The owner chose to host these in the existing account `8357be8f…` (the live TopHunt account) instead of a new account, and plans to remove the old resources later. Only the `tophunt-social-*` resources below belong to this repo. Do not touch `tophunt-db`, `tophunt-media`, `tophunt-broadcast`, `tophunt-api-*` KV or the `tophunt-api` Worker.
+
+| Resource | Name | ID |
+|---|---|---|
+| D1 | `tophunt-social-db` | `2d7aafa4-59ec-4807-bdda-d6dbae01cdf0` |
+| KV (`OTP_KV`) | `tophunt-social-OTP_KV` | `88dd5525822b401b9f02e1e08863e3b0` |
+| KV (`CACHE_KV`) | `tophunt-social-CACHE_KV` | `f53ab0b88b924b56a4be36820ec50d6b` |
+| R2 | `tophunt-social-media` | - |
+| Queue | `tophunt-social-broadcast` | `7ddc419169f74f919b849925c0b8fad8` |
+| workers.dev subdomain | `weadown-in` | API host: `tophunt-social-api.weadown-in.workers.dev` |
+| Pages | `tophunt-social`, `tophunt-social-admin` | Not created yet: the API token lacks Cloudflare Pages permission |
+
+Rate-limit namespace IDs were moved to `7401`/`7403` (prod) and `7402`/`7404` (staging) because `7301`-`7304` came from the live repo and namespace IDs are shared account-wide.
+
 ## Placeholders to fill once the new Cloudflare account is connected
+
+Filled on 2026-10-29 except the `REPLACE_WITH_STAGING_*` values (no staging env created).
 
 | Placeholder | Where | Value |
 |---|---|---|

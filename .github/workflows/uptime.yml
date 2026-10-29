@@ -32,7 +32,7 @@ jobs:
     steps:
       - name: API deep health
         run: |
-          code=$(curl -sS -o health.json -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 10 https://REPLACE_WITH_API_HOST/health/deep || echo 000)
+          code=$(curl -sS -o health.json -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 10 https://tophunt-social-api.weadown-in.workers.dev/health/deep || echo 000)
           echo "HTTP $code"
           if [ "$code" != "200" ]; then
             # Names of failing checks only; the endpoint never returns secret values.
@@ -42,7 +42,7 @@ jobs:
           fi
       - name: Web app
         run: |
-          code=$(curl -sS -o index.html -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 10 https://REPLACE_WITH_WEB_HOST/ || echo 000)
+          code=$(curl -sS -o index.html -w '%{http_code}' --max-time 20 --retry 2 --retry-delay 10 https://tophunt-social.pages.dev/ || echo 000)
           echo "HTTP $code"
           if [ "$code" != "200" ] || ! grep -q '<div id="root"' index.html; then
             echo "::error::tophunt.in did not serve the app shell (HTTP $code)"

@@ -82,7 +82,7 @@ command = "node scripts/gen-migrations.mjs"
 [[d1_databases]]
 binding = "DB"
 database_name = "tophunt-social-db"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "2d7aafa4-59ec-4807-bdda-d6dbae01cdf0"
 migrations_dir = "migrations"
 
 # ---------------------------------------------------------------------------
@@ -116,11 +116,11 @@ binding = "IMAGES"
 # ---------------------------------------------------------------------------
 [[kv_namespaces]]
 binding = "OTP_KV"
-id = "REPLACE_WITH_OTP_KV_ID"
+id = "88dd5525822b401b9f02e1e08863e3b0"
 
 [[kv_namespaces]]
 binding = "CACHE_KV"
-id = "REPLACE_WITH_CACHE_KV_ID"
+id = "f53ab0b88b924b56a4be36820ec50d6b"
 
 # ---------------------------------------------------------------------------
 # Durable Object for real-time WebSocket push (chat, notifications, live votes)
@@ -154,14 +154,14 @@ class_name = "RateLimiter"
 # the Cloudflare account.
 [[ratelimits]]
 name = "GUEST_READ_LIMITER"
-namespace_id = "7301"
+namespace_id = "7401"
 simple = { limit = 1000, period = 60 }
 
 # Anonymous usage counters (src/routes/telemetry.ts `/events`): per-IP budget for
 # batches. The app sends one every few minutes, so 30/min only stops scripts.
 [[ratelimits]]
 name = "USAGE_LIMITER"
-namespace_id = "7303"
+namespace_id = "7403"
 simple = { limit = 30, period = 60 }
 
 # Workers Analytics Engine: anonymous usage counters (src/lib/usageEvents.ts).
@@ -345,12 +345,12 @@ class_name = "RateLimiter"
 
 [[env.staging.ratelimits]]
 name = "GUEST_READ_LIMITER"
-namespace_id = "7302"
+namespace_id = "7402"
 simple = { limit = 1000, period = 60 }
 
 [[env.staging.ratelimits]]
 name = "USAGE_LIMITER"
-namespace_id = "7304"
+namespace_id = "7404"
 simple = { limit = 30, period = 60 }
 
 [[env.staging.analytics_engine_datasets]]
@@ -387,7 +387,7 @@ FIREBASE_PROJECT_ID = "tophuntdpcontest-staging"
 # "tophunt-api-staging.workers.dev", which does not resolve — workers.dev hosts
 # are always `<worker>.<account-subdomain>.workers.dev`, so every staging upload
 # was handed back a dead url.
-R2_PUBLIC_BASE_URL = "https://tophunt-social-api-staging.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev/media"
+R2_PUBLIC_BASE_URL = "https://tophunt-social-api-staging.weadown-in.workers.dev/media"
 # Nothing to keep compatible on staging; its bucket is disposable.
 R2_LEGACY_BASE_URLS = ""
 # Cannot be enabled on a *.workers.dev host with a /media path prefix — see the
@@ -417,8 +417,8 @@ FIREBASE_PROJECT_ID = "tophuntdpcontest"
 # The read-only token is a SECRET, set separately with:
 #   wrangler secret put CF_ANALYTICS_TOKEN
 # Without the token the widget still shows table growth + storage (fail-open).
-CF_ACCOUNT_ID = "REPLACE_WITH_CF_ACCOUNT_ID"
-CF_D1_DATABASE_ID = "REPLACE_WITH_D1_ID"
+CF_ACCOUNT_ID = "8357be8f9dba5721b6b726faff763f0f"
+CF_D1_DATABASE_ID = "2d7aafa4-59ec-4807-bdda-d6dbae01cdf0"
 
 # Scale tier — how the Worker tunes itself for the Cloudflare FREE vs Workers PAID
 # plan. See src/lib/scale.ts and SCALE_TIER.md. Three values:
@@ -453,7 +453,7 @@ ANALYTICS_DATASET = "tophunt_social_events"
 #
 # Prerequisite: R2 -> bucket `tophunt-media` -> Settings -> Public access ->
 # Custom domain -> media.tophunt.in.
-R2_PUBLIC_BASE_URL = "https://tophunt-social-api.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev/media"
+R2_PUBLIC_BASE_URL = "https://tophunt-social-api.weadown-in.workers.dev/media"
 
 # Media bases this deployment ALSO owns, comma-separated.
 #
