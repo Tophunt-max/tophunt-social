@@ -44,7 +44,15 @@ The owner chose to host these in the existing account `8357be8f…` (the live To
 | workers.dev subdomain | `weadown-in` | API host: `tophunt-social-api.weadown-in.workers.dev` |
 | Pages | `tophunt-social`, `tophunt-social-admin` | Not created yet: the API token lacks Cloudflare Pages permission |
 
-First Worker deploy (2026-10-29): `tophunt-social-api.weadown-in.workers.dev` is up, 72 D1 migrations applied (`0000`-`0071`). **Cron triggers are NOT active**: the account is on Workers Free (5 cron triggers per account) and the live `tophunt-api` already uses 4. Either upgrade to Workers Paid or reduce the crons before relying on settlement, retention and monthly jobs.
+First Worker deploy (2026-10-29): `tophunt-social-api.weadown-in.workers.dev` is up, 72 D1 migrations applied (`0000`-`0071`). The account is on Workers Free (5 cron triggers per account), so on the owner's instruction the 4 cron triggers were **moved from the live `tophunt-api` to `tophunt-social-api`** (2026-10-29). The live Worker now has no scheduled jobs (settlement, payment reconciliation, retention, SEO audit, Hall of Fame). To restore them on the live Worker, remove them here first, then:
+
+```
+curl -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+  https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/tophunt-api/schedules \
+  -d '[{"cron":"*/10 * * * *"},{"cron":"0 * * * *"},{"cron":"0 */6 * * *"},{"cron":"0 0 1 * *"}]'
+```
+
+A `wrangler deploy` of the live repo will also try to re-add its crons and fail with the same limit error.
 
 Secrets set on the Worker: `SETTINGS_ENCRYPTION_KEY`, `ADMIN_PROXY_SECRET` (both freshly generated, not shared with the live app), `R2_BUCKET`, `R2_ACCOUNT_ID`.
 
