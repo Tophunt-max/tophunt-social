@@ -44,6 +44,10 @@ The owner chose to host these in the existing account `8357be8f…` (the live To
 | workers.dev subdomain | `weadown-in` | API host: `tophunt-social-api.weadown-in.workers.dev` |
 | Pages | `tophunt-social`, `tophunt-social-admin` | Not created yet: the API token lacks Cloudflare Pages permission |
 
+First Worker deploy (2026-10-29): `tophunt-social-api.weadown-in.workers.dev` is up, 72 D1 migrations applied (`0000`-`0071`). **Cron triggers are NOT active**: the account is on Workers Free (5 cron triggers per account) and the live `tophunt-api` already uses 4. Either upgrade to Workers Paid or reduce the crons before relying on settlement, retention and monthly jobs.
+
+Secrets set on the Worker: `SETTINGS_ENCRYPTION_KEY`, `ADMIN_PROXY_SECRET` (both freshly generated, not shared with the live app), `R2_BUCKET`, `R2_ACCOUNT_ID`.
+
 Rate-limit namespace IDs were moved to `7401`/`7403` (prod) and `7402`/`7404` (staging) because `7301`-`7304` came from the live repo and namespace IDs are shared account-wide.
 
 ## Placeholders to fill once the new Cloudflare account is connected
