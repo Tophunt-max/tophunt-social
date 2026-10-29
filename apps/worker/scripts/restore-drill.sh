@@ -24,19 +24,19 @@ for d in source restored; do
 done
 
 cd "$T/source"
-wr d1 migrations apply tophunt-db --local > "$T/migrate.log" 2>&1 || { tail -20 "$T/migrate.log"; exit 1; }
-wr d1 execute tophunt-db --local --command \
+wr d1 migrations apply tophunt-social-db --local > "$T/migrate.log" 2>&1 || { tail -20 "$T/migrate.log"; exit 1; }
+wr d1 execute tophunt-social-db --local --command \
   "INSERT INTO users (uid, username, created_at, updated_at) VALUES ('drill-u1','drill',1,1);
    INSERT INTO coin_transactions (id, uid, amount, type, created_at) VALUES ('drill-t1','drill-u1',5,'admin_adjustment',1);" > /dev/null
-wr d1 export tophunt-db --local --output="$T/dump.sql" > /dev/null
+wr d1 export tophunt-social-db --local --output="$T/dump.sql" > /dev/null
 echo "export: $(wc -c < "$T/dump.sql") bytes"
 
 cd "$T/restored"
 start=$(date +%s)
-wr d1 execute tophunt-db --local --file="$T/dump.sql" -y > "$T/restore.log" 2>&1 || { tail -20 "$T/restore.log"; exit 1; }
+wr d1 execute tophunt-social-db --local --file="$T/dump.sql" -y > "$T/restore.log" 2>&1 || { tail -20 "$T/restore.log"; exit 1; }
 echo "restore: $(( $(date +%s) - start ))s"
 
-count() { (cd "$T/$1" && wr d1 execute tophunt-db --local --json --command "$2" 2>/dev/null) | grep -o '"n": [0-9]*' | grep -o '[0-9]*'; }
+count() { (cd "$T/$1" && wr d1 execute tophunt-social-db --local --json --command "$2" 2>/dev/null) | grep -o '"n": [0-9]*' | grep -o '[0-9]*'; }
 fail=0
 for q in "SELECT COUNT(*) n FROM users" \
          "SELECT COUNT(*) n FROM coin_transactions" \

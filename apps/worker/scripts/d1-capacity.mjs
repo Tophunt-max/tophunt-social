@@ -5,7 +5,7 @@
  * One command to answer "how close are we to a Cloudflare free-tier wall, and
  * which one hits first?" — see CAPACITY_MONITORING.md for the full runbook.
  *
- *   node scripts/d1-capacity.mjs            # prod DB (tophunt-db)
+ *   node scripts/d1-capacity.mjs            # prod DB (tophunt-social-db)
  *   node scripts/d1-capacity.mjs <db-name>
  *
  * Requires wrangler auth (CLOUDFLARE_API_TOKEN in CI, or `wrangler login`).
@@ -24,7 +24,7 @@
  */
 import { execFileSync } from "node:child_process";
 
-const DB = process.argv[2] || "tophunt-db";
+const DB = process.argv[2] || "tophunt-social-db";
 
 // Free-tier daily caps (see CAPACITY_MONITORING.md §caps).
 const CAPS = {

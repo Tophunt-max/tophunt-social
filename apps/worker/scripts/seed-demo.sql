@@ -4,8 +4,8 @@
 -- is populated. Everything below is scoped to just these two demo users.
 --
 -- Usage (run from apps/worker):
---   Local DB:   npx wrangler d1 execute tophunt-db --local  --file=scripts/seed-demo.sql
---   Remote DB:  npx wrangler d1 execute tophunt-db --remote --file=scripts/seed-demo.sql
+--   Local DB:   npx wrangler d1 execute tophunt-social-db --local  --file=scripts/seed-demo.sql
+--   Remote DB:  npx wrangler d1 execute tophunt-social-db --remote --file=scripts/seed-demo.sql
 --
 -- Idempotent: re-running deletes the previous demo rows first, so it never
 -- creates duplicates. All demo ids are prefixed with "demo-".

@@ -21,7 +21,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
-const DB = process.env.D1_DB || "tophunt-db";
+const DB = process.env.D1_DB || "tophunt-social-db";
 
 /** Collapse a statement to its shape. Exported for tests. */
 export function queryFamily(sql) {

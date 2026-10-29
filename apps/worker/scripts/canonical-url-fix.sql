@@ -38,17 +38,17 @@
 --   cd apps/worker
 --
 --   # 1. Count what is about to change (read-only).
---   npx wrangler d1 execute tophunt-db --remote --file=scripts/canonical-url-report.sql
+--   npx wrangler d1 execute tophunt-social-db --remote --file=scripts/canonical-url-report.sql
 --
 --   # 2. Repair.
---   npx wrangler d1 execute tophunt-db --remote --file=scripts/canonical-url-fix.sql
+--   npx wrangler d1 execute tophunt-social-db --remote --file=scripts/canonical-url-fix.sql
 --
 --   # 3. Confirm doubled_blog_prefix is now 0.
---   npx wrangler d1 execute tophunt-db --remote --file=scripts/canonical-url-report.sql
+--   npx wrangler d1 execute tophunt-social-db --remote --file=scripts/canonical-url-report.sql
 --
 -- Idempotent: each statement is guarded by a LIKE, so a second run touches no
 -- rows. Safe to re-run after a partial failure. Rollback is D1 Time Travel
--- (`npx wrangler d1 time-travel restore tophunt-db --bookmark=<b>`), and nothing
+-- (`npx wrangler d1 time-travel restore tophunt-social-db --bookmark=<b>`), and nothing
 -- user-visible depends on this either way — the edge Worker keeps emitting the
 -- collapsed form regardless.
 --

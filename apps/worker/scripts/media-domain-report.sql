@@ -4,7 +4,7 @@
 -- Read-only. Run this BEFORE and AFTER media-domain-backfill.sql:
 --
 --   cd apps/worker
---   npx wrangler d1 execute tophunt-db --remote --file=scripts/media-domain-report.sql
+--   npx wrangler d1 execute tophunt-social-db --remote --file=scripts/media-domain-report.sql
 --
 -- After a successful backfill every `remaining` value must be 0. A non-zero row
 -- means that column still holds urls on the legacy host — which is not broken
