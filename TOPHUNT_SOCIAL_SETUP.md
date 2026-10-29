@@ -56,6 +56,11 @@ A `wrangler deploy` of the live repo will also try to re-add its crons and fail 
 
 Production domains (attached by the owner on 2026-10-29, moved off the live resources): `api.tophunt.in` → Worker `tophunt-social-api`, `tophunt.in` → Pages `tophunt-social`, `admin.tophunt.in` → Pages `tophunt-social-admin`, `media.tophunt.in` → R2 `tophunt-social-media`. Config, CSP and CORS now use these hosts; `tophunt-social.pages.dev` 301s to `tophunt.in`. `MEDIA_TRANSFORMATIONS` stays `"false"` until the `cf-resized` check in `wrangler.toml` passes on a real image in the new bucket.
 
+Data copy from the live resources (2026-10-29, owner's request):
+- D1: all rows from `tophunt-db` copied into `tophunt-social-db` (row counts match per table), except `integration_secrets` (encrypted with the live app's key, unreadable here; re-enter in admin → Integrations), `cron_runs` and `error_logs` (old logs). Then `scripts/media-domain-backfill.sql` was applied, so stored media URLs now use `https://media.tophunt.in/`. Note: that script's `LIKE` patterns exceed D1's 50-char pattern limit; it was run with `instr()` instead, and the `blog_posts.content` update was run per row. Rollback bookmark from before the import: `00000009-00000000-00005113-cd0a7c36bd602c303119207ed8979a77`.
+- R2: all 624 objects (50.35 MB) copied from `tophunt-media` to `tophunt-social-media` with a temporary Worker (deleted afterwards). A second pass reported 624 identical objects.
+- Not copied: Durable Object state (chat message bodies in `CHAT_ARCHIVE`, live vote counters) and KV (OTP/cache, temporary).
+
 Secrets set on the Worker: `SETTINGS_ENCRYPTION_KEY`, `ADMIN_PROXY_SECRET` (both freshly generated, not shared with the live app), `R2_BUCKET`, `R2_ACCOUNT_ID`.
 
 Rate-limit namespace IDs were moved to `7401`/`7403` (prod) and `7402`/`7404` (staging) because `7301`-`7304` came from the live repo and namespace IDs are shared account-wide.
