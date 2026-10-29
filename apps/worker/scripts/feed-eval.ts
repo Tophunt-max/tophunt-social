@@ -38,7 +38,7 @@ function query<T = any>(sql: string, remote: boolean): T[] {
   if (!/^\s*select\b/i.test(sql) || /;\s*\S/.test(sql)) throw new Error(`refusing a non-SELECT statement: ${sql.slice(0, 60)}`);
   const out = execFileSync(
     "npx",
-    ["wrangler", "d1", "execute", "tophunt-db", remote ? "--remote" : "--local", "--json", "--command", sql],
+    ["wrangler", "d1", "execute", "tophunt-social-db", remote ? "--remote" : "--local", "--json", "--command", sql],
     { encoding: "utf8", maxBuffer: 512 * 1024 * 1024, stdio: ["ignore", "pipe", "inherit"] },
   );
   const parsed = JSON.parse(out);

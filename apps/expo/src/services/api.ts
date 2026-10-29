@@ -35,7 +35,7 @@ import { emitToast } from '@/src/lib/toastBridge';
 //
 // This is also the realtime WebSocket origin (src/services/realtime.ts rewrites
 // http -> ws), so it must be the API host — never the web host.
-const FALLBACK_API_URL = 'https://tophunt-social-api.REPLACE_WITH_WORKERS_SUBDOMAIN.workers.dev';
+const FALLBACK_API_URL = 'https://api.tophunt.in';
 
 if (!process.env.EXPO_PUBLIC_API_URL && __DEV__) {
   console.warn(

@@ -4,7 +4,7 @@
 -- Read-only. Run before and after canonical-url-fix.sql:
 --
 --   cd apps/worker
---   npx wrangler d1 execute tophunt-db --remote --file=scripts/canonical-url-report.sql
+--   npx wrangler d1 execute tophunt-social-db --remote --file=scripts/canonical-url-report.sql
 --
 -- After the fix, `doubled_blog_prefix` must be 0. The other rows are context: a
 -- canonical on a foreign host or a shape this app has no route for is equally

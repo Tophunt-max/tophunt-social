@@ -17,9 +17,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate": "wrangler d1 migrations apply tophunt-db --remote",
-    "db:migrate:local": "wrangler d1 migrations apply tophunt-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply tophunt-db --remote",
+    "migrate": "wrangler d1 migrations apply tophunt-social-db --remote",
+    "db:migrate:local": "wrangler d1 migrations apply tophunt-social-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply tophunt-social-db --remote",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {

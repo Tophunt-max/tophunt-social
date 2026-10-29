@@ -77,7 +77,7 @@ The rule is in `lib/privateAccount.ts`. Only an **approved** follow (a `follows`
 - **`GUEST_READ_LIMITER` binding** (wrangler `[[ratelimits]]`): 1000 requests/min per IP per colo on every `optionalAuth` read except search and share-image, which keep their own limits.
   - Applied after `optionalAuth`, so a bogus token still counts as a guest.
   - No Durable Object request per check. Fails open if the binding is missing.
-  - The binding's namespace ids (7301 prod, 7302 staging) must be unique in the Cloudflare account.
+  - The binding's namespace ids (7401 prod, 7402 staging; 7301/7302 came from the live TopHunt repo, which deploys to the same account) must be unique in the Cloudflare account.
 - **Recommended edge backstop (dashboard, not in code):** a WAF rate-limiting rule.
   - Match: `starts_with(http.request.uri.path, "/read/users/")` and no `Authorization` header.
   - Limit: about 1500 per minute per IP, action Managed Challenge.

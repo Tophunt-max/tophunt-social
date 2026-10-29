@@ -26,20 +26,20 @@
 --   curl -I https://media.tophunt.in/<some-existing-key>      # expect 200
 --
 --   # 1. Count what is about to change (read-only).
---   npx wrangler d1 execute tophunt-db --remote --file=scripts/media-domain-report.sql
+--   npx wrangler d1 execute tophunt-social-db --remote --file=scripts/media-domain-report.sql
 --
 --   # 2. Rewrite.
---   npx wrangler d1 execute tophunt-db --remote --file=scripts/media-domain-backfill.sql
+--   npx wrangler d1 execute tophunt-social-db --remote --file=scripts/media-domain-backfill.sql
 --
 --   # 3. Confirm every count is now 0.
---   npx wrangler d1 execute tophunt-db --remote --file=scripts/media-domain-report.sql
+--   npx wrangler d1 execute tophunt-social-db --remote --file=scripts/media-domain-report.sql
 --
 -- Idempotent: every statement is guarded by a LIKE, so a second run touches no
 -- rows. Safe to re-run after a partial failure.
 --
 -- Rollback: D1 Time Travel covers the last 30 days —
---   npx wrangler d1 time-travel info tophunt-db          (before running, note the bookmark)
---   npx wrangler d1 time-travel restore tophunt-db --bookmark=<bookmark>
+--   npx wrangler d1 time-travel info tophunt-social-db          (before running, note the bookmark)
+--   npx wrangler d1 time-travel restore tophunt-social-db --bookmark=<bookmark>
 -- Nothing user-visible breaks either way: `/media/*` keeps serving the old urls
 -- and R2_LEGACY_BASE_URLS keeps deletes correct on both hosts.
 --

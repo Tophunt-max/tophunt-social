@@ -88,8 +88,8 @@ export const CONTENT_SECURITY_POLICY =
   // Encoded video (Qencode output) is served from media.tophunt.in above and
   // uploads go to the API origin, so neither needs another host. hls.js fetches
   // playlists + segments over XHR, which is connect-src, not media-src.
-  'https://tophunt-api.weadown-in.workers.dev wss://tophunt-api.weadown-in.workers.dev ' +
-  'https://tophunt-api-staging.weadown-in.workers.dev wss://tophunt-api-staging.weadown-in.workers.dev ' +
+  'https://tophunt-social-api.weadown-in.workers.dev wss://tophunt-social-api.weadown-in.workers.dev ' +
+  'https://tophunt-social-api-staging.weadown-in.workers.dev wss://tophunt-social-api-staging.weadown-in.workers.dev ' +
   'https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com ' +
   'https://securetoken.googleapis.com https://identitytoolkit.googleapis.com ' +
   'https://fcmregistrations.googleapis.com https://lumberjack.razorpay.com https://api.razorpay.com ' +
@@ -391,6 +391,7 @@ const RESERVED = new Set([
 const CANONICAL_ALIASES = new Set([
   'tophuntdpcontest-89t.pages.dev',
   'tophuntdpcontest.pages.dev',
+  'tophunt-social.pages.dev',
 ]);
 
 /** The alias target for a path, tolerating a trailing slash. Null when none. */

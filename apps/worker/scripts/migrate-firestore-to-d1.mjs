@@ -5,7 +5,7 @@
  * Reads every collection with the Firebase Admin SDK and emits a SQL file of
  * INSERTs matching apps/worker/src/db/schema.ts. Load it into D1 with:
  *
- *   wrangler d1 execute tophunt-db --remote --file=./d1-seed.sql
+ *   wrangler d1 execute tophunt-social-db --remote --file=./d1-seed.sql
  *
  * Prereqs (run from apps/worker):
  *   npm i -D firebase-admin
