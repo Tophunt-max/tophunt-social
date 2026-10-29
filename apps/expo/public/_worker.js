@@ -27,15 +27,15 @@
  *
  * Config (optional Pages env vars — the defaults below are the production
  * values, so a Pages project with neither var set is already correct):
- *   - SEO_API_BASE     Worker API base (default: https://tophunt-social-api.weadown-in.workers.dev)
- *   - SEO_SITE_ORIGIN  Public origin  (default: https://tophunt-social.pages.dev)
+ *   - SEO_API_BASE     Worker API base (default: https://api.tophunt.in)
+ *   - SEO_SITE_ORIGIN  Public origin  (default: https://tophunt.in)
  *
  * Override them on a staging/preview Pages project so its sitemap and canonical
  * tags do not advertise the production origin.
  */
 
-const DEFAULT_API_BASE = 'https://tophunt-social-api.weadown-in.workers.dev';
-const DEFAULT_SITE_ORIGIN = 'https://tophunt-social.pages.dev';
+const DEFAULT_API_BASE = 'https://api.tophunt.in';
+const DEFAULT_SITE_ORIGIN = 'https://tophunt.in';
 const SITE_NAME = 'TopHunt';
 const DEFAULT_DESCRIPTION =
   'TopHunt — contests, quizzes, giveaways and the latest offers, answers and updates.';
@@ -57,10 +57,10 @@ const DEFAULT_DESCRIPTION =
 // fails the build if they drift.
 //
 // connect-src notes (the list that the domain cutover actually changes):
-//  - the API host is required as `wss://` as well as `https://`. Realtime push
+//  - `wss://api.tophunt.in` is required as well as `https://`. Realtime push
 //    (src/services/realtime.ts) builds its socket url by swapping the scheme on
 //    the API base, and CSP matches per-scheme: the https entry does not cover it.
-//  - the API host also serves media (`<worker>/media`) and is listed
+//  - `https://media.tophunt.in` and the legacy `<worker>/media` host are here
 //    because media is FETCHED, not just displayed: share/download and the web VS
 //    card capture call fetch() on an image url, which connect-src governs.
 //  - Hosts are pinned exactly instead of `https://*.workers.dev`, which had
@@ -84,10 +84,11 @@ export const CONTENT_SECURITY_POLICY =
   "img-src 'self' data: blob: https:; " +
   "media-src 'self' blob: https:; " +
   "font-src 'self' data:; " +
-  "connect-src 'self' blob: https://tophunt-social-api.weadown-in.workers.dev wss://tophunt-social-api.weadown-in.workers.dev " +
-  // Encoded video (Qencode output) is served from the API's /media path above and
+  "connect-src 'self' blob: https://api.tophunt.in wss://api.tophunt.in https://media.tophunt.in " +
+  // Encoded video (Qencode output) is served from media.tophunt.in above and
   // uploads go to the API origin, so neither needs another host. hls.js fetches
   // playlists + segments over XHR, which is connect-src, not media-src.
+  'https://tophunt-social-api.weadown-in.workers.dev wss://tophunt-social-api.weadown-in.workers.dev ' +
   'https://tophunt-social-api-staging.weadown-in.workers.dev wss://tophunt-social-api-staging.weadown-in.workers.dev ' +
   'https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com ' +
   'https://securetoken.googleapis.com https://identitytoolkit.googleapis.com ' +
@@ -390,6 +391,7 @@ const RESERVED = new Set([
 const CANONICAL_ALIASES = new Set([
   'tophuntdpcontest-89t.pages.dev',
   'tophuntdpcontest.pages.dev',
+  'tophunt-social.pages.dev',
 ]);
 
 /** The alias target for a path, tolerating a trailing slash. Null when none. */

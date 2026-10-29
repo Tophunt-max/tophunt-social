@@ -9,7 +9,7 @@ import path from "path";
 //
 // The fallback is the production API on purpose: a build with no VITE_API_URL
 // should reach a working backend rather than a hostname that no longer resolves.
-const WORKER_URL = process.env.VITE_API_URL ?? "https://tophunt-social-api.weadown-in.workers.dev";
+const WORKER_URL = process.env.VITE_API_URL ?? "https://api.tophunt.in";
 
 // Identifies this build, so a tab left open across a deploy can tell it is
 // stale (src/lib/updateCheck.ts). The commit on Cloudflare Pages; otherwise a

@@ -26,8 +26,8 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://tophunt-social-api.weadown-in.workers.dev",
-        "EXPO_PUBLIC_SHARE_ORIGIN": "https://tophunt-social.pages.dev",
+        "EXPO_PUBLIC_API_URL": "https://api.tophunt.in",
+        "EXPO_PUBLIC_SHARE_ORIGIN": "https://tophunt.in",
         "EXPO_PUBLIC_ENV": "production"
       }
     }

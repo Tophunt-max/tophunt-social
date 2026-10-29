@@ -49,9 +49,8 @@ workers_dev = true
 # side effect of a compatibility fix.
 preview_urls = false
 
-# tophunt-social: no custom domain yet. The API is served on workers.dev until a
-# domain is chosen. Add it back as: routes = [{ pattern = "<api-host>", custom_domain = true }]
-# routes = [{ pattern = "api.tophunt.in", custom_domain = true }]
+# tophunt-social: api.tophunt.in was attached to this Worker on 2026-10-29.
+routes = [{ pattern = "api.tophunt.in", custom_domain = true }]
 
 # Pin the bundler to this package's own tsconfig. Without this, esbuild walks up
 # the monorepo and picks up the root tsconfig.json (which extends
@@ -452,8 +451,8 @@ ANALYTICS_DATASET = "tophunt_social_events"
 # thing `/cdn-cgi/image/` needs in order to resolve at all.
 #
 # Prerequisite: R2 -> bucket `tophunt-media` -> Settings -> Public access ->
-# Custom domain -> media.tophunt.in.
-R2_PUBLIC_BASE_URL = "https://tophunt-social-api.weadown-in.workers.dev/media"
+# Custom domain -> media.tophunt.in. (tophunt-social: bucket `tophunt-social-media`.)
+R2_PUBLIC_BASE_URL = "https://media.tophunt.in"
 
 # Media bases this deployment ALSO owns, comma-separated.
 #
@@ -468,7 +467,7 @@ R2_PUBLIC_BASE_URL = "https://tophunt-social-api.weadown-in.workers.dev/media"
 # `contestBannerKeyFromPublicUrl` and `vsImageKeyFromPublicUrl` correct for both
 # hosts. Keep it until `scripts/media-domain-backfill.sql` has been run AND no
 # app build old enough to have written such a url is still in the wild.
-R2_LEGACY_BASE_URLS = ""
+R2_LEGACY_BASE_URLS = "https://tophunt-social-api.weadown-in.workers.dev/media"
 
 # Cloudflare Transformations (Image Resizing) switch for the media origin.
 #
@@ -586,4 +585,4 @@ KV_WRITES_DISABLED = "false"
 #
 # For local development, override this in `.dev.vars` (which takes precedence
 # over these vars under `wrangler dev`) rather than adding localhost here.
-ALLOWED_ORIGINS = "https://tophunt-social.pages.dev,https://tophunt-social-admin.pages.dev"
+ALLOWED_ORIGINS = "https://tophunt.in,https://admin.tophunt.in"
