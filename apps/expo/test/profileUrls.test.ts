@@ -33,7 +33,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { get, stubApi, json, fakeEnv } from './helpers/edgeWorker';
 
-const ORIGIN = 'https://tophunt.in';
+const ORIGIN = 'https://tophunt-social.pages.dev';
 const UID = 'ykQFaQ6urJV2t7sMqsIgEFu5vUE2';
 
 const PROFILE = {

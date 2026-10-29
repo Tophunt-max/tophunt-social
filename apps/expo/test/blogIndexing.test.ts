@@ -30,7 +30,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { get, stubApi, json, fakeEnv } from './helpers/edgeWorker';
 
-const ORIGIN = 'https://tophunt.in';
+const ORIGIN = 'https://tophunt-social.pages.dev';
 const SLUG = 'amazon-quiz-answers-today';
 
 const post = (overrides: Record<string, unknown> = {}) => ({
@@ -298,7 +298,7 @@ describe('internal linking', () => {
   it('gives /blog crawlable links, which it had none of', async () => {
     stub({ ...API.archive(archivePayload({ count: 12 })) });
     const html = await head(await get(`${ORIGIN}/blog`));
-    const postLinks = hrefsOf(html).filter((h) => /^https:\/\/tophunt\.in\/post-\d+$/.test(h));
+    const postLinks = hrefsOf(html).filter((h) => /^https:\/\/tophunt-social\.pages\.dev\/post-\d+$/.test(h));
     expect(postLinks.length).toBe(12);
     expect(html).toContain(`href="${ORIGIN}/blog/archive"`);
   });
@@ -316,7 +316,7 @@ describe('/blog/archive', () => {
     expect(res.status).toBe(200);
     expect(robotsOf(html)).toBe('index, follow');
     expect(canonicalOf(html)).toBe(`${ORIGIN}/blog/archive`);
-    expect(hrefsOf(html).filter((h) => /^https:\/\/tophunt\.in\/post-\d+$/.test(h)).length).toBe(100);
+    expect(hrefsOf(html).filter((h) => /^https:\/\/tophunt-social\.pages\.dev\/post-\d+$/.test(h)).length).toBe(100);
     // No `rel=prev` on the first page, and a `rel=next` because there are 3.
     expect(html).not.toContain('rel="prev"');
     expect(html).toContain(`<link rel="next" href="${ORIGIN}/blog/archive/page/2"`);
@@ -399,8 +399,8 @@ describe('/sitemap.xml', () => {
   it('emits post urls with no trailing slash and no /blog/ prefix', async () => {
     const xml = await sitemapOf(3);
     expect(xml).toContain(`<loc>${ORIGIN}/post-0</loc>`);
-    expect(xml).not.toMatch(/<loc>https:\/\/tophunt\.in\/blog\/post-/);
-    expect(xml).not.toMatch(/<loc>https:\/\/tophunt\.in\/post-\d+\/<\/loc>/);
+    expect(xml).not.toMatch(/<loc>https:\/\/tophunt-social\.pages\.dev\/blog\/post-/);
+    expect(xml).not.toMatch(/<loc>https:\/\/tophunt-social\.pages\.dev\/post-\d+\/<\/loc>/);
   });
 
   it('still serves valid XML when the categories call fails', async () => {
@@ -410,7 +410,7 @@ describe('/sitemap.xml', () => {
     });
     const res = await get(`${ORIGIN}/sitemap.xml`);
     expect(res.headers.get('content-type')).toContain('xml');
-    expect(await res.text()).toContain('<loc>https://tophunt.in/a</loc>');
+    expect(await res.text()).toContain('<loc>https://tophunt-social.pages.dev/a</loc>');
   });
 });
 

@@ -22,7 +22,7 @@ const B = 'https://media.tophunt.in/contests/2026/10/bob.jpg';
 
 async function preview(match: any) {
   restore = stubApi({ '/read/matches/*': () => json(match) });
-  const res = await get('https://tophunt.in/battle/m1');
+  const res = await get('https://tophunt-social.pages.dev/battle/m1');
   return res.text();
 }
 
@@ -64,7 +64,7 @@ describe('battle link preview image', () => {
 describe('battle RESULT link preview', () => {
   async function resultPreview(match: any) {
     restore = stubApi({ '/read/matches/*': () => json(match) });
-    const res = await get('https://tophunt.in/battle/m1/result');
+    const res = await get('https://tophunt-social.pages.dev/battle/m1/result');
     return res.text();
   }
   const base = {
@@ -76,7 +76,7 @@ describe('battle RESULT link preview', () => {
     const html = await resultPreview({ ...base, status: 'completed', winnerUid: 'a' });
     expect(html).toContain('@alice won');
     expect(html).toContain('12 votes');
-    expect(html).toContain('https://tophunt.in/battle/m1/result');
+    expect(html).toContain('https://tophunt-social.pages.dev/battle/m1/result');
     expect(ogImage(html)).toBe(CARD);
   });
 
