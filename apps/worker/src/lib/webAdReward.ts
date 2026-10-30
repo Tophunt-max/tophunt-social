@@ -25,7 +25,7 @@
 import type { Env } from "../types";
 import { httpsError } from "./http";
 import { getAppConfig } from "./settings";
-import { parseMonetizationConfig, webRewardedReady } from "./monetizationConfig";
+import { parseMonetizationConfig, webRewardedReady, webRewardedUnit } from "./monetizationConfig";
 import { getSettings, rewardDayNumber, rewardDayStart } from "./gamification";
 import { assertUnderFreeDiamondCap, dailyFreeLimitError, economyConfig, freeDiamondCapGate, overFreeDiamondCap } from "./economyLimits";
 import { FREE_REWARDS_EXHAUSTED, freeRewardBudgetStatements, freeRewardsBudgetId } from "./promoBudget";
@@ -108,7 +108,7 @@ async function webAdContext(env: Env, uid: string) {
     }
   }
   const offset = (await getSettings(env)).dayResetOffsetMinutes;
-  return { cfg, w, offset };
+  return { cfg, w, offset, unit: webRewardedUnit(m) };
 }
 
 /** Paid web ad views today for `uid` (same reward day as the other free rewards). */
@@ -121,7 +121,7 @@ export async function webAdsWatchedToday(env: Env, uid: string, day: number): Pr
 
 /** `startWebAd`: a signed watch token, refused when today's cap is already used. */
 export async function startWebAd(env: Env, uid: string, ts: number) {
-  const { w, offset } = await webAdContext(env, uid);
+  const { w, offset, unit } = await webAdContext(env, uid);
   const day = rewardDayNumber(ts, offset);
   const watched = await webAdsWatchedToday(env, uid, day);
   if (watched >= w.dailyCap) throw httpsError("resource-exhausted", "Aaj ke saare ads ho gaye. Kal phir aao!");
@@ -129,7 +129,7 @@ export async function startWebAd(env: Env, uid: string, ts: number) {
   const token = await mintToken(env, { u: uid, n: randomNonce(), i: ts, w: minWatchMs, e: ts + WEB_AD_TOKEN_TTL_MS });
   return {
     token,
-    adUnitPath: w.adUnitPath,
+    adUnitPath: unit,
     rewardDiamonds: w.rewardDiamonds,
     minWatchSec: w.minWatchSec,
     claimableAt: ts + minWatchMs,

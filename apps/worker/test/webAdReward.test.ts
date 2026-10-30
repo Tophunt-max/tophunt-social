@@ -176,20 +176,4 @@ describe('web rewarded ads', () => {
     expect(publicMonetizationConfig({ monetization: WEB_ON }).ads.web).toMatchObject({ enabled: true, adUnitPath: UNIT, rewardDiamonds: 2 });
     expect(publicMonetizationConfig({ monetization: { ads: { enabled: true, web: { enabled: true } } } }).ads.web.enabled).toBe(false);
   });
-
-  it('validates and exposes the web display block', () => {
-    expect(() => validateMonetizationPatch({ ads: { webDisplay: { adUnitPath: 'nope' } } })).toThrow();
-    expect(() => validateMonetizationPatch({ ads: { webDisplay: { placements: { feed: true } } } })).toThrow();
-    expect(() => validateMonetizationPatch({ ads: { webDisplay: { enabled: true, adUnitPath: '/1234567/tophunt_display', placements: { battlePage: true, resultPage: false } } } })).not.toThrow();
-    expect(parseMonetizationConfig({}).ads.webDisplay).toEqual({ enabled: false, adUnitPath: '', placements: { battlePage: true, resultPage: true } });
-    const on = { ads: { enabled: true, webDisplay: { enabled: true, adUnitPath: '/1234567/tophunt_display', placements: { resultPage: false } } } };
-    expect(publicMonetizationConfig({ monetization: on }).ads.webDisplay).toEqual({
-      enabled: true,
-      adUnitPath: '/1234567/tophunt_display',
-      placements: { battlePage: true, resultPage: false },
-    });
-    // No unit, or ads off: off.
-    expect(publicMonetizationConfig({ monetization: { ads: { enabled: true, webDisplay: { enabled: true } } } }).ads.webDisplay.enabled).toBe(false);
-    expect(publicMonetizationConfig({ monetization: { ads: { enabled: false, webDisplay: on.ads.webDisplay } } }).ads.webDisplay.enabled).toBe(false);
-  });
 });

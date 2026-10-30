@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,9 @@ import { Ionicons } from '@/src/lib/icons';
 import { BackButton } from '@/src/components/ui/BackButton';
 import { BlogSkeleton } from '@/src/components/skeletons/BlogSkeleton';
 import { useRouter } from 'expo-router';
+import { AdSlot } from '@/src/ads/AdSlot';
+import { useAdPlacement } from '@/src/ads/placements';
+import { interleaveAdRows, isAdSlotRow, type AdSlotRow } from '@/src/lib/adSlots';
 import { blogService, BlogPost, BlogCategory } from '@/src/services/blog/blogService';
 import { Colors } from '@/constants/theme';
 import { Header } from '@/src/components/home/Header';
@@ -127,11 +130,22 @@ export default function BlogListScreen() {
     return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
+  // Ad platform rows between articles (Monetization → Ad platform → Blog list).
+  const listAd = useAdPlacement('blog_list');
+  const listRows = useMemo(() => interleaveAdRows(posts, 'blog_list', listAd?.rules ?? null), [posts, listAd]);
+
   const openPost = (post: BlogPost) => {
     router.push({ pathname: '/blog/[slug]', params: { slug: post.slug } });
   };
 
-  const renderItem = ({ item, index }: { item: BlogPost; index: number }) => {
+  const renderItem = ({ item, index }: { item: BlogPost | AdSlotRow; index: number }) => {
+    if (isAdSlotRow(item)) {
+      return (
+        <View style={{ paddingHorizontal: 16 }}>
+          <AdSlot slot="blog_list" index={item.index} isDark={isDark} />
+        </View>
+      );
+    }
     // First post gets a larger "featured" treatment.
     const featured = index === 0 && !activeCategory;
     return (
@@ -216,7 +230,7 @@ export default function BlogListScreen() {
         </>
       ) : (
         <FlatList
-          data={posts}
+          data={listRows}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           ListHeaderComponent={renderHeader}

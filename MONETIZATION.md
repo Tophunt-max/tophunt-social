@@ -217,15 +217,52 @@ The web CSP (`public/_headers` and `public/_worker.js`) allowlists Google's ad h
 nonce-based strict CSP for GPT, so a new Google host can be blocked; watch the browser console for CSP
 violations after enabling.
 
-### Display ads on shared battle pages (web)
+## Ad platform (admin-managed networks, placements, waterfall)
 
-`monetization.ads.webDisplay` {enabled, adUnitPath, placements {battlePage, resultPage}} shows one labelled
-Google Ad Manager display slot (`apps/expo/src/components/ads/WebDisplayAd.tsx`) on the pages a shared battle
-link opens: `/battle/<id>` (below the battle card and its vote buttons) and `/battle/<id>/result` (below the
-winner card, share buttons and prize). Web / PWA only; guests see it too. It is never part of the VS or winner
-image that gets shared (those are captured from the card alone). The slot reserves 250 px while loading and
-collapses when there is no ad. Needs "Ads enabled" and a display ad unit path; no deploy switch, since nothing is
-paid.
+Admin → Monetization → **Ad platform**. Stored as `appConfig.monetization.adPlatform`
+(`apps/worker/src/lib/adPlatform.ts`), served to the app in `/read/app-config`, used by `apps/expo/src/ads/`.
+
+**Networks** (max 20): Google AdMob (Android / iOS), Google Ad Manager (web and apps; AdX demand is set up
+inside Ad Manager), AdSense (web, needs the `ca-pub-` id) and House ads (approved sponsored campaigns). Each
+has on/off, platforms and **test mode** (Google's published test ads, never real ones).
+
+**Placements**: one per slot the app has in code. The panel can switch a slot on per platform and configure
+it, but cannot put an ad on a screen without a slot. Login, signup, checkout, chat, uploads, settings and the
+area next to vote buttons have no slot on purpose.
+
+| Slot | Where | Formats |
+|---|---|---|
+| `home_feed` | Between battles (For You) | native, banner |
+| `explore_grid` | Explore → See all, between tile rows | native, banner |
+| `battle_page` | Shared battle page, below the card | banner, native |
+| `result_page` | Result page, below winner card / share / prize | banner, native |
+| `blog_list` | Between blog articles | native, banner |
+| `blog_article` | After the article text | banner, native |
+| `leaderboard` | After the top 10 | banner, native |
+| `earn_rewarded` | Earn page, watch & earn | rewarded |
+| `contest_join_rewarded` | Contest join when Diamonds are short | rewarded |
+| `result_exit_interstitial` | Leaving the result page (apps only) | interstitial |
+
+Per placement: format, platforms, **waterfall** (up to 6 networks, each with its unit per platform and a
+timeout), first position and interval (lists), max per session / per day, seconds between full-screen ads,
+guests on/off, no ads for new accounts for N days, start / end dates.
+
+**Waterfall.** The app tries the first network; on no fill, error or timeout it tries the next. House ads are
+the usual last step; when nothing fills, the slot collapses. Interstitials on leaving a page are shown only
+if already preloaded, so nobody waits for an ad.
+
+**Rewards** are never paid by the panel config. Apps: AdMob rewarded with SSV (amount and cap in Ads &
+rewards → Rewarded ads). Web: Ad Manager rewarded through the watch-token flow below. Rewarded slots accept
+AdMob in the apps and Ad Manager on the web only.
+
+**ads.txt / app-ads.txt**: entered in the panel, served at `https://tophunt.in/ads.txt` and `/app-ads.txt`
+by the web edge worker (`public/_worker.js` → API `/read/ads-txt`).
+
+**Reports**: ad events (request, fill, impression, click, fail, reward_complete) are counted per slot,
+network id and platform in `ad_event_counters`; the Ads & rewards tab shows them with fill rate.
+
+**Apps**: need a build with the AdMob SDK (APP_RELEASE.md). Consent runs first (Google UMP), then the SDK
+starts. Native-format slots render as a medium rectangle banner in the apps.
 
 ### Measurement
 

@@ -16,6 +16,7 @@ import { newId } from "../lib/ids";
 import { getAppConfig } from "../lib/settings";
 import { MONETIZATION_DEFAULTS, parseMonetizationConfig, providerReady } from "../lib/monetizationConfig";
 import { adsReport, importRevenueRows, utcDay } from "../lib/adMetrics";
+import { adPlatformRegistry } from "../lib/adPlatform";
 import { GIFT_ID_RE, toGift, validateGiftInput } from "../lib/gifts";
 import { refundStorePurchase, validateListingInput } from "../lib/store";
 import {
@@ -112,6 +113,8 @@ export function registerMonetizationRoutes(
       unverifiedClientRewards: (c.env as any).ALLOW_UNVERIFIED_AD_REWARDS === "true",
       // Web rewarded ads pay only when this deploy switch is on (lib/webAdReward.ts).
       webAdRewardsAllowed: (c.env as any).ALLOW_WEB_AD_REWARDS === "true",
+      // Slots the app has, network types and limits, for the Ad platform editor.
+      adPlatformRegistry: adPlatformRegistry(),
     });
   });
 

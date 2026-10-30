@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,8 +19,7 @@ import { balancesOf, hasLiveBalance } from '@/src/lib/balances';
 import { useDesignWindow } from '@/src/lib/layout';
 import { useAppConfig } from '@/src/services/appSettings';
 import { walletService } from '@/src/services/wallet/walletService';
-import { getAdProvider } from '@/src/services/ads/adProvider';
-import { preloadWebRewarded, showWebRewarded, type WebRewardedOutcome } from '@/src/services/ads/webRewarded';
+import { useRewardedAd } from '@/src/ads/fullscreen';
 import { newRequestId, useMonetizationConfig } from '@/src/services/monetization';
 import { useConvertXp, useXpConversion } from '@/src/services/shop';
 
@@ -53,14 +52,6 @@ const errorText = (e: any, fallback: string) =>
   dailyFreeLimit(e) ?? (freeRewardsOut(e) ? 'Aaj ke free rewards khatam ho gaye hain. Thodi der baad try karo.' : e?.message || fallback);
 
 const IS_WEB = Platform.OS === 'web';
-/** What to tell the user when a web ad did not end in a reward. */
-const WEB_OUTCOME_TEXT: Record<Exclude<WebRewardedOutcome, 'granted'>, string> = {
-  closed: 'Ad poora nahi hua, isliye reward nahi mila.',
-  no_fill: 'Abhi koi ad available nahi hai. Thodi der baad try karo.',
-  unsupported: 'Video ads abhi sirf mobile browser par chalte hain. Phone par tophunt.in kholo.',
-  blocked: 'Ad load nahi hua. Ad blocker band karke dobara try karo.',
-};
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type DailySlot = { day: number; amount: number; status: 'claimed' | 'ready' | 'upcoming' };
 type Task = { id: string; title: string; reward: number; xp: number; target: number; type: string; progress: number; claimed: boolean; claimable: boolean; endsAt: number | null };
@@ -96,22 +87,15 @@ export default function EarnScreen() {
   const checkinReady = checkinOn && d.claimedToday !== true;
 
   const tr: any = tasksQ.data ?? {};
-  // The web build shows Google Ad Manager ads with their own reward and cap;
-  // the app shows AdMob. Both counters come from getDailyTasks.
-  const adInfo = IS_WEB
-    ? {
-        enabled: tr.ads?.web?.enabled ?? false,
-        reward: Number(tr.ads?.web?.rewardDiamonds ?? mon.ads.web.rewardDiamonds) || 0,
-        cap: Number(tr.ads?.web?.dailyCap ?? mon.ads.web.dailyCap) || 0,
-        watched: Number(tr.ads?.web?.watchedToday ?? 0),
-      }
-    : {
-        enabled: tr.ads?.enabled ?? mon.ads.rewarded.enabled,
-        reward: Number(tr.ads?.rewardDiamonds ?? mon.ads.rewarded.rewardDiamonds) || 0,
-        cap: Number(tr.ads?.dailyCap ?? mon.ads.rewarded.dailyCap) || 0,
-        watched: Number(tr.ads?.watchedToday ?? 0),
-      };
-  const adsLeft = Math.max(0, adInfo.cap - adInfo.watched);
+  // Rewarded ads through the ad platform's "earn_rewarded" slot (src/ads/fullscreen.ts):
+  // AdMob with SSV in the apps, Ad Manager + watch token on the web. Amounts,
+  // caps and today's counter come from the server.
+  const rewarded = useRewardedAd('earn_rewarded', () => {
+    void refetchMe();
+    void tasksQ.refetch();
+  });
+  const adInfo = { enabled: rewarded.enabled, reward: rewarded.reward, cap: rewarded.cap, watched: rewarded.watched };
+  const adsLeft = rewarded.left;
   const allTasks: Task[] = useMemo(() => tr.tasks ?? [], [tr.tasks]);
   // The legacy single "ad" row is paid by the ad itself; the ad card covers it.
   // "ads" bonus tasks only make sense while rewarded ads are on.
@@ -133,10 +117,6 @@ export default function EarnScreen() {
     (adInfo.enabled ? adsLeft * adInfo.reward : 0);
   const referral = (config as any)?.referral;
 
-  // Fetch GPT as soon as web ads are on, so the tap shows the ad quickly.
-  useEffect(() => {
-    if (IS_WEB && adInfo.enabled) preloadWebRewarded();
-  }, [adInfo.enabled]);
 
   const refreshAll = () => {
     void refetchMe();
@@ -185,83 +165,13 @@ export default function EarnScreen() {
     }
   };
 
-  /**
-   * Show a rewarded ad. The SDK only reports that the ad finished; the reward is
-   * paid by the ad network's server-side callback to the Worker, so we refetch a
-   * moment later instead of crediting anything here.
-   */
-  /**
-   * Web: ask the server for a watch token, show the Ad Manager ad, and once GPT
-   * grants the reward (and the minimum watch time has passed) claim the token.
-   */
-  const watchWebAd = async () => {
-    if (!adInfo.enabled) {
-      setAdSheet(true);
-      return;
-    }
-    if (adsLeft <= 0) {
-      emitToast('Aaj ke saare ads ho gaye. Kal phir aao!', 'info');
-      return;
-    }
-    setBusy('ad');
-    try {
-      const t0 = Date.now();
-      const start = await walletService.startWebAd();
-      const outcome = await showWebRewarded(start.adUnitPath);
-      if (outcome !== 'granted') {
-        emitToast(WEB_OUTCOME_TEXT[outcome], 'info');
-        return;
-      }
-      // The server only pays after the minimum watch time (+1s for clock drift).
-      const wait = start.minWatchSec * 1000 + 1000 - (Date.now() - t0);
-      if (wait > 0) await sleep(wait);
-      const r = await walletService.claimWebAdReward(start.token);
-      success(`+${r.reward} Diamond mil gaye!${r.remaining > 0 ? ` Aaj ${r.remaining} ad aur.` : ''}`);
-      refreshAll();
-    } catch (e: any) {
-      if (e?.reason === 'phone_not_verified') {
-        emitToast(e.message || 'Pehle mobile number verify karo.', 'info');
-        router.push('/profile/manage/verification' as any);
-        return;
-      }
-      fail(errorText(e, 'Ad reward nahi mila. Dobara try karo.'));
-      void tasksQ.refetch();
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const watchAd = async () => {
-    if (busy) return;
-    if (IS_WEB) return watchWebAd();
-    const provider = getAdProvider();
-    if (!adInfo.enabled || !provider.isAvailable()) {
+    if (busy || rewarded.busy) return;
+    if (!rewarded.enabled) {
       setAdSheet(true);
       return;
     }
-    if (adsLeft <= 0) {
-      emitToast('Aaj ke saare ads ho gaye. Kal phir aao!', 'info');
-      return;
-    }
-    setBusy('ad');
-    try {
-      if (!(await provider.ensureConsent())) {
-        emitToast('Ads ke liye consent chahiye.', 'info');
-        return;
-      }
-      const unit = mon.ads.units[Platform.OS === 'ios' ? 'ios' : 'android']?.rewarded;
-      const res = unit && user?.uid ? await provider.showRewarded(unit, user.uid) : { earned: false };
-      if (res.earned) {
-        success(`Ad poora hua! +${adInfo.reward} Diamond aa rahe hain`);
-        setTimeout(refreshAll, 2500);
-      } else {
-        emitToast('Ad poora nahi hua, reward nahi mila.', 'info');
-      }
-    } catch {
-      fail('Ad load nahi hua. Thodi der baad try karo.');
-    } finally {
-      setBusy(null);
-    }
+    await rewarded.watch();
   };
 
   const goTask = (t: Task) => {
@@ -343,7 +253,7 @@ export default function EarnScreen() {
           p={p}
           info={adInfo}
           left={adsLeft}
-          busy={busy === 'ad'}
+          busy={rewarded.busy}
           bonus={adBonus}
           claimBusy={busy}
           onWatch={() => void watchAd()}
@@ -419,17 +329,17 @@ export default function EarnScreen() {
         <View style={[styles.floatWrap, { width: contentW }]} pointerEvents="box-none">
           <TouchableOpacity
             onPress={() => void watchAd()}
-            disabled={busy === 'ad'}
+            disabled={rewarded.busy}
             activeOpacity={0.9}
             accessibilityRole="button"
             accessibilityLabel={`Watch an ad for ${adInfo.reward} Diamonds, ${adsLeft} left today`}
           >
             <LinearGradient colors={['#8B5CF6', '#FF4D67', '#FF8A4D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.float}>
               <View style={styles.floatPlay}>
-                {busy === 'ad' ? <ActivityIndicator color="#FF4D67" size="small" /> : <Ionicons name="play" size={18} color="#FF4D67" />}
+                {rewarded.busy ? <ActivityIndicator color="#FF4D67" size="small" /> : <Ionicons name="play" size={18} color="#FF4D67" />}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.floatTitle}>{busy === 'ad' ? 'Ad chal raha hai…' : `Ad dekho, +${adInfo.reward} Diamond pao`}</Text>
+                <Text style={styles.floatTitle}>{rewarded.busy ? 'Ad chal raha hai…' : `Ad dekho, +${adInfo.reward} Diamond pao`}</Text>
                 <Text style={styles.floatSub}>Aaj {adsLeft} ad baaki · {(adsLeft * adInfo.reward).toLocaleString()} Diamond</Text>
               </View>
               <DiamondIcon size={20} color="#FFF" />

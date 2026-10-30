@@ -15,6 +15,8 @@ import { contestMediaService } from '@/src/services/contests/uploadMedia';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useAuthGate } from '@/src/hooks/useAuthGate';
 import { useProfile } from '@/src/hooks/useProfileData';
+import { NeedDiamondsSheet } from '@/src/ads/NeedDiamondsSheet';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { LinearGradient } from 'expo-linear-gradient';
 import { goToCongratulations } from '@/src/lib/contestSuccess';
@@ -35,7 +37,10 @@ export default function VideoContestScreen() {
   const { contestId, matchId, mode } = useLocalSearchParams();
   const { user } = useAuth();
   const { requireAuth } = useAuthGate();
-  const { data: profile } = useProfile(user?.uid || '');
+  const { data: profile, refetch: refetchProfile } = useProfile(user?.uid || '');
+  // Entry fee short: offer a rewarded ad in place (src/ads/NeedDiamondsSheet.tsx).
+  const [needDiamonds, setNeedDiamonds] = useState<{ fee: number; have: number } | null>(null);
+  const isDark = useColorScheme() === 'dark';
   
   const [contests, setContests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,7 +171,7 @@ export default function VideoContestScreen() {
     // Entry fees are paid in Diamonds only (src/lib/balances.ts).
     const userCoins = balancesOf(profile as any).diamonds;
     if (userCoins < fee) {
-        Alert.alert("Diamond kam hain", `Entry ke liye ${fee} Diamond chahiye, aapke paas ${userCoins} hain. Earn page par daily reward, tasks aur XP se free Diamond kamao.`);
+        setNeedDiamonds({ fee, have: userCoins });
         return;
     }
 
@@ -305,6 +310,14 @@ export default function VideoContestScreen() {
           </TouchableOpacity>
         </ScrollView>
       )}
+      <NeedDiamondsSheet
+        visible={!!needDiamonds}
+        fee={needDiamonds?.fee ?? 0}
+        have={needDiamonds?.have ?? 0}
+        isDark={isDark}
+        onClose={() => setNeedDiamonds(null)}
+        onRewarded={() => void refetchProfile()}
+      />
     </SafeAreaView>
   );
 }

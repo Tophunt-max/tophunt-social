@@ -83,7 +83,7 @@ export const CONTENT_SECURITY_POLICY =
   // (src/services/ads/webRewarded.ts). Google only documents a nonce-based
   // strict CSP for GPT; this allowlist covers today's ad hosts and may need a
   // new host if Google adds one (watch the console for CSP violations).
-  "script-src 'self' 'unsafe-inline' https://apis.google.com https://*.gstatic.com https://*.googleapis.com https://static.cloudflareinsights.com https://securepubads.g.doubleclick.net https://*.doubleclick.net https://*.googlesyndication.com https://*.googletagservices.com https://*.adtrafficquality.google; " +
+  "script-src 'self' 'unsafe-inline' https://apis.google.com https://*.gstatic.com https://*.googleapis.com https://static.cloudflareinsights.com https://securepubads.g.doubleclick.net https://*.doubleclick.net https://*.googlesyndication.com https://*.googletagservices.com https://*.adtrafficquality.google https://fundingchoicesmessages.google.com https://*.googleadservices.com; " +
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data: blob: https:; " +
   "media-src 'self' blob: https:; " +
@@ -100,11 +100,11 @@ export const CONTENT_SECURITY_POLICY =
   // The analytics beacon POSTs its payload back to this host.
   'https://cloudflareinsights.com ' +
   // Ad requests and ad-quality pings (GPT).
-  'https://*.doubleclick.net https://*.googlesyndication.com https://*.adtrafficquality.google https://www.google.com; ' +
+  'https://*.doubleclick.net https://*.googlesyndication.com https://*.adtrafficquality.google https://www.google.com https://fundingchoicesmessages.google.com https://*.googleadservices.com; ' +
   // 'self': on tophunt.in the Firebase auth iframe is served first-party from
   // `/__/auth/iframe` (see FIREBASE_AUTH_PROXY below).
   // Ad creatives render in Google's safe frames.
-  "frame-src 'self' https://*.firebaseapp.com https://*.doubleclick.net https://*.googlesyndication.com https://www.google.com; " +
+  "frame-src 'self' https://*.firebaseapp.com https://*.doubleclick.net https://*.googlesyndication.com https://www.google.com https://fundingchoicesmessages.google.com https://*.googleadservices.com; " +
   // `blob:` is required by hls.js, which plays HLS on the web: it spawns
   // its demuxer in a Web Worker created from a blob URL. Without this the worker
   // is blocked and playback degrades to the main thread (or fails outright).
@@ -368,6 +368,8 @@ const RESERVED = new Set([
   '_expo',
   'sitemap.xml',
   'robots.txt',
+  'ads.txt',
+  'app-ads.txt',
   'favicon.png',
   'favicon.ico',
   'firebase-messaging-sw.js',
@@ -824,6 +826,14 @@ export default {
           headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' },
         }),
       );
+    }
+
+    // --- ads.txt / app-ads.txt --------------------------------------------
+    // Entered by the admin (Monetization → Ad platform) and served by the API
+    // Worker's /read/ads-txt. Must live at the root of this host: AdSense and
+    // Ad Manager read /ads.txt, AdMob reads /app-ads.txt from the developer site.
+    if (path === '/ads.txt' || path === '/app-ads.txt') {
+      return withSecurityHeaders(await proxyAdsTxt(apiBase, path === '/app-ads.txt' ? 'app' : 'web'));
     }
 
     // --- sitemap.xml -------------------------------------------------------
@@ -1305,6 +1315,20 @@ function injectPostSeo(shellResp, post, origin, canonicalPath) {
  */
 function canonicalForPost(post, origin, canonicalPath) {
   return `${origin}${canonicalPath}`;
+}
+
+/** ads.txt / app-ads.txt from the API, as plain text. 404 when empty, 503 when the API cannot answer. */
+async function proxyAdsTxt(apiBase, kind) {
+  try {
+    const res = await fetch(`${apiBase}/read/ads-txt?kind=${kind}`, { cf: { cacheTtl: 300, cacheEverything: true } });
+    if (res.status >= 500) throw new Error(`upstream ${res.status}`);
+    return new Response(res.ok ? await res.text() : '', {
+      status: res.ok ? 200 : 404,
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=300' },
+    });
+  } catch (_err) {
+    return new Response('', { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'retry-after': '60' } });
+  }
 }
 
 /** Public battle snapshot. Same endpoint the app uses; works unauthenticated. */

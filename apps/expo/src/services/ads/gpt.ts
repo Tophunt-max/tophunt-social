@@ -1,6 +1,6 @@
 /**
  * Google Publisher Tag (Google Ad Manager) loader for the WEB build, shared by
- * rewarded ads (webRewarded.ts) and display slots (components/ads/WebDisplayAd.tsx).
+ * rewarded ads (webRewarded.ts) and display slots (src/ads/providers/web.tsx).
  * Loaded on demand, once, and only on the web.
  */
 import { Platform } from 'react-native';
