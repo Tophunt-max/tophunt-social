@@ -7,7 +7,7 @@
  * handler it was given (which calls the Worker).
  */
 import React from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { Ionicons } from '@/src/lib/icons';
@@ -24,8 +24,8 @@ import type { ExplorePalette } from '@/src/components/explore/theme';
 import { GamificationIcon } from './GamificationIcon';
 import { RarityPill } from './RarityPill';
 import { EmptyInventory, FrameRing } from './vectors';
-import { FRAME_AVATAR_RATIO, cosmeticArt } from '@/src/lib/cosmeticArt';
 import { CosmeticFx } from './CosmeticFx';
+import { FRAME_AVATAR_RATIO, cosmeticArt } from '@/src/lib/cosmeticArt';
 
 const BRAND = '#FF4D67';
 
@@ -96,18 +96,17 @@ export function CosmeticPreview({
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
           <Avatar uri={avatarUri ?? undefined} name={name || 'You'} size={size * FRAME_AVATAR_RATIO} />
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            <art.Art width={size} height={size} />
+            <Image source={art.source} style={{ width: size, height: size }} resizeMode="contain" />
             {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} /> : null}
           </View>
         </View>
       ) : art && art.kind === 'theme' ? (
         <View style={{ width: size, height: size, borderRadius: size * 0.22, overflow: 'hidden' }}>
-          <art.Art width={size} height={size} preserveAspectRatio="xMidYMid slice" />
-          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} preserveAspectRatio="xMidYMid slice" /> : null}
+          <Image source={art.source} style={{ width: size, height: size }} resizeMode="cover" />
         </View>
       ) : art ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-          <art.Art width={size * 0.8} height={size * 0.8} />
+          <Image source={art.source} style={{ width: size * 0.8, height: size * 0.8 }} resizeMode="contain" />
           {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size * 0.8} height={size * 0.8} /> : null}
         </View>
       ) : tier ? (

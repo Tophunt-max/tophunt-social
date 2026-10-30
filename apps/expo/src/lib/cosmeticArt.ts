@@ -11,21 +11,21 @@
  * back to the key prefix. Anything else in the catalog is earned, so `xp` is
  * the default.
  */
-import type { FC } from 'react';
-import type { SvgProps } from 'react-native-svg';
-import { SHOP_DIGITAL_ART, type FxMotion } from '@/assets/shop/digital';
+import type { ImageSourcePropType } from 'react-native';
+import { SHOP_DIGITAL_ART } from '@/assets/shop/digital';
 import { XP_ART } from '@/assets/xp';
 
 export type CosmeticTier = 'xp' | 'premium';
 export type ArtKind = 'frame' | 'theme' | 'badge' | 'title' | 'sticker' | 'collectible' | 'effect';
-export type { FxMotion };
+/** Retained for the shared legacy animation component; WebP cosmetics are static. */
+export type FxMotion = 'spin' | 'pulse' | 'twinkle' | 'flicker' | 'drift';
 
 export interface CosmeticArt {
   kind: ArtKind;
   tier: CosmeticTier;
-  Art: FC<SvgProps>;
-  /** Animated overlay (premium only). */
-  Fx?: FC<SvgProps>;
+  source: ImageSourcePropType;
+  /** Animated WebP overlay, used by premium frames only. */
+  Fx?: ImageSourcePropType;
   fx?: FxMotion;
 }
 

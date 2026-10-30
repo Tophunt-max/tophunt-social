@@ -2,14 +2,13 @@
  * Cosmetic artwork for admin previews. The files are the app's own, so the
  * admin preview is the exact artwork users see, with no second copy:
  *
- *   - Premium (Shop) items: apps/expo/assets/shop/digital, key `shop.<kind>_<file>`,
- *     plus an animated overlay in `<kind>/fx/<file>.svg`;
- *   - XP (earned) items:    apps/expo/assets/xp, key `xp.<kind>_<file>`, static.
+ *   - Premium (Shop) items: apps/expo/assets/shop/digital, key `shop.<kind>_<file>`, transparent WebP;
+ *   - XP (earned) items:    apps/expo/assets/xp, key `xp.<kind>_<file>`, transparent WebP.
  */
 // Vite reads the glob options statically, so they must be written inline.
-const shopFiles = import.meta.glob("../../../expo/assets/shop/digital/*/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
-const shopFx = import.meta.glob("../../../expo/assets/shop/digital/*/fx/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
-const xpFiles = import.meta.glob("../../../expo/assets/xp/*/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
+const shopFiles = import.meta.glob("../../../expo/assets/shop/digital/*/*.webp", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
+const shopFx = import.meta.glob("../../../expo/assets/shop/digital/*/fx/*.webp", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
+const xpFiles = import.meta.glob("../../../expo/assets/xp/*/*.webp", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
 
 const SINGULAR: Record<string, string> = {
   frames: "frame", themes: "theme", badges: "badge", titles: "title",
@@ -23,11 +22,13 @@ export const SHOP_ART: Record<string, Art> = {};
 
 function index(files: Record<string, string>, prefix: "shop" | "xp", tier: Tier) {
   for (const [path, url] of Object.entries(files)) {
-    const m = path.match(/\/([a-z]+)\/([a-z0-9_]+)\.svg$/);
+    const m = path.match(/\/([a-z]+)\/([a-z0-9_]+)\.webp$/);
     if (!m || !SINGULAR[m[1]]) continue;
     const kind = SINGULAR[m[1]];
-    const fx = tier === "premium" ? Object.entries(shopFx).find(([p]) => p.endsWith(`/${m[1]}/fx/${m[2]}.svg`))?.[1] ?? null : null;
-    SHOP_ART[`${prefix}.${kind}_${m[2]}`] = { kind, url, fxUrl: fx, tier };
+    const fxUrl = tier === "premium"
+      ? Object.entries(shopFx).find(([fxPath]) => fxPath.endsWith(`/${m[1]}/fx/${m[2]}.webp`))?.[1] ?? null
+      : null;
+    SHOP_ART[`${prefix}.${kind}_${m[2]}`] = { kind, url, fxUrl, tier };
   }
 }
 index(shopFiles, "shop", "premium");

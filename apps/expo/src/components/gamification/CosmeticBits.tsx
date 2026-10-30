@@ -11,7 +11,7 @@
  * Everything renders nothing (or the plain avatar) when nothing is equipped.
  */
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Image, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { Ionicons } from '@/src/lib/icons';
@@ -42,7 +42,7 @@ export function FrameArt({ frame, box, motion = 'full' }: { frame: { asset?: Rec
   if (!art) return null;
   return (
     <View pointerEvents="none" style={[{ width: box, height: box }, styles.center]}>
-      <art.Art width={box} height={box} />
+      <Image source={art.source} style={{ width: box, height: box }} resizeMode="contain" />
       {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={box} height={box} motion={motion} /> : null}
     </View>
   );
@@ -107,7 +107,7 @@ export function CosmeticBadge({ badge, size = 16, motion = 'full' }: { badge?: B
   if (art) {
     return (
       <View accessible accessibilityLabel={`${badge.name}, ${TIER_STYLE[art.tier].label}`} style={{ marginLeft: 3, width: size, height: size }}>
-        <art.Art width={size} height={size} />
+        <Image source={art.source} style={{ width: size, height: size }} resizeMode="contain" />
         {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} motion={motion} /> : null}
       </View>
     );
@@ -136,7 +136,12 @@ export function CosmeticTitleChip({ title, compact = false, motion = 'full' }: {
   const tier = cosmeticTier(title);
   const [c0, c1] = assetColors(title.asset, [rarityColor(title.rarity), rarityColor(title.rarity)]);
   const h = compact ? 18 : 24;
-  const icon = art ? <art.Art width={h * 0.72} height={h * 0.72} /> : <Ionicons name="ribbon" size={h * 0.6} color={tier === 'premium' ? '#FFF' : c1} />;
+  const icon = art ? (
+    <View style={{ width: h * 0.72, height: h * 0.72 }}>
+      <Image source={art.source} style={StyleSheet.absoluteFill} resizeMode="contain" />
+      {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={h * 0.72} height={h * 0.72} motion={motion} /> : null}
+    </View>
+  ) : <Ionicons name="ribbon" size={h * 0.6} color={tier === 'premium' ? '#FFF' : c1} />;
   if (tier === 'premium') {
     return (
       <View
@@ -204,8 +209,7 @@ export function ThemeBackdrop({ theme, style, motion = 'full' }: { theme?: Theme
   if (art) {
     return (
       <View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }, style]}>
-        <art.Art width="100%" height="100%" preserveAspectRatio="xMidYMid slice" />
-        {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width="100%" height="100%" preserveAspectRatio="xMidYMid slice" motion={motion} /> : null}
+        <Image source={art.source} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
       </View>
     );
   }

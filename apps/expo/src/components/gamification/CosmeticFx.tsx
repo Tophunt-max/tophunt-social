@@ -7,10 +7,8 @@
  * while the app is backgrounded, or with `motion="none"`.
  */
 import React from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Image, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion } from 'react-native-reanimated';
-import type { FC } from 'react';
-import type { SvgProps } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useScreenActive } from '@/src/hooks/useScreenActive';
 import { fxClock, useFxClock } from '@/src/lib/fxClock';
@@ -38,7 +36,7 @@ export function CosmeticFx({
   style,
   preserveAspectRatio,
 }: {
-  Fx: FC<SvgProps>;
+  Fx: ImageSourcePropType;
   fx?: FxMotion;
   width: number | string;
   height: number | string;
@@ -75,7 +73,7 @@ export function CosmeticFx({
   });
   return (
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.center, style, anim]}>
-      <Fx width={width as any} height={height as any} {...(preserveAspectRatio ? { preserveAspectRatio } : {})} />
+      <Image source={Fx} style={{ width: width as any, height: height as any }} resizeMode="contain" />
     </Animated.View>
   );
 }
