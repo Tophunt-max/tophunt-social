@@ -29,6 +29,10 @@ export interface MonetizationPublicConfig {
     shortVideo: { enabled: boolean; interval: number; maxPerSession: number };
     interstitial: { enabled: boolean; minIntervalSec: number; maxPerSession: number; maxPerHour: number };
     rewarded: { enabled: boolean; rewardDiamonds: number; dailyCap: number };
+    /** Rewarded ads on the web build (Google Ad Manager). Paid by the Worker against a watch token. */
+    web: { enabled: boolean; adUnitPath: string; rewardDiamonds: number; dailyCap: number; minWatchSec: number; requireVerifiedPhone: boolean };
+    /** Display ads on the web build's shared-battle pages (Google Ad Manager). */
+    webDisplay: { enabled: boolean; adUnitPath: string; placements: { battlePage: boolean; resultPage: boolean } };
   };
   sponsored: SlotRule & { enabled: boolean };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number };
@@ -50,6 +54,8 @@ const OFF: MonetizationPublicConfig = {
     shortVideo: { enabled: false, interval: 6, maxPerSession: 0 },
     interstitial: { enabled: false, minIntervalSec: 300, maxPerSession: 0, maxPerHour: 0 },
     rewarded: { enabled: false, rewardDiamonds: 0, dailyCap: 0 },
+    web: { enabled: false, adUnitPath: '', rewardDiamonds: 0, dailyCap: 0, minWatchSec: 15, requireVerifiedPhone: true },
+    webDisplay: { enabled: false, adUnitPath: '', placements: { battlePage: true, resultPage: true } },
   },
   sponsored: { enabled: false, firstPosition: 3, interval: 12, maxPerSession: 0 },
   gifts: { enabled: false, maxQuantity: 1, maxCoinsPerSend: 0 },
@@ -65,7 +71,7 @@ export function useMonetizationConfig(): MonetizationPublicConfig {
   return useMemo(
     () =>
       m && typeof m === 'object'
-        ? { ...OFF, ...m, ads: { ...OFF.ads, ...(m.ads ?? {}) }, earning: { xpConversion: { ...OFF.earning.xpConversion, ...(m.earning?.xpConversion ?? {}) } } }
+        ? { ...OFF, ...m, ads: { ...OFF.ads, ...(m.ads ?? {}), web: { ...OFF.ads.web, ...(m.ads?.web ?? {}) }, webDisplay: { ...OFF.ads.webDisplay, ...(m.ads?.webDisplay ?? {}) } }, earning: { xpConversion: { ...OFF.earning.xpConversion, ...(m.earning?.xpConversion ?? {}) } } }
         : OFF,
     [m],
   );

@@ -110,6 +110,8 @@ export function registerMonetizationRoutes(
       providerReady: providerReady(cfg),
       ssvCallbackPath: "/webhook/admob/ssv",
       unverifiedClientRewards: (c.env as any).ALLOW_UNVERIFIED_AD_REWARDS === "true",
+      // Web rewarded ads pay only when this deploy switch is on (lib/webAdReward.ts).
+      webAdRewardsAllowed: (c.env as any).ALLOW_WEB_AD_REWARDS === "true",
     });
   });
 

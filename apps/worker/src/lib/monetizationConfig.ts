@@ -42,6 +42,19 @@ export interface MonetizationConfig {
     shortVideo: { enabled: boolean; interval: number; maxPerSession: number };
     interstitial: { enabled: boolean; minIntervalSec: number; maxPerSession: number; maxPerHour: number };
     rewarded: { enabled: boolean; rewardDiamonds: number; dailyCap: number };
+    /**
+     * Rewarded ads on the WEB build (Google Ad Manager / GPT). GPT has no
+     * server-side verification, so these are paid on the client's word,
+     * limited by a server-signed watch token (lib/webAdReward.ts), their own
+     * daily cap, the verified-phone rule and the deploy switch
+     * ALLOW_WEB_AD_REWARDS. Keep the reward small.
+     */
+    web: WebRewardedConfig;
+    /**
+     * Display ads on the WEB build (Google Ad Manager / GPT) on the pages people
+     * open from a shared battle link. No reward, so no extra risk.
+     */
+    webDisplay: WebDisplayConfig;
   };
   sponsored: { enabled: boolean; firstPosition: number; interval: number; maxPerSession: number };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number; creatorShareBps: number };
@@ -57,6 +70,27 @@ export interface MonetizationConfig {
   earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
   /** Economy guardrails (lib/economyLimits.ts). Every knob: 0 = off. */
   economy: EconomyConfig;
+}
+
+export interface WebRewardedConfig {
+  enabled: boolean;
+  /** Ad Manager ad unit path, e.g. "/1234567/tophunt_rewarded". Public, not a secret. */
+  adUnitPath: string;
+  rewardDiamonds: number;
+  /** Paid web ad views per account per reward day (separate from the app cap). */
+  dailyCap: number;
+  /** Seconds between asking for a watch token and claiming it. */
+  minWatchSec: number;
+  /** Only accounts with a verified mobile number are paid. */
+  requireVerifiedPhone: boolean;
+}
+
+export interface WebDisplayConfig {
+  enabled: boolean;
+  /** Ad Manager display ad unit path, e.g. "/1234567/tophunt_display". */
+  adUnitPath: string;
+  /** Where the slot shows. Never inside the VS / winner image that gets shared. */
+  placements: { battlePage: boolean; resultPage: boolean };
 }
 
 export interface EconomyConfig {
@@ -102,6 +136,8 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
     shortVideo: { enabled: false, interval: 6, maxPerSession: 4 },
     interstitial: { enabled: false, minIntervalSec: 300, maxPerSession: 2, maxPerHour: 3 },
     rewarded: { enabled: false, rewardDiamonds: 5, dailyCap: 5 },
+    web: { enabled: false, adUnitPath: "", rewardDiamonds: 2, dailyCap: 3, minWatchSec: 15, requireVerifiedPhone: true },
+    webDisplay: { enabled: false, adUnitPath: "", placements: { battlePage: true, resultPage: true } },
   },
   sponsored: { enabled: false, firstPosition: 3, interval: 12, maxPerSession: 3 },
   gifts: { enabled: false, maxQuantity: 99, maxCoinsPerSend: 5000, creatorShareBps: 0 },
@@ -133,6 +169,7 @@ const BOUNDS = {
   maxPerHour: [0, 20],
   rewardDiamonds: [1, 100],
   dailyCap: [1, 50],
+  minWatchSec: [5, 120],
   maxQuantity: [1, 999],
   maxCoinsPerSend: [1, 1_000_000],
   creatorShareBps: [0, 10_000],
@@ -155,6 +192,8 @@ const ECONOMY_KEYS = ["contestPlatformFeePercent", "dailyFreeDiamondCap", "month
 const AD_UNIT_RE = /^ca-app-pub-\d{16}\/\d{10}$/;
 const APP_ID_RE = /^ca-app-pub-\d{16}~\d{10}$/;
 const REGION_RE = /^[A-Z]{2}$/;
+/** Ad Manager ad unit path: "/<network code>/<unit>[/<child>...]". */
+export const GAM_UNIT_PATH_RE = /^\/\d{2,15}(\/[A-Za-z0-9_.\-]{1,100}){1,5}$/;
 
 function int(v: unknown, fallback: number, [min, max]: readonly [number, number]): number {
   const n = Number(v);
@@ -216,6 +255,22 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
         rewardDiamonds: int(a.rewarded?.rewardDiamonds, d.ads.rewarded.rewardDiamonds, BOUNDS.rewardDiamonds),
         dailyCap: int(a.rewarded?.dailyCap, d.ads.rewarded.dailyCap, BOUNDS.dailyCap),
       },
+      web: {
+        enabled: bool(a.web?.enabled, false),
+        adUnitPath: str(a.web?.adUnitPath, GAM_UNIT_PATH_RE),
+        rewardDiamonds: int(a.web?.rewardDiamonds, d.ads.web.rewardDiamonds, BOUNDS.rewardDiamonds),
+        dailyCap: int(a.web?.dailyCap, d.ads.web.dailyCap, BOUNDS.dailyCap),
+        minWatchSec: int(a.web?.minWatchSec, d.ads.web.minWatchSec, BOUNDS.minWatchSec),
+        requireVerifiedPhone: bool(a.web?.requireVerifiedPhone, true),
+      },
+      webDisplay: {
+        enabled: bool(a.webDisplay?.enabled, false),
+        adUnitPath: str(a.webDisplay?.adUnitPath, GAM_UNIT_PATH_RE),
+        placements: {
+          battlePage: bool(a.webDisplay?.placements?.battlePage, true),
+          resultPage: bool(a.webDisplay?.placements?.resultPage, true),
+        },
+      },
     },
     sponsored: {
       enabled: bool(m.sponsored?.enabled, false),
@@ -272,6 +327,11 @@ export function providerReady(cfg: MonetizationConfig): boolean {
   return Boolean(a.androidAppId || a.iosAppId);
 }
 
+/** Web rewarded ads are switched on in the panel and have an ad unit (the deploy switch is separate). */
+export function webRewardedReady(cfg: MonetizationConfig): boolean {
+  return cfg.ads.enabled && cfg.ads.web.enabled && cfg.ads.web.adUnitPath !== "";
+}
+
 /** What the app may see. Ad unit ids are public by design (they ship in the app binary). */
 export function publicMonetizationConfig(cfg: any) {
   const m = parseMonetizationConfig(cfg);
@@ -288,6 +348,21 @@ export function publicMonetizationConfig(cfg: any) {
       shortVideo: m.ads.shortVideo,
       interstitial: m.ads.interstitial,
       rewarded: { enabled: ready && m.ads.rewarded.enabled, rewardDiamonds: m.ads.rewarded.rewardDiamonds, dailyCap: m.ads.rewarded.dailyCap },
+      // The deploy switch is checked by the server when a token is asked for;
+      // getDailyTasks reports the combined state to the Earn screen.
+      web: {
+        enabled: webRewardedReady(m),
+        adUnitPath: m.ads.web.adUnitPath,
+        rewardDiamonds: m.ads.web.rewardDiamonds,
+        dailyCap: m.ads.web.dailyCap,
+        minWatchSec: m.ads.web.minWatchSec,
+        requireVerifiedPhone: m.ads.web.requireVerifiedPhone,
+      },
+      webDisplay: {
+        enabled: m.ads.enabled && m.ads.webDisplay.enabled && m.ads.webDisplay.adUnitPath !== "",
+        adUnitPath: m.ads.webDisplay.adUnitPath,
+        placements: m.ads.webDisplay.placements,
+      },
     },
     sponsored: m.sponsored,
     gifts: { enabled: m.gifts.enabled, maxQuantity: m.gifts.maxQuantity, maxCoinsPerSend: m.gifts.maxCoinsPerSend },
@@ -340,7 +415,7 @@ export function validateMonetizationPatch(patch: any): void {
 
   const a = patch.ads;
   if (obj(a, "ads")) {
-    only(a, ["enabled", "mode", "provider", "admob", "sessionMaxAds", "requireConsent", "blockedRegions", "feedNative", "shortVideo", "interstitial", "rewarded"], "ads");
+    only(a, ["enabled", "mode", "provider", "admob", "sessionMaxAds", "requireConsent", "blockedRegions", "feedNative", "shortVideo", "interstitial", "rewarded", "web", "webDisplay"], "ads");
     isBool(a.enabled, "ads.enabled");
     isBool(a.requireConsent, "ads.requireConsent");
     if (a.requireConsent === false) bad("ads.requireConsent cannot be turned off; consent is required where the law requires it.");
@@ -389,6 +464,35 @@ export function validateMonetizationPatch(patch: any): void {
       isBool(a.rewarded.enabled, "ads.rewarded.enabled");
       isInt(a.rewarded.rewardDiamonds, "ads.rewarded.rewardDiamonds", BOUNDS.rewardDiamonds);
       isInt(a.rewarded.dailyCap, "ads.rewarded.dailyCap", BOUNDS.dailyCap);
+    }
+    if (obj(a.web, "ads.web")) {
+      only(a.web, ["enabled", "adUnitPath", "rewardDiamonds", "dailyCap", "minWatchSec", "requireVerifiedPhone"], "ads.web");
+      isBool(a.web.enabled, "ads.web.enabled");
+      isBool(a.web.requireVerifiedPhone, "ads.web.requireVerifiedPhone");
+      if (a.web.adUnitPath !== undefined && a.web.adUnitPath !== "") {
+        if (typeof a.web.adUnitPath !== "string" || !GAM_UNIT_PATH_RE.test(a.web.adUnitPath.trim())) {
+          bad('ads.web.adUnitPath must be an Ad Manager ad unit path like "/1234567/tophunt_rewarded".');
+        }
+        a.web.adUnitPath = a.web.adUnitPath.trim();
+      }
+      isInt(a.web.rewardDiamonds, "ads.web.rewardDiamonds", BOUNDS.rewardDiamonds);
+      isInt(a.web.dailyCap, "ads.web.dailyCap", BOUNDS.dailyCap);
+      isInt(a.web.minWatchSec, "ads.web.minWatchSec", BOUNDS.minWatchSec);
+    }
+    if (obj(a.webDisplay, "ads.webDisplay")) {
+      only(a.webDisplay, ["enabled", "adUnitPath", "placements"], "ads.webDisplay");
+      isBool(a.webDisplay.enabled, "ads.webDisplay.enabled");
+      if (a.webDisplay.adUnitPath !== undefined && a.webDisplay.adUnitPath !== "") {
+        if (typeof a.webDisplay.adUnitPath !== "string" || !GAM_UNIT_PATH_RE.test(a.webDisplay.adUnitPath.trim())) {
+          bad('ads.webDisplay.adUnitPath must be an Ad Manager ad unit path like "/1234567/tophunt_display".');
+        }
+        a.webDisplay.adUnitPath = a.webDisplay.adUnitPath.trim();
+      }
+      if (obj(a.webDisplay.placements, "ads.webDisplay.placements")) {
+        only(a.webDisplay.placements, ["battlePage", "resultPage"], "ads.webDisplay.placements");
+        isBool(a.webDisplay.placements.battlePage, "ads.webDisplay.placements.battlePage");
+        isBool(a.webDisplay.placements.resultPage, "ads.webDisplay.placements.resultPage");
+      }
     }
   }
 

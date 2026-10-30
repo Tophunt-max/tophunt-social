@@ -185,6 +185,48 @@ Policy note: Diamonds pay contest entry fees, and contest prizes are withdrawabl
 reward therefore has indirect cash value. Review AdMob's rewarded-ad policy for this before enabling
 `ads.rewarded`. The safer alternative is a cosmetic item reward, which is not built.
 
+### Rewarded ads on the web (Google Ad Manager, client-trusted)
+
+The web build's Earn page shows rewarded video ads through Google Ad Manager's GPT
+(`apps/expo/src/services/ads/webRewarded.ts`). GPT has **no server-side verification**: only the browser's
+`rewardedSlotGranted` event says the ad was watched. The Worker (`lib/webAdReward.ts`) therefore pays on the
+client's word, bounded by:
+
+1. `startWebAd` returns an HMAC-signed watch token (uid, nonce, issue time, min watch time, 5 min expiry).
+   `claimWebAdReward` pays only the caller's own token, at least `minWatchSec` after it was issued.
+2. One payout per token (`ad_reward_claims.id = web:<nonce>`).
+3. Its own daily cap `ads.web.dailyCap` (provider `web`, separate from the AdMob cap), checked in the batch.
+4. Verified mobile number required (`ads.web.requireVerifiedPhone`, default on).
+5. The shared daily free Diamond cap and the free-rewards budget. Paid in Diamonds only.
+6. Deploy switch: nothing pays unless the Worker variable `ALLOW_WEB_AD_REWARDS` is exactly `true`.
+
+A script that waits `minWatchSec` per token can still collect up to the daily cap without watching. Keep
+`ads.web.rewardDiamonds` and `ads.web.dailyCap` small.
+
+To turn it on:
+
+1. Ad Manager: create a **rewarded** ad unit for the web inventory and approve `tophunt.in`.
+2. Admin → Monetization → Ads: "Ads enabled" on, then "Web rewarded ads" on, the ad unit path
+   (`/<network code>/<unit code>`), reward, daily cap and minimum watch time. Save.
+3. Cloudflare → Worker → Variables: `ALLOW_WEB_AD_REWARDS=true` (optional `WEB_AD_TOKEN_SECRET`; otherwise the
+   key is derived from `ADMIN_PROXY_SECRET`). Deploy.
+4. Check on a phone browser. Google serves web rewarded ads only on mobile-optimised pages with neutral zoom,
+   so desktop browsers usually get none.
+
+The web CSP (`public/_headers` and `public/_worker.js`) allowlists Google's ad hosts. Google documents only a
+nonce-based strict CSP for GPT, so a new Google host can be blocked; watch the browser console for CSP
+violations after enabling.
+
+### Display ads on shared battle pages (web)
+
+`monetization.ads.webDisplay` {enabled, adUnitPath, placements {battlePage, resultPage}} shows one labelled
+Google Ad Manager display slot (`apps/expo/src/components/ads/WebDisplayAd.tsx`) on the pages a shared battle
+link opens: `/battle/<id>` (below the battle card and its vote buttons) and `/battle/<id>/result` (below the
+winner card, share buttons and prize). Web / PWA only; guests see it too. It is never part of the VS or winner
+image that gets shared (those are captured from the card alone). The slot reserves 250 px while loading and
+collapses when there is no ad. Needs "Ads enabled" and a display ad unit path; no deploy switch, since nothing is
+paid.
+
 ### Measurement
 
 - `ad_event_counters`: app-reported requests/fills/impressions/clicks/failures, per day/platform/placement,

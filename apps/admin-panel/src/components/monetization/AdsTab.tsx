@@ -153,6 +153,68 @@ export function AdsTab({ range }: { range: Range }) {
         </div>
       </Card>
 
+      <Card title="Web rewarded ads (Google Ad Manager)" subtitle="Video ads on the web app's Earn page (tophunt.in). Paid in Diamonds.">
+        <Notice tone="warning">
+          Web ads have no server-side verification: the browser says the ad was watched. Limits: signed watch token + minimum watch time, the web
+          daily cap below, verified mobile number, the daily free Diamond cap and the free-rewards budget. Keep the reward small.
+        </Notice>
+        {!cfgQ.data?.webAdRewardsAllowed && (
+          <Notice tone="warning">
+            Deploy switch is OFF, so web ads pay nothing even when enabled here. Set the Worker variable <code>ALLOW_WEB_AD_REWARDS=true</code> in Cloudflare to allow it.
+          </Notice>
+        )}
+        {ads.web.enabled && !ads.enabled && <Notice tone="warning">"Ads enabled" (above) is off, so web ads are off too.</Notice>}
+        {ads.web.enabled && !ads.web.adUnitPath && <Notice tone="warning">Enter the Ad Manager rewarded ad unit path, or web ads stay off.</Notice>}
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Toggle label="Web rewarded ads" checked={ads.web.enabled} onChange={(v) => set(["web", "enabled"], v)} hint={`Deploy switch: ${cfgQ.data?.webAdRewardsAllowed ? "ON" : "OFF"}`} />
+          <Toggle
+            label="Verified mobile number required"
+            checked={ads.web.requireVerifiedPhone}
+            onChange={(v) => set(["web", "requireVerifiedPhone"], v)}
+            hint="Strongly recommended: makes farming with many accounts expensive."
+          />
+          <Text
+            label="Rewarded ad unit path"
+            value={ads.web.adUnitPath}
+            placeholder="/1234567/tophunt_rewarded"
+            onChange={(v) => set(["web", "adUnitPath"], v)}
+            hint="Ad Manager → Inventory → Ad units → the rewarded unit's code, with your network code in front."
+          />
+          <div className="grid grid-cols-3 gap-2">
+            <Num label="Diamonds per view" value={ads.web.rewardDiamonds} onChange={(v) => set(["web", "rewardDiamonds"], v)} />
+            <Num label="Per user per day" value={ads.web.dailyCap} onChange={(v) => set(["web", "dailyCap"], v)} />
+            <Num label="Min watch (sec)" value={ads.web.minWatchSec} onChange={(v) => set(["web", "minWatchSec"], v)} />
+          </div>
+        </div>
+      </Card>
+
+      <Card title="Web display ads on shared battles (Google Ad Manager)" subtitle="A labelled ad box on the pages people open from a shared battle link. Web / PWA only. Never inside the VS or winner image.">
+        {ads.webDisplay.enabled && !ads.enabled && <Notice tone="warning">"Ads enabled" (above) is off, so these are off too.</Notice>}
+        {ads.webDisplay.enabled && !ads.webDisplay.adUnitPath && <Notice tone="warning">Enter the Ad Manager display ad unit path, or these stay off.</Notice>}
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Toggle label="Display ads on shared battles" checked={ads.webDisplay.enabled} onChange={(v) => set(["webDisplay", "enabled"], v)} />
+          <Text
+            label="Display ad unit path"
+            value={ads.webDisplay.adUnitPath}
+            placeholder="/1234567/tophunt_display"
+            onChange={(v) => set(["webDisplay", "adUnitPath"], v)}
+            hint="A display unit sized 300×250 / 336×280 / 320×100 / 320×50 / fluid."
+          />
+          <Toggle
+            label="Battle page (/battle/…)"
+            checked={ads.webDisplay.placements.battlePage}
+            onChange={(v) => set(["webDisplay", "placements", "battlePage"], v)}
+            hint="Below the battle card and its vote buttons, above “See more battles”."
+          />
+          <Toggle
+            label="Result page (/battle/…/result)"
+            checked={ads.webDisplay.placements.resultPage}
+            onChange={(v) => set(["webDisplay", "placements", "resultPage"], v)}
+            hint="Below the winner card, share buttons and prize, above “Apna battle shuru karo”."
+          />
+        </div>
+      </Card>
+
       <Card title="Sponsored posts (direct campaigns)" subtitle="Where approved brand campaigns appear in the home feed.">
         <div className="grid sm:grid-cols-4 gap-3">
           <Toggle label="Sponsored posts enabled" checked={sponsored.enabled} onChange={(v) => setSponsored({ ...sponsored, enabled: v })} />
