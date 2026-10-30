@@ -4,8 +4,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BackButton } from '@/src/components/ui/BackButton';
-import { Avatar } from '@/src/components/ui/Avatar';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { useAuth } from '@/src/hooks/useAuth';
 import { BRAND, BRAND_GRAD, PAD, useExplorePalette, type ExplorePalette } from '@/src/components/explore/theme';
 import { SectionEmpty, SectionError } from '@/src/components/explore/ExploreBits';
@@ -122,11 +122,12 @@ const Row = React.memo(function Row({ r, p, isMe, onOpen, prevRank }: { r: XpRan
       ) : (
         <Text style={[styles.rank, { color: p.sub }]}>{r.rank}</Text>
       )}
-      <Avatar uri={r.profileImageUrlThumb || r.profileImageUrl} name={r.fullName || r.username || 'user'} size={42} />
+      <FramedAvatar uri={r.profileImageUrlThumb || r.profileImageUrl} name={r.fullName || r.username || 'user'} size={42} frame={cosmeticsOf(r)?.frame} />
       <View style={{ flex: 1, marginLeft: 12 }}>
         <View style={styles.nameRow}>
           <Text style={[styles.name, { color: p.text }]} numberOfLines={1}>{r.fullName || r.username}</Text>
           <VerifiedBadge verified={r.verified} size={13} />
+          <NameCosmetics cosmetics={cosmeticsOf(r)} badgeSize={14} showTitle />
           <RankDelta prev={prevRank} next={r.rank} />
         </View>
         <View style={styles.levelRow}>

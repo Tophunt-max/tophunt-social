@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="royalCrownRing" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FEF3C7"/>
+      <stop offset="0.35" stop-color="#FCD34D"/>
+      <stop offset="0.7" stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#B45309"/>
+    </linearGradient>
+    <linearGradient id="royalCrownTop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#D97706"/>
+    </linearGradient>
+  </defs>
+  <circle cx="60" cy="60" r="54" fill="none" stroke="url(#royalCrownRing)" stroke-width="8"/>
+  <circle cx="60" cy="60" r="50.4" fill="none" stroke="#FFF7D6" stroke-width="1"/>
+  <circle cx="60" cy="60" r="57.6" fill="none" stroke="#92400E" stroke-opacity="0.6" stroke-width="0.8"/>
+  <g stroke="#FFF7D6" stroke-width="0.8">
+    <circle cx="114" cy="60" r="3.4" fill="#2563EB"/>
+    <circle cx="6" cy="60" r="3.4" fill="#10B981"/>
+    <circle cx="60" cy="114" r="3.8" fill="#DC2626"/>
+    <circle cx="98.2" cy="98.2" r="2.4" fill="#A855F7"/>
+    <circle cx="21.8" cy="98.2" r="2.4" fill="#A855F7"/>
+  </g>
+  <path d="M43 17 L40 3 L50 10 L60 0 L70 10 L80 3 L77 17 Z" fill="url(#royalCrownTop)" stroke="#92400E" stroke-width="1" stroke-linejoin="round"/>
+  <rect x="43" y="15" width="34" height="4" rx="1.5" fill="#B45309"/>
+  <circle cx="60" cy="10" r="2.2" fill="#DC2626" stroke="#FFF7D6" stroke-width="0.6"/>
+  <circle cx="50" cy="12.5" r="1.5" fill="#2563EB"/>
+  <circle cx="70" cy="12.5" r="1.5" fill="#10B981"/>
+</svg>

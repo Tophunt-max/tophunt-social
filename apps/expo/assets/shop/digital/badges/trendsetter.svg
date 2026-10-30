@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <defs>
+    <linearGradient id="trendsetterShield" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF8FA3"/>
+      <stop offset="1" stop-color="#E11D48"/>
+    </linearGradient>
+  </defs>
+  <path d="M24 2 L42 9 V22 C42 33 34 41.5 24 46 C14 41.5 6 33 6 22 V9 Z" fill="url(#trendsetterShield)" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M27 9 L15 27 H23 L20 39 L33 20 H25 Z" fill="#FFFFFF" stroke="#9F1239" stroke-width="1" stroke-linejoin="round"/>
+</svg>

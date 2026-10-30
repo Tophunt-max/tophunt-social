@@ -70,7 +70,6 @@ import { prefetchImages } from '@/src/lib/mediaPrefetch';
 import { StoryClock } from '@/src/lib/storyClock';
 import { useAppActive } from '@/src/hooks/usePlaybackEnvironment';
 import { useIsFocused } from '@react-navigation/native';
-import { Avatar } from '@/src/components/ui/Avatar';
 import { isVideoStory, isVsStory, storyMediaKind, type StoryViewer } from '@/src/types/stories';
 import { StoryVsFrame } from '@/src/components/stories/StoryVsFrame';
 import { VsCaptureBoundary } from '@/src/components/stories/VsCaptureBoundary';
@@ -82,6 +81,7 @@ import { storyCaption } from '@/src/lib/shareCaptions';
 import { createShareCounter, resolveBattleShareAsset, shareOutcomeMessage } from '@/src/lib/vsShareAsset';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useDesignWindow, webPhoneColumn } from '@/src/lib/layout';
@@ -1172,16 +1172,18 @@ export default function StoryView() {
                 ))}
             </View>
             <View style={styles.userInfo}>
-                <Avatar
+                <FramedAvatar
                   uri={currentUserStories.avatarUrlThumb || currentUserStories.avatarUrl}
                   name={currentUserStories.username}
                   size={40}
+                  frame={cosmeticsOf(currentUserStories)?.frame}
                   style={styles.avatar}
                 />
                 <View style={styles.userTextContainer}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Text style={styles.username} numberOfLines={1}>{currentUserStories.username}</Text>
                         <VerifiedBadge verified={(currentUserStories as any)?.verified} size={15} />
+                        <NameCosmetics cosmetics={cosmeticsOf(currentUserStories)} badgeSize={15} />
                     </View>
                     <Text style={styles.timeAgo}>{formatClockTime(currentStory.createdAt)}</Text>
                 </View>

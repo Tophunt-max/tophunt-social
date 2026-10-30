@@ -39,6 +39,7 @@ import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { COMMENT_REPORT_REASONS, useReportReason } from '@/src/components/modals/ReportReasonDialog';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -347,10 +348,11 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
         delayLongPress={350}
       >
         <TouchableOpacity activeOpacity={0.8} onPress={() => openProfile(item.userId)}>
-          <Avatar
+          <FramedAvatar
             uri={item.userAvatar}
             name={item.username}
             size={36}
+            frame={cosmeticsOf(item)?.frame}
             style={styles.commentAvatar}
           />
         </TouchableOpacity>
@@ -364,6 +366,7 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
               {item.username}
             </Text>
             <VerifiedBadge verified={(item as any).verified} size={13} />
+            <NameCosmetics cosmetics={cosmeticsOf(item)} badgeSize={14} showTitle />
             <Text style={[styles.commentTime, { color: subTextColor, marginLeft: 6 }]}>{formatTime(item.createdAt)}</Text>
           </View>
           <Text style={[styles.commentText, { color: textColor }]}>{item.text}</Text>

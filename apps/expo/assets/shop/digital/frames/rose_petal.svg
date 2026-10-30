@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="rosePetalRing" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFC2D4"/>
+      <stop offset="0.5" stop-color="#FF7A9C"/>
+      <stop offset="1" stop-color="#FF4D67"/>
+    </linearGradient>
+    <linearGradient id="rosePetalLeaf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE3EC"/>
+      <stop offset="1" stop-color="#FF8FB1"/>
+    </linearGradient>
+  </defs>
+  <circle cx="60" cy="60" r="54" fill="none" stroke="url(#rosePetalRing)" stroke-width="8"/>
+  <circle cx="60" cy="60" r="50.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="1"/>
+  <g fill="url(#rosePetalLeaf)" stroke="#FF4D67" stroke-width="0.6">
+    <ellipse cx="60" cy="6" rx="4.6" ry="2.8"/>
+    <ellipse cx="60" cy="6" rx="4.6" ry="2.8" transform="rotate(45 60 60)"/>
+    <ellipse cx="60" cy="6" rx="4.6" ry="2.8" transform="rotate(90 60 60)"/>
+    <ellipse cx="60" cy="6" rx="4.6" ry="2.8" transform="rotate(135 60 60)"/>
+    <ellipse cx="60" cy="6" rx="4.6" ry="2.8" transform="rotate(225 60 60)"/>
+    <ellipse cx="60" cy="6" rx="4.6" ry="2.8" transform="rotate(270 60 60)"/>
+    <ellipse cx="60" cy="6" rx="4.6" ry="2.8" transform="rotate(315 60 60)"/>
+  </g>
+  <g transform="translate(60 112)">
+    <circle r="7" fill="#FF4D67"/>
+    <circle r="4.6" fill="#FF7A9C"/>
+    <circle r="2.2" fill="#FFC2D4"/>
+    <ellipse cx="-9" cy="1" rx="4" ry="2" fill="#34D399" transform="rotate(-20 -9 1)"/>
+    <ellipse cx="9" cy="1" rx="4" ry="2" fill="#34D399" transform="rotate(20 9 1)"/>
+  </g>
+</svg>

@@ -140,6 +140,8 @@ export interface RankRow {
   verified: boolean;
   score: number;
   lifetimeXp: number;
+  /** Raw `users.cosmetics` JSON when selected; the read route resolves it (lib/cosmetics.ts#withCardCosmetics). */
+  cosmetics?: unknown;
 }
 
 const toRow = (r: any, rank: number): RankRow => ({
@@ -151,6 +153,7 @@ const toRow = (r: any, rank: number): RankRow => ({
   verified: !!r.verified,
   score: Number(r.score) || 0,
   lifetimeXp: Number(r.lifetime) || 0,
+  ...(r.cosmetics !== undefined ? { cosmetics: r.cosmetics } : {}),
 });
 
 const PERIOD_SCORES = `SELECT uid, SUM(xp) AS score FROM user_xp_daily
@@ -160,14 +163,14 @@ const PERIOD_SCORES = `SELECT uid, SUM(xp) AS score FROM user_xp_daily
 export async function leaderboardPage(env: Env, range: DayRange | null, offset: number, limit: number): Promise<RankRow[]> {
   if (!range) {
     const rows = await env.DB.prepare(
-      `SELECT u.uid, u.username, u.full_name, u.profile_image_url, u.verified, u.xp AS score, u.xp AS lifetime
+      `SELECT u.uid, u.username, u.full_name, u.profile_image_url, u.verified, u.cosmetics, u.xp AS score, u.xp AS lifetime
          FROM users u WHERE ${DISCOVERABLE} AND COALESCE(u.xp, 0) > 0
         ORDER BY u.xp DESC, u.created_at ASC, u.uid ASC LIMIT ? OFFSET ?`,
     ).bind(limit, offset).all<any>();
     return (rows.results ?? []).map((r, i) => toRow(r, offset + i + 1));
   }
   const rows = await env.DB.prepare(
-    `SELECT u.uid, u.username, u.full_name, u.profile_image_url, u.verified, s.score, COALESCE(u.xp, 0) AS lifetime
+    `SELECT u.uid, u.username, u.full_name, u.profile_image_url, u.verified, u.cosmetics, s.score, COALESCE(u.xp, 0) AS lifetime
        FROM (${PERIOD_SCORES}) s JOIN users u ON u.uid = s.uid
       WHERE ${DISCOVERABLE}
       ORDER BY s.score DESC, lifetime DESC, u.created_at ASC, u.uid ASC LIMIT ? OFFSET ?`,

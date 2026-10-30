@@ -3,6 +3,7 @@
  * independently failing query, so one slow or broken section never blanks the
  * whole screen — each section shows its own retry.
  */
+import type { CardCosmetics } from '@/src/services/gamification';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { readApi, readApiWithCursor } from '@/src/services/api';
@@ -81,6 +82,8 @@ export interface SuggestedPerson {
   avatar: string | null;
   verified: boolean;
   followersCount: number;
+  /** Equipped frame / badge / title, shown on the card (null when none). */
+  cosmetics: CardCosmetics | null;
 }
 
 const toPerson = (d: any): SuggestedPerson => ({
@@ -90,6 +93,7 @@ const toPerson = (d: any): SuggestedPerson => ({
   avatar: d.avatarThumbUrl || d.avatarUrl || d.profileImageUrl || null,
   verified: !!d.verified,
   followersCount: Number(d.followersCount) || 0,
+  cosmetics: d.cosmetics && typeof d.cosmetics === 'object' ? d.cosmetics : null,
 });
 
 /** "People you may know": excludes you and everyone you follow (server-side). */

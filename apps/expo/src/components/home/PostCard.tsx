@@ -19,6 +19,7 @@ import { BATTLE_REPORT_REASONS, useReportReason } from '../modals/ReportReasonDi
 import { engagementService } from '@/src/services/contests/engagementService';
 import { Avatar } from '../ui/Avatar';
 import { VerifiedBadge } from '../ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { useVideoStatus } from '@/src/hooks/useVideoStatus';
 import { useCountdown } from '@/src/hooks/useCountdown';
 import { useHlsVideo } from '@/src/hooks/useHlsVideo';
@@ -723,6 +724,9 @@ export const PostCard = memo(({ item, isDark, onMatchEnded, onNotInterested, liv
   // preferring them is safe today and gets lighter automatically at cutover.
   const picA = item.userA.profilePicThumb || item.userA.profilePic || item.userA.profileImageUrl || null;
   const picB = item.userB?.profilePicThumb || item.userB?.profilePic || item.userB?.profileImageUrl || null;
+  // Equipped frame / badge of each side (Worker: enrichParticipants).
+  const cosA = cosmeticsOf(item.userA);
+  const cosB = cosmeticsOf(item.userB);
 
   /**
    * The opponent side, and what this battle pays.
@@ -761,21 +765,21 @@ export const PostCard = memo(({ item, isDark, onMatchEnded, onNotInterested, liv
               <TouchableOpacity
                 activeOpacity={0.8}
                 onPress={() => openProfile(item.userA?.uid)}
-                style={[styles.avatarWrapper, aWins && styles.leadingAvatar, { zIndex: 2 }]}
+                style={[cosA?.frame ? styles.framedAvatarWrapper : [styles.avatarWrapper, aWins && styles.leadingAvatar], { zIndex: 2 }]}
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${nameA}'s profile`}
               >
-                <Avatar uri={picA} name={nameA} fill size={28} />
+                {cosA?.frame ? <FramedAvatar uri={picA} name={nameA} size={34} frame={cosA.frame} /> : <Avatar uri={picA} name={nameA} fill size={28} />}
               </TouchableOpacity>
               {item.userB && (
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={() => openProfile(item.userB?.uid)}
-                  style={[styles.avatarWrapper, bWins && styles.leadingAvatar, { marginLeft: -14, zIndex: 1 }]}
+                  style={[cosB?.frame ? styles.framedAvatarWrapper : [styles.avatarWrapper, bWins && styles.leadingAvatar], { marginLeft: -14, zIndex: 1 }]}
                   accessibilityRole="button"
                   accessibilityLabel={`Open ${nameB}'s profile`}
                 >
-                  <Avatar uri={picB} name={nameB} fill size={28} />
+                  {cosB?.frame ? <FramedAvatar uri={picB} name={nameB} size={34} frame={cosB.frame} /> : <Avatar uri={picB} name={nameB} fill size={28} />}
                 </TouchableOpacity>
               )}
            </View>
@@ -790,6 +794,7 @@ export const PostCard = memo(({ item, isDark, onMatchEnded, onNotInterested, liv
                    >
                      <Text style={[styles.nameText, { color: textColor }]} numberOfLines={1}>{nameA}</Text>
                      <VerifiedBadge verified={item.userA?.verified} size={13} />
+                     <NameCosmetics cosmetics={cosA} badgeSize={13} />
                    </TouchableOpacity>
                    <View style={styles.vsPill}><Text style={styles.vsPillText}>VS</Text></View>
                    <TouchableOpacity
@@ -801,6 +806,7 @@ export const PostCard = memo(({ item, isDark, onMatchEnded, onNotInterested, liv
                    >
                      <Text style={[styles.nameText, { color: textColor }]} numberOfLines={1}>{nameB}</Text>
                      <VerifiedBadge verified={item.userB?.verified} size={13} />
+                     <NameCosmetics cosmetics={cosB} badgeSize={13} />
                    </TouchableOpacity>
                </View>
                <Text style={[styles.timeText, { color: subTextColor }]} numberOfLines={1}>{item.title}</Text>
@@ -1127,6 +1133,8 @@ const styles = StyleSheet.create({
   userInfo: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 10 },
   avatarContainer: { flexDirection: 'row', alignItems: 'center' },
   avatarWrapper: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: '#FFF', overflow: 'hidden', backgroundColor: '#EEE' },
+  // With an equipped frame the frame replaces the white ring, in about the same footprint.
+  framedAvatarWrapper: { width: 34, height: 34, marginVertical: -1 },
   avatarImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   videoPlaceholder: { backgroundColor: '#15171C', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   videoPlaceholderOverlay: { alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.45)', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 },

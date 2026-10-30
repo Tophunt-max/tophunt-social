@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { UserStories } from '@/src/types/stories';
 import { Avatar } from '../ui/Avatar';
 import { VerifiedBadge } from '../ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import AddIcon from '@/assets/svgs/add_Icon.svg';
 import { auth } from '@/src/services/firebase/initFirebase';
 import { useRouter } from 'expo-router';
@@ -67,7 +68,7 @@ export const StoryItem: React.FC<StoryItemProps> = memo(({ item, isCurrentUser, 
       // No Story - No Ring
       return (
         <View style={styles.ring}>
-           <Avatar uri={avatarUrl} name={username} size={64} />
+           <FramedAvatar uri={avatarUrl} name={username} size={64} frame={cosmeticsOf(item)?.frame} />
         </View>
       );
     }
@@ -89,6 +90,7 @@ export const StoryItem: React.FC<StoryItemProps> = memo(({ item, isCurrentUser, 
           {username}
         </Text>
         {!isCurrentUser && <VerifiedBadge verified={(item as any)?.verified} size={12} />}
+        {!isCurrentUser && <NameCosmetics cosmetics={cosmeticsOf(item)} badgeSize={12} />}
       </View>
     </Pressable>
   );

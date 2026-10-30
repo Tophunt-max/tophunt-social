@@ -11,6 +11,7 @@ import {
 import { usePathname, useRouter } from 'expo-router';
 import { Alert } from '@/src/lib/appAlert';
 import { Avatar } from '@/src/components/ui/Avatar';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { useAuth } from '@/src/hooks/useAuth';
 import { loginHref } from '@/src/lib/authGate';
 import { commentService, Comment } from '@/src/services/comments/commentService';
@@ -347,12 +348,13 @@ export default function BlogComments({ postId, isDark }: Props) {
             const liked = !!cm.likedByMe;
             return (
               <View key={cm.id} style={[styles.item, cm.pending && { opacity: 0.55 }]}>
-                <Avatar uri={cm.userAvatar} name={cm.username} size={38} />
+                <FramedAvatar uri={cm.userAvatar} name={cm.username} size={38} frame={cosmeticsOf(cm)?.frame} />
                 <View style={{ flex: 1 }}>
                   <View style={styles.itemHead}>
                     <Text style={[styles.itemName, { color: textColor, fontFamily: FONT_SANS }]} numberOfLines={1}>
                       {cm.username || 'TopHunt reader'}
                     </Text>
+                    <NameCosmetics cosmetics={cosmeticsOf(cm)} badgeSize={14} />
                     <Text style={[styles.itemTime, { color: subTextColor, fontFamily: FONT_SANS }]}>
                       {cm.pending ? 'Posting…' : relativeTime(cm.createdAt)}
                     </Text>

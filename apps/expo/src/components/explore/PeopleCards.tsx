@@ -3,8 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@/src/lib/icons';
-import { Avatar } from '@/src/components/ui/Avatar';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { followButtonLabel, type FollowState } from '@/src/lib/followState';
 import { compactCount } from '@/src/lib/exploreMedia';
 import type { SuggestedPerson } from '@/src/services/explore';
@@ -38,12 +38,13 @@ export const PersonCard = React.memo(function PersonCard({
       >
         <LinearGradient colors={['#FF4D67', '#8B5CF6']} style={styles.ring}>
           <View style={[styles.ringInner, { backgroundColor: palette.card }]}>
-            <Avatar uri={person.avatar} name={person.name} size={62} />
+            <FramedAvatar uri={person.avatar} name={person.name} size={62} frame={person.cosmetics?.frame} />
           </View>
         </LinearGradient>
         <View style={styles.nameRow}>
           <Text style={[styles.name, { color: palette.text }]} numberOfLines={1}>{person.name}</Text>
           <VerifiedBadge verified={person.verified} size={13} />
+          <NameCosmetics cosmetics={person.cosmetics} badgeSize={14} />
         </View>
         <Text style={[styles.handle, { color: palette.sub }]} numberOfLines={1}>@{person.username}</Text>
         {person.followersCount > 0 ? (
@@ -78,7 +79,7 @@ export const CreatorChip = React.memo(function CreatorChip({ user, rank, palette
     >
       <View style={{ alignItems: 'center' }}>
         <View style={[styles.creatorRing, { borderColor: rank <= 3 ? medal : palette.border }]}>
-          <Avatar uri={user.profileImageUrlThumb || user.profileImageUrl} name={user.fullName || user.username} size={60} />
+          <FramedAvatar uri={user.profileImageUrlThumb || user.profileImageUrl} name={user.fullName || user.username} size={60} frame={cosmeticsOf(user)?.frame} />
         </View>
         <View style={[styles.rank, { backgroundColor: medal }]}>
           <Text style={[styles.rankText, { color: rank <= 3 ? '#3B2A00' : palette.text }]}>{rank}</Text>
