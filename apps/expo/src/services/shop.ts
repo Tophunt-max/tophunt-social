@@ -1,13 +1,12 @@
 /**
  * Physical shop (DP coin) and XP → Diamond conversion clients.
  *
- * The cart lives on the device (zustand, persisted). The server re-prices and
+ * The cart lives on the device (zustand, saved to AsyncStorage). The server re-prices and
  * re-checks stock at checkout; the app sends the total it showed and a
  * per-checkout `requestId`, so a retry never places two orders.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { callApi } from '@/src/services/api';
 
@@ -143,23 +142,54 @@ interface CartState {
 
 export const MAX_QTY = 5;
 
-export const useCart = create<CartState>()(
-  persist(
-    (set) => ({
-      lines: [],
-      add: (l) =>
-        set((s) => {
-          const prev = s.lines.find((x) => x.variantId === l.variantId);
-          if (prev) return { lines: s.lines.map((x) => (x.variantId === l.variantId ? { ...x, qty: Math.min(MAX_QTY, x.qty + l.qty), unitCoins: l.unitCoins } : x)) };
-          return { lines: [...s.lines, { ...l, qty: Math.min(MAX_QTY, l.qty) }].slice(0, 10) };
-        }),
-      setQty: (variantId, qty) => set((s) => ({ lines: s.lines.map((x) => (x.variantId === variantId ? { ...x, qty: Math.max(1, Math.min(MAX_QTY, qty)) } : x)) })),
-      remove: (variantId) => set((s) => ({ lines: s.lines.filter((x) => x.variantId !== variantId) })),
-      clear: () => set({ lines: [] }),
+const CART_KEY = 'tophunt-shop-cart';
+
+// Persisted MANUALLY, like src/store/signup.ts: `zustand/middleware` uses
+// `import.meta.env`, which the Expo web export puts in a classic <script> and
+// which then throws "Cannot use 'import.meta' outside a module" — a blank web app.
+export const useCart = create<CartState>()((set) => ({
+  lines: [],
+  add: (l) =>
+    set((s) => {
+      const prev = s.lines.find((x) => x.variantId === l.variantId);
+      if (prev) return { lines: s.lines.map((x) => (x.variantId === l.variantId ? { ...x, qty: Math.min(MAX_QTY, x.qty + l.qty), unitCoins: l.unitCoins } : x)) };
+      return { lines: [...s.lines, { ...l, qty: Math.min(MAX_QTY, l.qty) }].slice(0, 10) };
     }),
-    { name: 'tophunt-shop-cart', storage: createJSONStorage(() => AsyncStorage) },
-  ),
-);
+  setQty: (variantId, qty) => set((s) => ({ lines: s.lines.map((x) => (x.variantId === variantId ? { ...x, qty: Math.max(1, Math.min(MAX_QTY, qty)) } : x)) })),
+  remove: (variantId) => set((s) => ({ lines: s.lines.filter((x) => x.variantId !== variantId) })),
+  clear: () => set({ lines: [] }),
+}));
+
+/** Lines read back from storage, keeping only well-formed ones. */
+export function parseStoredCart(raw: string | null): CartLine[] {
+  try {
+    const v = raw ? JSON.parse(raw) : null;
+    // Also reads the old zustand `persist` shape: { state: { lines }, version }.
+    const lines = Array.isArray(v?.lines) ? v.lines : Array.isArray(v?.state?.lines) ? v.state.lines : [];
+    return lines
+      .filter((l: any) => l && typeof l.variantId === 'string' && typeof l.productId === 'string' && Number.isFinite(Number(l.qty)))
+      .map((l: any) => ({ ...l, qty: Math.max(1, Math.min(MAX_QTY, Math.floor(Number(l.qty)))) }))
+      .slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
+let cartHydrated = false;
+AsyncStorage.getItem(CART_KEY)
+  .then((raw) => {
+    const saved = parseStoredCart(raw);
+    // Something added before the read finished wins over the saved copy.
+    if (saved.length && useCart.getState().lines.length === 0) useCart.setState({ lines: saved });
+  })
+  .catch(() => {})
+  .finally(() => {
+    cartHydrated = true;
+  });
+useCart.subscribe((s) => {
+  if (!cartHydrated) return;
+  AsyncStorage.setItem(CART_KEY, JSON.stringify({ lines: s.lines })).catch(() => {});
+});
 
 /** Re-price the cart against the current catalogue; drops lines that are gone. */
 export function repriceCart(lines: CartLine[], products: ShopProduct[] | undefined) {
