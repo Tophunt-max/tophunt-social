@@ -351,7 +351,7 @@ export const AUDITED_PUBLIC_ROUTES = [
 ] as const;
 
 /** A sample of screens that must never be indexable. */
-const AUDITED_PRIVATE_ROUTES = ["/wallet/withdraw", "/auth/login", "/setting"] as const;
+const AUDITED_PRIVATE_ROUTES = ["/wallet", "/auth/login", "/setting"] as const;
 
 export function seoSiteOrigin(env: Env): string {
   const configured = String((env as any).SEO_SITE_ORIGIN || "").trim();
@@ -622,7 +622,7 @@ function runTechnical(
     "tech.noindex.private",
     "critical",
     "Signed-in and transactional screens are noindex",
-    "Wallet, auth and settings screens must not be indexable. An indexed withdrawal or OTP screen is a " +
+    "Wallet, auth and settings screens must not be indexable. An indexed wallet or OTP screen is a " +
       "privacy and trust problem, not just an SEO one.",
     indexablePrivate,
   );

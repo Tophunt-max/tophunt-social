@@ -1,9 +1,6 @@
 import { callApi } from '../api';
 
-// Real-money top-ups (createOrder / topup / requestDeposit) and withdrawals
-// (requestWithdrawal) are retired: the server refuses them (worker
-// lib/cashRetirement.ts). Diamonds are earned (app/earn), DP coin is spent in
-// the shop (src/services/shop.ts).
+// Diamonds are earned (app/earn), DP coin is spent in the shop (src/services/shop.ts).
 export const walletService = {
   claimDailyBonus: async () => {
     try {
@@ -29,12 +26,7 @@ export const walletService = {
     }
   },
 
-  /**
-   * Request a cash payout of Dpcoins. The Worker validates against the admin
-   * withdrawal config (enabled / min amount / conversion rate) and creates a
-   * pending request; coins are held by the admin on approval.
-   */
-  /** `quotedFee`: the platform fee shown to the user; the server refuses if it no longer matches. */
+  /** Today's daily-reward state. */
   getDailyReward: async () => {
     return await callApi('getDailyReward', {});
   },

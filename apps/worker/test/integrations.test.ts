@@ -8,7 +8,6 @@ import { openSecret, sealSecret, secretStorageAvailable } from '../src/lib/secre
 import {
   deleteSecret,
   getIntegrations,
-  getRazorpayCredentials,
   integrationSecretStatus,
   invalidateIntegrationCache,
   putSecret,
@@ -16,10 +15,11 @@ import {
   saveIntegrations,
   validateIntegrations,
   DEFAULT_INTEGRATIONS,
+  SECRET_DEFINITIONS,
 } from '../src/lib/integrations';
 import { sendSmsDetailed } from '../src/lib/sms';
 import { sendEmailDetailed, emailConfigured, sendUserEmail } from '../src/lib/email';
-import { coinsAddedEmail } from '../src/lib/emailTemplates';
+import { contestWinEmail } from '../src/lib/emailTemplates';
 
 // base64("test-encryption-key-for-unit-tests") — a fixed test vector, not a
 // credential. Named to avoid tripping secret scanners.
@@ -198,14 +198,17 @@ describe('integration config', () => {
     expect(() => validateIntegrations({ ...base, video: { provider: 'qencode' } })).not.toThrow();
   });
 
-  it('exposes the Razorpay key id from config with an environment fallback', async () => {
-    const e = env({ RAZORPAY_KEY_ID: 'rzp_env', RAZORPAY_KEY_SECRET: 'secret_env' });
-    expect((await getRazorpayCredentials(e as any)).keyId).toBe('rzp_env');
-
-    await saveIntegrations(e as any, { payments: { razorpayKeyId: 'rzp_panel' } });
-    const creds = await getRazorpayCredentials(e as any);
-    expect(creds.keyId).toBe('rzp_panel');
-    expect(creds.keySecret).toBe('secret_env');
+  it('has no payment gateway group or Razorpay secrets any more', async () => {
+    const e = env();
+    const integrations: Record<string, unknown> = await import('../src/lib/integrations');
+    expect('getRazorpayCredentials' in integrations).toBe(false);
+    expect(Object.keys(DEFAULT_INTEGRATIONS)).not.toContain('payments');
+    const names = SECRET_DEFINITIONS.map((d) => d.name);
+    expect(names.filter((n) => /RAZORPAY/.test(n))).toEqual([]);
+    expect(SECRET_DEFINITIONS.some((d) => (d.group as string) === 'payments')).toBe(false);
+    // An old panel resending a payments block stores nothing for it.
+    const saved = await saveIntegrations(e as any, { payments: { razorpayKeyId: 'rzp_panel' } } as any);
+    expect((saved as any).payments).toBeUndefined();
   });
 });
 
@@ -425,7 +428,7 @@ describe('email gateway dispatch', () => {
 });
 
 // ===========================================================================
-// The shared helper every transactional receipt (payout, prize, clawback) uses:
+// The shared helper every transactional receipt (prize, refund) uses:
 // resolve the user's address from their uid, send best-effort, never throw.
 describe('sendUserEmail (uid -> address)', () => {
   async function seedUser(e: TestEnv, uid: string, email: string | null) {
@@ -447,7 +450,7 @@ describe('sendUserEmail (uid -> address)', () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true, data: { reference_id: 'r1' } }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await sendUserEmail(e as any, 'alice', coinsAddedEmail(500));
+    await sendUserEmail(e as any, 'alice', contestWinEmail('Sunset vs Sunrise', 500));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const sent = JSON.parse((fetchMock.mock.calls[0] as any)[1].body);
@@ -462,7 +465,7 @@ describe('sendUserEmail (uid -> address)', () => {
     const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await sendUserEmail(e as any, 'bob', coinsAddedEmail(500));
+    await sendUserEmail(e as any, 'bob', contestWinEmail('Sunset vs Sunrise', 500));
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -473,7 +476,7 @@ describe('sendUserEmail (uid -> address)', () => {
     await seedUser(e, 'carol', 'carol@example.com');
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
 
-    // Must resolve, not reject — a receipt failure cannot break the money write.
-    await expect(sendUserEmail(e as any, 'carol', coinsAddedEmail(500))).resolves.toBeUndefined();
+    // Must resolve, not reject — a receipt failure cannot break the coin write.
+    await expect(sendUserEmail(e as any, 'carol', contestWinEmail('Sunset vs Sunrise', 500))).resolves.toBeUndefined();
   });
 });

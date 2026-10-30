@@ -18,7 +18,7 @@ import { requestConfirm } from './confirmBridge';
  * user got no feedback whatsoever from any of them: "Upload failed",
  * "Insufficient Coins", "Invalid OTP", "Below minimum", "Account required",
  * "Request submitted", "Bonus Claimed!" — all silently discarded. A failed
- * withdrawal looked identical to a successful one.
+ * action looked identical to a successful one.
  *
  * The confirmations were worse than invisible: "Delete Chat", "Delete Story",
  * "Delete comment?" and the block/mute actions never ran their handler, so the

@@ -1,14 +1,14 @@
 /**
  * Promo budgets — the only way the platform gives away coins it was not paid for.
  *
- * Two kinds of offer can cost the platform coins:
+ * Offers that cost the platform coins:
  *
- *   package_bonus   bonus coins on a coin package beyond what its price covers
  *   contest_prize   the part of a contest prize that is larger than the pot the
  *                   two players funded
  *   product_prize   the coin cost of a physical prize (set by the admin, never
  *                   shown to users) above the pot, per match won
- *   free_rewards    a cap on daily login + rewarded ads + daily task coins
+ *   free_rewards    a cap on every free Diamond (check-in, tasks, ads, XP
+ *                   conversion, signup bonus, Hall of Fame)
  *                   (appConfig.freeRewardsBudgetId); when it runs out those
  *                   rewards pause until the admin raises it
  *
@@ -24,11 +24,6 @@
  * amount (platform expense), next to the user's own `coin_transactions` row, so
  * the admin can see exactly where each promo coin went.
  *
- * Package bonus coins from a budget are credited as LOCKED coins
- * (`users.locked_coins`): they can be spent on contest entry fees but never
- * withdrawn. That is what makes a "loss-making" package safe to sell — the bonus
- * can be played with, not cashed out.
- *
  * All statements here are plain prepared statements meant to be placed inside
  * the caller's existing gated `DB.batch`, with the caller's gate appended, so a
  * promo credit applies in the same transaction as the money movement it belongs
@@ -40,17 +35,12 @@ import { MAX_COIN_AMOUNT } from "./money";
 import { getAppConfig } from "./settings";
 import { sendEmail } from "./email";
 
-export const BUDGET_KINDS = ["package_bonus", "contest_prize", "product_prize", "free_rewards"] as const;
+export const BUDGET_KINDS = ["contest_prize", "product_prize", "free_rewards"] as const;
 export type BudgetKind = (typeof BUDGET_KINDS)[number];
 export const BUDGET_STATUSES = ["active", "paused", "closed"] as const;
 export type BudgetStatus = (typeof BUDGET_STATUSES)[number];
 
-/** How long a Razorpay checkout keeps its bonus reserved before it stops counting. */
-export const ORDER_RESERVATION_TTL_MS = 60 * 60 * 1000;
-
 /** Reservation ids are deterministic so a retry can never reserve twice. */
-export const orderReservationId = (orderId: string) => `order:${orderId}`;
-export const depositReservationId = (depositId: string) => `deposit:${depositId}`;
 export const matchReservationId = (matchId: string) => `match:${matchId}`;
 
 /**
@@ -74,7 +64,7 @@ export interface ReserveInput {
   /** The recipient, for the per-user limit. Null skips the per-user check. */
   uid: string | null;
   coins: number;
-  refType: "order" | "deposit" | "match" | "free";
+  refType: "match" | "free";
   refId: string;
   expiresAt: number | null;
   ts: number;
@@ -122,7 +112,7 @@ export async function tryReserve(env: Env, r: Omit<ReserveInput, "gate" | "gateA
   return row?.status === "held";
 }
 
-/** Give a hold back to its budget (deposit rejected, match refunded). */
+/** Give a hold back to its budget (match refunded). */
 export function releaseStatement(env: Env, reservationId: string, ts: number, gate?: string, gateArgs: unknown[] = []): D1PreparedStatement {
   return env.DB.prepare(
     `UPDATE promo_reservations SET status = 'released', updated_at = ?
@@ -132,7 +122,7 @@ export function releaseStatement(env: Env, reservationId: string, ts: number, ga
 
 export interface PlatformEntry {
   id: string;
-  kind: "promo_bonus" | "prize_subsidy" | "product_prize" | "product_prize_reversal" | "free_reward" | "platform_fee" | "product_prize_fund";
+  kind: "prize_subsidy" | "product_prize" | "product_prize_reversal" | "free_reward" | "platform_fee" | "product_prize_fund";
   /** + platform income, − platform expense. */
   coins: number;
   budgetId?: string | null;
@@ -157,68 +147,6 @@ export function platformLedgerStatement(env: Env, e: PlatformEntry, gate?: strin
   );
 }
 
-export interface PromoBonusCredit {
-  uid: string;
-  coins: number;
-  budgetId: string;
-  reservationId: string;
-  /** Ledger row id; deterministic per purchase. */
-  ledgerId: string;
-  refId: string;
-  description: string;
-  ts: number;
-}
-
-/**
- * Credit a package's budget-funded bonus as LOCKED coins.
- *
- * Returns the statements to place in the caller's batch BEFORE its final claim
- * statement, all carrying the caller's `gate` so they apply exactly when the
- * purchase itself is credited. The bonus row is separate from the `purchase`
- * row, which then carries only the coins that were paid for.
- */
-export function promoBonusCreditStatements(
-  env: Env,
-  p: PromoBonusCredit,
-  gate: string,
-  gateArgs: unknown[],
-): D1PreparedStatement[] {
-  return [
-    env.DB.prepare(
-      `INSERT OR IGNORE INTO coin_transactions
-         (id, uid, amount, type, description, created_at, locked_delta, budget_id)
-       SELECT ?, ?, ?, 'promo_bonus', ?, ?, ?, ?
-        WHERE ${gate}`,
-    ).bind(p.ledgerId, p.uid, p.coins, p.description, p.ts, p.coins, p.budgetId, ...gateArgs),
-    env.DB.prepare(
-      `UPDATE users SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, updated_at = ?
-        WHERE uid = ? AND ${gate}`,
-    ).bind(p.coins, p.coins, p.ts, p.uid, ...gateArgs),
-    env.DB.prepare(
-      `UPDATE promo_budgets SET spent_coins = spent_coins + ?, updated_at = ?
-        WHERE id = ? AND ${gate}`,
-    ).bind(p.coins, p.ts, p.budgetId, ...gateArgs),
-    platformLedgerStatement(
-      env,
-      {
-        id: `pl:${p.ledgerId}`,
-        kind: "promo_bonus",
-        coins: -p.coins,
-        budgetId: p.budgetId,
-        uid: p.uid,
-        refId: p.refId,
-        description: p.description,
-        ts: p.ts,
-      },
-      gate,
-      gateArgs,
-    ),
-    env.DB.prepare(
-      `UPDATE promo_reservations SET status = 'used', updated_at = ?
-        WHERE id = ? AND ${gate}`,
-    ).bind(p.ts, p.reservationId, ...gateArgs),
-  ];
-}
 
 /**
  * One admin notification (and an email to `adminAlertEmail`, if set) per
@@ -419,7 +347,6 @@ export interface BudgetSummary {
   live: boolean;
   usedCount: number;
   heldCount: number;
-  linkedPackages: number;
   linkedContests: number;
 }
 
@@ -429,7 +356,6 @@ const SUMMARY_SQL = `
          (SELECT COUNT(*) FROM promo_reservations r WHERE r.budget_id = b.id AND r.status = 'used') AS used_count,
          (SELECT COUNT(*) FROM promo_reservations r WHERE r.budget_id = b.id AND r.status = 'held'
              AND (r.expires_at IS NULL OR r.expires_at > ?)) AS held_count,
-         (SELECT COUNT(*) FROM coin_packages p WHERE p.budget_id = b.id) AS linked_packages,
          (SELECT COUNT(*) FROM contests ct WHERE ct.subsidy_budget_id = b.id) AS linked_contests
     FROM promo_budgets b`;
 
@@ -458,7 +384,6 @@ function toSummary(r: any, ts: number): BudgetSummary {
     live: r.status === "active" && inWindow && remaining > 0,
     usedCount: Number(r.used_count) || 0,
     heldCount: Number(r.held_count) || 0,
-    linkedPackages: Number(r.linked_packages) || 0,
     linkedContests: Number(r.linked_contests) || 0,
   };
 }
@@ -483,7 +408,6 @@ export async function assertLinkableBudget(env: Env, id: string, kind: BudgetKin
   if (!b) throw httpsError("not-found", "Promo budget not found.");
   if (b.kind !== kind) {
     const need: Record<BudgetKind, string> = {
-      package_bonus: "Coin package ke liye 'Package bonus' budget chuno.",
       contest_prize: "Coin prize wale contest ke liye 'Contest prize' budget chuno.",
       product_prize: "Product prize wale contest ke liye 'Product prize' budget chuno.",
       free_rewards: "Free rewards ki limit ke liye 'Free rewards' budget chuno.",

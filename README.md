@@ -78,10 +78,10 @@ dependency audit, and the migration append-only check.
 
 Two layers, deliberately separate:
 
-1. **Admin panel → App Settings** — wallet limits, deposit mode, rewarded-ad
-   policy, legal copy, contact details. Stored in D1.
-2. **Admin panel → Integrations** — which SMS gateway, email provider, payment
-   gateway and video CDN to use, plus their credentials.
+1. **Admin panel → App Settings** — rewarded-ad policy, legal copy, contact
+   details. Stored in D1. Coins and rewards live in **Coin Economy**.
+2. **Admin panel → Integrations** — which SMS gateway, email provider and video
+   CDN to use, plus their credentials.
 
 Credentials set in the panel are **AES-256-GCM encrypted** with
 `SETTINGS_ENCRYPTION_KEY`, which stays a Cloudflare secret and is never written to

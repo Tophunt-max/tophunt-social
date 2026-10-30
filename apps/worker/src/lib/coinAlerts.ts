@@ -4,8 +4,6 @@
  * runCoinAlerts (every 6 hours, index.ts) raises one admin notification (and an
  * email to `adminAlertEmail`) when:
  *   - a promo budget is 80%+ used (spent + reserved)
- *   - the ₹ the platform owes (withdrawable coins × payout rate, plus payouts
- *     pending) is more than the ₹ it has taken in, net of refunds and payouts
  *   - a user received more free coins in 24 hours than
  *     `appConfig.coinAlerts.dailyFreeCoinsPerUser` (default 300)
  *
@@ -51,12 +49,11 @@ export function validateCoinAlertPatch(body: any): void {
 
 export interface CoinAlertResult {
   budgets: number;
-  liability: boolean;
   heavyEarners: number;
 }
 
 export async function runCoinAlerts(env: Env, ts = Date.now()): Promise<CoinAlertResult> {
-  const out: CoinAlertResult = { budgets: 0, liability: false, heavyEarners: 0 };
+  const out: CoinAlertResult = { budgets: 0, heavyEarners: 0 };
   const cfg = await getAppConfig(env);
 
   // 1. Budgets 80%+ used.
@@ -75,22 +72,7 @@ export async function runCoinAlerts(env: Env, ts = Date.now()): Promise<CoinAler
     if (sent) out.budgets++;
   }
 
-  // 2. Liability vs cash.
-  const eco = await coinEconomyOverview(env);
-  const cash = eco.cash.paidInInr - eco.cash.refundedInr - eco.cash.paidOutInr;
-  const owed = eco.supply.liabilityInr + eco.cash.pendingOutInr;
-  if (owed > 0 && owed > cash) {
-    out.liability = await adminAlert(
-      env,
-      "Liability cash se zyada",
-      `Users ke withdraw hone wale coin + pending payout = ₹${owed.toFixed(2)}, jabki net cash (aaya − refund − bheja) = ₹${cash.toFixed(2)}. ` +
-        `Free rewards ya promo budgets check karo.`,
-      "/coin-economy",
-      DAY,
-    );
-  }
-
-  // 3. Users who got a lot of free coins in 24 hours.
+  // 2. Users who got a lot of free coins in 24 hours.
   const threshold = freeCoinsAlertThreshold(cfg);
   const placeholders = FREE_TYPES.map(() => "?").join(",");
   const heavy = await env.DB.prepare(
@@ -153,7 +135,7 @@ export async function buildCoinReport(env: Env, from: number, to: number, title:
     `SELECT t.uid AS uid, u.username AS username, SUM(t.amount) AS coins
        FROM coin_transactions t LEFT JOIN users u ON u.uid = t.uid
       WHERE t.created_at >= ? AND t.created_at < ? AND t.amount > 0
-        AND t.type NOT IN ('opening', 'withdrawal_refund', 'withdrawal_hold_release', 'contest_refund', 'contest_entry_refund')
+        AND t.type NOT IN ('opening', 'contest_refund', 'contest_entry_refund')
       GROUP BY t.uid ORDER BY coins DESC LIMIT 5`,
   ).bind(from, to).all<any>().catch(() => ({ results: [] as any[] }));
   const failing = eco.checks.filter((c) => !c.ok);
@@ -163,7 +145,7 @@ export async function buildCoinReport(env: Env, from: number, to: number, title:
     <h2 style="margin:0 0 4px">${esc(title)}</h2>
     <p style="margin:0 0 16px;color:#666">${esc(new Date(from).toISOString().slice(0, 16))} → ${esc(new Date(to).toISOString().slice(0, 16))} UTC</p>
     <h3>Abhi ki halat</h3>
-    <table>${row("Users ke paas coin", n(eco.supply.total))}${row("DP coin (withdraw ho sakte)", n(eco.supply.withdrawable))}${row("Diamond (sirf khelne ke liye)", n(eco.supply.locked))}${row("Liability", `₹${eco.supply.liabilityInr.toFixed(2)}`)}${row("Payout pending", `₹${eco.cash.pendingOutInr.toFixed(2)}`)}</table>
+    <table>${row("Users ke paas coin", n(eco.supply.total))}${row("DP coin (shopping ke liye)", n(eco.supply.withdrawable))}${row("Diamond (contest entry ke liye)", n(eco.supply.locked))}${row("DP coin ki shop value", `₹${eco.supply.liabilityInr.toFixed(2)}`)}</table>
     <h3>Is dauran coin flow</h3>
     <table>${cats.map(([k, c]) => row(CATEGORY_LABELS[k] ?? c.label, `${c.net > 0 ? "+" : ""}${n(c.net)}`)).join("")}</table>
     <h3>Platform</h3>

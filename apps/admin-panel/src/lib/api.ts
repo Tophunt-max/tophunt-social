@@ -364,9 +364,6 @@ async function uploadBinary(
 const uploadContestBanner = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/contest-banner", file, onProgress, "Banner upload failed. Check your connection and try again.");
 
-const uploadPaymentQr = (file: File, onProgress?: UploadProgressHandler) =>
-  uploadBinary("/admin/media/payment-qr", file, onProgress, "QR upload failed. Check your connection and try again.");
-
 export interface OnboardingStats {
   days: number;
   since: string;
@@ -402,7 +399,7 @@ export function setReauthHandler(fn: (() => Promise<boolean>) | null) {
 }
 
 /**
- * Promo actions (budgets, budget-funded packages and contest prizes) also need
+ * Promo actions (budgets and contest prizes) also need
  * the separate APPROVAL password (worker lib/approvalPassword.ts). When the
  * server answers `approval_required` / `approval_invalid`, the handler prompts
  * for it and the request is re-sent with `approvalPassword` in the body. The
@@ -493,7 +490,7 @@ const patch = <T>(p: string, b?: unknown) => req<T>("PATCH", p, b ?? {});
 const put = <T>(p: string, b?: unknown) => req<T>("PUT", p, b ?? {});
 const del = <T>(p: string) => req<T>("DELETE", p);
 
-// ─── Integrations (SMS / email / payments / video / storage) ─────────────────
+// ─── Integrations (SMS / email / video / storage) ─────────────────
 
 export type SecretSource = "panel" | "environment" | "unset";
 
@@ -504,7 +501,7 @@ export type SecretSource = "panel" | "environment" | "unset";
 export interface SecretStatus {
   name: string;
   label: string;
-  group: "sms" | "email" | "payments" | "video" | "storage" | "auth" | "observability";
+  group: "sms" | "email" | "video" | "storage" | "auth" | "observability";
   help?: string;
   sensitive: boolean;
   multiline: boolean;
@@ -566,7 +563,6 @@ export interface IntegrationsConfig {
     customBody: string;
   };
   email: { provider: "resend" | "brevo" | "maileroo" | "none"; from: string; replyTo: string };
-  payments: { razorpayKeyId: string };
   video: { provider: "qencode" | "r2" };
   push: { vapidPublicKey: string };
 }
@@ -639,19 +635,10 @@ export interface MoneyHealth {
   ts: number;
   ledgerDrift: { count: number; samples: LedgerDriftSample[] };
   negativeBalances: { count: number; samples: { uid: string; balance: number }[] };
-  strandedPaidOrders: number;
-  /** Approved manual deposits whose coins never landed (optional on older Workers). */
-  strandedApprovedDeposits?: number;
-  stuckCreatedOrders: number;
-  clawbackShortfalls: { count: number; coins: number };
   /** Locked (play-only promo) coins out of step with the ledger or above the balance. */
   lockedDrift?: { count: number; overBalance: number; samples: { uid: string; locked: number; ledger: number; balance: number }[] };
-  /** Promo-budget holds left on a finished match / processed deposit. */
+  /** Promo-budget holds left on a finished match. */
   staleReservations?: number;
-  /** Escrowed withdrawals missing their hold/refund ledger row (optional on older Workers). */
-  withdrawalLedgerGaps?: { count: number; samples: { id: string; status: string; missing: string }[] };
-  pendingDeposits: { count: number; oldestAgeMs: number | null };
-  pendingWithdrawals: { count: number; oldestAgeMs: number | null };
 }
 
 export interface IntegrationsResponse {
@@ -729,14 +716,8 @@ export const api = {
       posts: number;
       reports: number;
       support: number;
-      /** COINS sold all-time (payments.amount has always held coins). */
-      revenue: number;
-      /** Actual money collected, in rupees. */
-      revenueInr: number;
       activeMatches: number;
       liveContests: number;
-      pendingWithdrawals: number;
-      pendingDeposits: number;
       /**
        * Prize claims still needing an operator: everything that is neither
        * delivered nor cancelled. Includes `unclaimed`, which is waiting on the
@@ -806,9 +787,6 @@ export const api = {
    */
   deleteProductImage: (url: string) =>
     req<{ success: true }>("DELETE", "/admin/media/product-image", { url }),
-
-  // Manual payment QR image upload (stored in R2, returns a public URL).
-  uploadPaymentQr,
 
   // prize claims (physical prize fulfilment queue)
   prizeClaims: (params?: { status?: PrizeClaimStatus; limit?: number }) => {
@@ -1051,7 +1029,7 @@ export const api = {
   retryVsStory: (id: string) =>
     post<{ outcome: string; reason?: string }>(`/admin/matches/${id}/vs-story/retry`),
 
-  // transactions + revenue
+  // transactions
   transactions: (params?: { uid?: string; type?: string; limit?: number }) => {
     const q = new URLSearchParams();
     if (params?.uid) q.set("uid", params.uid);
@@ -1061,31 +1039,6 @@ export const api = {
     return get<any[]>(`/admin/transactions${s ? `?${s}` : ""}`);
   },
   transactionTypes: () => get<string[]>("/admin/transactions/types"),
-  // Revenue is reported in RUPEES; coin counts are separate fields. The old
-  // response summed a coin column and called it revenue.
-  revenue: () =>
-    get<{
-      totalRevenue: number; // rupees (same as grossRevenueInr)
-      grossRevenueInr: number;
-      refundedInr: number;
-      netRevenueInr: number;
-      refundedCount: number;
-      coinsSold: number;
-      coinsInCirculation: number;
-      paymentsWithoutRecordedAmount: number;
-      paymentCount: number;
-      byType: { type: string; total: number; n: number }[];
-      trend: { date: string; amount: number; revenueInr: number; coins: number }[];
-      topSpenders: {
-        userId: string;
-        total: number;
-        totalInr: number;
-        totalCoins: number;
-        username?: string;
-        fullName?: string;
-      }[];
-    }>("/admin/revenue"),
-  payments: () => get<any[]>("/admin/payments"),
 
   // fraud
   fraudVotes: () => get<{ deviceId: string; accounts: number; totalVotes: number }[]>("/admin/fraud/votes"),
@@ -1207,15 +1160,11 @@ export const api = {
     get<{
       totalUsers: number; newUsersToday: number; newUsers7d: number; newUsers30d: number;
       dau: number; mau: number;
-      // Coin counts (labelled "Coins Sold" in the UI).
-      revenueToday: number; revenue7d: number; revenue30d: number;
-      // Real money, in rupees.
-      revenueTodayInr: number; revenue7dInr: number; revenue30dInr: number;
       matchesToday: number; votesToday: number; postsToday: number;
       activeMatches: number; completedMatches: number;
       // previous-period comparators (for week-over-week / day-over-day deltas)
-      newUsersYesterday: number; votesYesterday: number; dauYesterday: number; revenueYesterday: number;
-      newUsersPrev7d: number; revenuePrev7d: number;
+      newUsersYesterday: number; votesYesterday: number; dauYesterday: number;
+      newUsersPrev7d: number;
     }>("/admin/analytics"),
 
   // ops (manual cron triggers)
@@ -1251,7 +1200,7 @@ export const api = {
   confirmApprovalReset: (payload: { code: string; next: string }) =>
     post<{ success: boolean }>("/admin/approval-password/reset/confirm", payload),
   sendCoinReport: (period: "daily" | "weekly") => post<{ success: boolean; to: string }>("/admin/coin-economy/report", { period }),
-  runCoinAlerts: () => post<{ budgets: number; liability: boolean; heavyEarners: number }>("/admin/coin-economy/alerts/run", {}),
+  runCoinAlerts: () => post<{ budgets: number; heavyEarners: number }>("/admin/coin-economy/alerts/run", {}),
   cronHealth: () => get<CronJobHealth[]>("/admin/ops/cron-health"),
 
   // SEO
@@ -1261,7 +1210,7 @@ export const api = {
 
 // ─── Coin economy (worker: lib/promoBudget.ts, lib/coinEconomy.ts) ───────────
 
-export type PromoBudgetKind = "package_bonus" | "contest_prize" | "product_prize" | "free_rewards";
+export type PromoBudgetKind = "contest_prize" | "product_prize" | "free_rewards";
 export type PromoBudgetStatus = "active" | "paused" | "closed";
 
 export interface PromoBudget {
@@ -1283,7 +1232,6 @@ export interface PromoBudget {
   live: boolean;
   usedCount: number;
   heldCount: number;
-  linkedPackages: number;
   linkedContests: number;
 }
 
@@ -1298,7 +1246,6 @@ export interface PromoBudgetWrite {
 
 export interface PromoBudgetDetail {
   budget: PromoBudget;
-  packages: { id: string; name: string | null; coins: number; bonusCoins: number; active: boolean }[];
   contests: { id: string; title: string | null; status: string | null; totalEntryFee: number | null; rewardCoins: number | null }[];
   reservations: { id: string; uid: string | null; coins: number; status: string; refType: string; refId: string; expiresAt: number | null; createdAt: number; updatedAt: number }[];
   payouts: { id: string; kind: string; coins: number; contestId: string | null; matchId: string | null; uid: string | null; refId: string | null; description: string | null; createdAt: number }[];
@@ -1307,11 +1254,12 @@ export interface PromoBudgetDetail {
 export interface CoinEconomy {
   ts: number;
   range: { from: number | null; to: number | null };
+  /** ₹ per DP coin (coinPricing.dpCoinInr). Worker field name. */
   payoutRate: number;
+  /** `withdrawable` = DP coin held, `liabilityInr` = its shop value in ₹ (worker field names). */
   supply: { total: number; withdrawable: number; locked: number; holders: number; liabilityInr: number };
-  /** Superadmin coins: platform money, left out of supply, liability and flows. */
+  /** Superadmin coins: platform-held, left out of supply and flows. */
   house?: { total: number; locked: number; accounts: number };
-  cash: { paidInInr: number; refundedInr: number; paidOutInr: number; pendingOutInr: number };
   categories: Record<string, { label: string; credits: number; debits: number; net: number; locked: number }>;
   types: {
     type: string; category: string; credits: number; debits: number; net: number; locked: number; count: number;

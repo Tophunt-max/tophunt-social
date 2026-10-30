@@ -123,7 +123,7 @@ describe('describePrize', () => {
  *
  * These pin the bug the feed card shipped: it rendered `item.entryFee * 1.8`.
  * `entryFee` on a match is the pot BOTH players funded, so that advertised 180% of
- * the money that existed against a server payout hard-capped at the pot; it had no
+ * the coins that existed against a server prize hard-capped at the pot; it had no
  * rounding, so a 7-coin pot displayed "12.6" for a whole-number currency; and it
  * showed a coin figure even when the prize was a physical product. Explore printed
  * the raw pot for the same battle, so the two surfaces disagreed.

@@ -25,7 +25,7 @@ import { designWidth } from "@/src/lib/layout";
 import { markOnboardingComplete } from "@/src/lib/profileCompletion";
 import { getDeviceId } from "@/src/lib/deviceId";
 import { emitToast } from "@/src/lib/toastBridge";
-import { QUALIFY_COPY, clearPendingInvite, getPendingInvite } from "@/src/services/referrals";
+import { qualifyCopy, clearPendingInvite, getPendingInvite } from "@/src/services/referrals";
 
 export default function CongratulationsScreen() {
   const router = useRouter();
@@ -176,7 +176,7 @@ export default function CongratulationsScreen() {
             emitToast(
               outcome.referralStatus === 'rewarded'
                 ? 'Referral reward aapke wallet mein aa gaya! 🎉'
-                : `Referral code lag gaya! ${QUALIFY_COPY[outcome.qualifyAction as keyof typeof QUALIFY_COPY]?.short ?? 'qualify'} karte hi reward milega.`,
+                : `Referral code lag gaya! ${qualifyCopy(outcome.qualifyAction).short} karte hi reward milega.`,
               'success',
             );
           } else if (outcome?.status === 'refused' && outcome.message) {

@@ -25,8 +25,8 @@ import { kvPutsSuspended, noteKvPutFailure } from "./kvQuota";
  * total rather than ~4,300.
  *
  * NOT moved to the Cache API or to isolate memory, and NOT for lack of trying —
- * `appConfig` carries `payoutsFrozen`, the emergency switch that blocks all new
- * payout requests during a suspected-fraud incident. Both of those tiers are
+ * `appConfig` carries the emergency switches (maintenance, feature flags, the
+ * shop and reward kill switches) used during an incident. Both of those tiers are
  * unpurgeable from anywhere but the isolate/colo that wrote them, so either would
  * mean the kill-switch takes effect everywhere EXCEPT the machines already serving
  * traffic, for as long as its ttl. A fraud switch that is live in one colo is not a
@@ -199,8 +199,7 @@ export const FEED_WEIGHTS_MEMO_KEY = "memo:feedWeights";
  * The App Control gate (lib/appControl.ts) runs on every /api write. It reads
  * appConfig through a 5-second isolate memo so a busy isolate does not spend a
  * KV read per request. Availability switches only (maintenance, feature flags,
- * minimum version) — never a money decision, which keeps reading KV directly
- * (the payoutsFrozen kill switch in requestWithdrawal).
+ * minimum version) — never a coin decision, which keeps reading KV directly.
  */
 export const APP_CONTROL_MEMO_KEY = "memo:appControlGate";
 const APP_CONTROL_MEMO_SEC = 5;

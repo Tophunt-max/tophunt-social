@@ -7,7 +7,6 @@
  * promises happen to overlap.
  */
 import { vi, describe, it, expect } from 'vitest';
-import crypto from 'node:crypto';
 
 // Bearer token is "uid" or "uid:role". authTime is fixed in the past so a
 // session cutoff written "now" revokes it. A "#fresh" suffix is a session signed in
@@ -35,24 +34,18 @@ vi.mock('../src/lib/firebaseAdmin', () => ({
   sendFcmToToken: async () => ({ ok: true, retryable: false, invalid: false, status: 200 }),
 }));
 
-import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { makeEnv, makeApp, fakeCtx, drizzleOf, type TestEnv } from './helpers/harness';
 import * as schema from '../src/db/schema';
-import { creditPaymentOrder, clawbackPaymentOrder } from '../src/lib/coinOrders';
-import { readWithdrawalPolicy } from '../src/lib/payouts';
 import { runMigrations } from '../src/db/migrationRunner';
 import fs from 'node:fs';
 import path from 'node:path';
 import { boundedQueryInt } from '../src/routes/admin';
-import { webhookRoute } from '../src/routes/webhook';
-import { ApiError, errorBody } from '../src/lib/http';
 
-const WEBHOOK_SECRET = 'whsec_test';
 const app = makeApp();
 
 function env0(overrides: Partial<TestEnv> = {}) {
-  return makeEnv({ RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, ...overrides });
+  return makeEnv(overrides);
 }
 
 async function api(env: TestEnv, token: string, action: string, data: any = {}) {
@@ -101,304 +94,6 @@ async function seedSettings(env: TestEnv, id: string, data: Record<string, any>)
   await drizzleOf(env).insert(schema.settings).values({ id, data: data as any, updatedAt: Date.now() } as any);
   await env.CACHE_KV.delete(`settings:${id}`);
 }
-
-async function seedOrder(env: TestEnv, orderId: string, uid: string, coins = 120, extra: Record<string, any> = {}) {
-  const ts = Date.now();
-  await drizzleOf(env).insert(schema.paymentOrders).values({
-    orderId, userId: uid, packageId: 'pkg', coins, bonusCoins: 0, amountPaise: 19900,
-    currency: 'INR', status: 'created', createdAt: ts, updatedAt: ts, ...extra,
-  } as any);
-}
-
-function checkoutSig(orderId: string, paymentId: string, secret = 'rzp_test_secret') {
-  return crypto.createHmac('sha256', secret).update(`${orderId}|${paymentId}`).digest('hex');
-}
-
-/** Razorpay payments API stand-in for the topup capture check. */
-function gateway(orderId: string, status: string, amount = 19900, currency = 'INR') {
-  return vi.fn(async (url: any) => {
-    const u = String(url);
-    const id = decodeURIComponent(u.split('/v1/payments/')[1] || '');
-    return new Response(JSON.stringify({ id, status, amount, currency, order_id: orderId }), { status: 200 });
-  });
-}
-
-const webhookApp = new Hono();
-webhookApp.onError((err, c) =>
-  err instanceof ApiError ? c.json(errorBody(err), err.status) : c.json({ error: 'internal' }, 500),
-);
-webhookApp.route('/webhook', webhookRoute);
-
-async function webhook(env: TestEnv, payload: any) {
-  const raw = JSON.stringify(payload);
-  const sig = crypto.createHmac('sha256', WEBHOOK_SECRET).update(raw).digest('hex');
-  const res = await webhookApp.request(
-    '/webhook/razorpay',
-    { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': sig }, body: raw },
-    env,
-    fakeCtx(),
-  );
-  return { status: res.status, body: (await res.json().catch(() => ({}))) as any };
-}
-
-/** Run `inject` once, immediately before the first batch whose SQL matches. */
-function injectBeforeBatch(env: TestEnv, match: RegExp, inject: () => Promise<void>) {
-  const original = env.DB.batch.bind(env.DB);
-  let fired = false;
-  env.DB.batch = async (stmts: any[]) => {
-    if (!fired && stmts.some((s) => match.test(String(s.sql)))) {
-      fired = true;
-      await inject();
-    }
-    return original(stmts);
-  };
-}
-
-// ===========================================================================
-describe('legacy withdrawal approval is exactly-once across revert + retry', () => {
-  // The legacy approve path wrote a fixed-id ledger row with INSERT OR IGNORE but
-  // an UNGATED balance UPDATE. The route reverts its status claim on a failure
-  // after the batch so the admin can retry — and that retry debited again.
-  it('a retried approval does not debit the user a second time', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 500);
-    const ts = Date.now();
-    await drizzleOf(env).insert(schema.withdrawals).values({
-      id: 'w1', userId: 'alice', amount: 200, cashAmount: 200, method: 'upi',
-      accountDetails: 'a@upi', status: 'pending', reserved: false, createdAt: ts, updatedAt: ts,
-    } as any);
-
-    const first = await adminCall(env, 'PATCH', '/withdrawals/w1', { action: 'approve' });
-    expect(first.status).toBe(200);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(300);
-
-    // Exactly what revertClaim() does after a failure that follows the batch.
-    await env.DB.prepare(`UPDATE withdrawals SET status = 'pending' WHERE id = 'w1'`).run();
-
-    const retry = await adminCall(env, 'PATCH', '/withdrawals/w1', { action: 'approve' });
-    expect(retry.status).toBe(200);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(300); // was 100 before the fix
-    const rows = await ledger(env, 'alice');
-    expect(rows.map((r: any) => r.id)).toEqual(['withdrawal_legacy:w1']);
-    expect(rows.reduce((t: number, r: any) => t + Number(r.amount), 0)).toBe(-200);
-  });
-
-  it('still refuses (and reverts) an approval the balance cannot cover', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 50);
-    const ts = Date.now();
-    await drizzleOf(env).insert(schema.withdrawals).values({
-      id: 'w2', userId: 'alice', amount: 200, cashAmount: 200, method: 'upi',
-      accountDetails: 'a@upi', status: 'pending', reserved: false, createdAt: ts, updatedAt: ts,
-    } as any);
-    const res = await adminCall(env, 'PATCH', '/withdrawals/w2', { action: 'approve' });
-    expect(res.status).toBe(412);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(50);
-    const w = await drizzleOf(env).select().from(schema.withdrawals).where(eq(schema.withdrawals.id, 'w2')).get();
-    expect(w?.status).toBe('pending');
-    expect(await ledger(env, 'alice')).toHaveLength(0);
-  });
-});
-
-// ===========================================================================
-describe('withdrawal daily cap holds under concurrent requests', () => {
-  it('parallel requests cannot together exceed maxPerDay', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 1000);
-    await seedSettings(env, 'appConfig', { withdrawal: { enabled: true, minAmount: 1, maxPerDay: 100 } });
-
-    const results = await Promise.all(
-      [0, 1, 2].map(() => api(env, 'alice', 'requestWithdrawal', { amount: 60, method: 'upi', accountDetails: 'alice@upi' })),
-    );
-    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
-    const rows = await drizzleOf(env).select().from(schema.withdrawals).all();
-    expect(rows.reduce((t, r: any) => t + Number(r.amount), 0)).toBeLessThanOrEqual(100);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(940);
-    // Every escrowed coin has its hold row.
-    expect((await ledger(env, 'alice')).reduce((t: number, r: any) => t + Number(r.amount), 0)).toBe(-60);
-  });
-
-  it('a zero or negative conversion rate disables withdrawals instead of paying ₹0 / negative', () => {
-    expect(readWithdrawalPolicy({ withdrawal: { conversionRate: 0 } }).enabled).toBe(false);
-    expect(readWithdrawalPolicy({ withdrawal: { conversionRate: -2 } }).enabled).toBe(false);
-    expect(readWithdrawalPolicy({ withdrawal: { conversionRate: 'abc' } }).enabled).toBe(false);
-    expect(readWithdrawalPolicy({ withdrawal: {} })).toMatchObject({ enabled: true, conversionRate: 1 });
-    expect(readWithdrawalPolicy({ withdrawal: { conversionRate: 0.5 } })).toMatchObject({ enabled: true, conversionRate: 0.5 });
-  });
-});
-
-// ===========================================================================
-describe('payment crediting vs a refund that lands mid-credit', () => {
-  it('does not credit coins onto an order a refund made terminal between claim and credit', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_r', 'alice');
-    // The refund webhook arrives after the status claim committed but before
-    // the wallet batch: it sees `paid` with no payments row and marks the order
-    // refunded without debiting anything ("never landed").
-    injectBeforeBatch(env, /INTO payments/i, async () => {
-      await clawbackPaymentOrder(env as any, drizzleOf(env) as any, {
-        paymentId: 'pay_r', kind: 'refund', refundedAmountPaise: 19900, refundId: 'rfnd_1',
-      });
-    });
-
-    await creditPaymentOrder(env as any, drizzleOf(env) as any, { orderId: 'order_r', paymentId: 'pay_r', source: 'webhook' });
-
-    const order = await drizzleOf(env).select().from(schema.paymentOrders).where(eq(schema.paymentOrders.orderId, 'order_r')).get();
-    expect(order?.status).toBe('refunded');
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(0); // was 120 before the fix
-    expect(await ledger(env, 'alice')).toHaveLength(0);
-  });
-
-  it('a normal credit writes one deterministic ledger row and the payments marker', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_ok', 'alice');
-    const r = await creditPaymentOrder(env as any, drizzleOf(env) as any, { orderId: 'order_ok', paymentId: 'pay_ok', source: 'webhook' });
-    expect(r).toMatchObject({ credited: true, coins: 120 });
-    expect((await ledger(env, 'alice')).map((x: any) => x.id)).toEqual(['purchase:pay_ok']);
-    const pay = await drizzleOf(env).select().from(schema.payments).where(eq(schema.payments.id, 'pay_ok')).get();
-    expect(pay).toBeTruthy();
-  });
-
-  it('rejects a capture in a different currency', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_usd', 'alice');
-    const r = await creditPaymentOrder(env as any, drizzleOf(env) as any, {
-      orderId: 'order_usd', paymentId: 'pay_usd', source: 'webhook', capturedAmountPaise: 19900, capturedCurrency: 'USD',
-    });
-    expect(r.credited).toBe(false);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(0);
-  });
-});
-
-// ===========================================================================
-describe('Razorpay webhook processing failures are retryable', () => {
-  const captured = (orderId: string, paymentId: string) => ({
-    event: 'payment.captured',
-    payload: { payment: { entity: { id: paymentId, order_id: orderId, amount: 19900, currency: 'INR', status: 'captured' } } },
-  });
-
-  it('a failed refund clawback returns 5xx (so Razorpay redelivers) and the retry claws back once', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_w', 'alice');
-    expect((await webhook(env, captured('order_w', 'pay_w'))).status).toBe(200);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(120);
-
-    const refund = { event: 'refund.processed', payload: { refund: { entity: { id: 'rfnd_w', payment_id: 'pay_w', amount: 19900 } } } };
-    const original = env.DB.batch.bind(env.DB);
-    let failOnce = true;
-    env.DB.batch = async (stmts: any[]) => {
-      if (failOnce && stmts.some((s) => /idempotency_keys/i.test(String(s.sql)))) {
-        failOnce = false;
-        throw new Error('D1_ERROR: simulated transient failure');
-      }
-      return original(stmts);
-    };
-
-    const failed = await webhook(env, refund);
-    expect(failed.status).toBe(500); // was 200 — Razorpay never retried
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(120);
-
-    expect((await webhook(env, refund)).status).toBe(200);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(0);
-    // A duplicate delivery after success moves nothing further.
-    expect((await webhook(env, refund)).status).toBe(200);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(0);
-  });
-
-  it('duplicate and out-of-order capture events credit exactly once', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_d', 'alice');
-    const evts = [captured('order_d', 'pay_d'), { event: 'order.paid', payload: captured('order_d', 'pay_d').payload }, captured('order_d', 'pay_d')];
-    const results = await Promise.all(evts.map((e) => webhook(env, e)));
-    expect(results.every((r) => r.status === 200)).toBe(true);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(120);
-    expect(await ledger(env, 'alice')).toHaveLength(1);
-  });
-
-  it('rejects an unsigned / wrongly signed webhook without touching data', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_s', 'alice');
-    const raw = JSON.stringify(captured('order_s', 'pay_s'));
-    const res = await webhookApp.request(
-      '/webhook/razorpay',
-      { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Razorpay-Signature': 'bad' }, body: raw },
-      env,
-      fakeCtx(),
-    );
-    expect(res.status).toBe(400);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(0);
-  });
-});
-
-// ===========================================================================
-describe('topup callback requires a captured payment', () => {
-  it('an authorized-but-uncaptured payment is reported pending and credits nothing', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_a', 'alice');
-    vi.stubGlobal('fetch', gateway('order_a', 'authorized'));
-    try {
-      const res = await api(env, 'alice', 'topup', { orderId: 'order_a', paymentId: 'pay_a', signature: checkoutSig('order_a', 'pay_a') });
-      expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ pending: true, coins: 0 });
-      expect((await getUser(env, 'alice'))?.dpcoin).toBe(0);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('a captured payment in another order, or for less than the price, is refused', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_b', 'alice');
-    vi.stubGlobal('fetch', gateway('order_other', 'captured'));
-    try {
-      const wrongOrder = await api(env, 'alice', 'topup', { orderId: 'order_b', paymentId: 'pay_b', signature: checkoutSig('order_b', 'pay_b') });
-      expect(wrongOrder.status).toBe(403);
-      vi.stubGlobal('fetch', gateway('order_b', 'captured', 100));
-      const under = await api(env, 'alice', 'topup', { orderId: 'order_b', paymentId: 'pay_b', signature: checkoutSig('order_b', 'pay_b') });
-      expect(under.status).toBe(412);
-      expect((await getUser(env, 'alice'))?.dpcoin).toBe(0);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('after the webhook credited first, the callback reports already-processed (the app shows success)', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_c', 'alice');
-    await creditPaymentOrder(env as any, drizzleOf(env) as any, { orderId: 'order_c', paymentId: 'pay_c', source: 'webhook' });
-    vi.stubGlobal('fetch', gateway('order_c', 'captured'));
-    try {
-      const res = await api(env, 'alice', 'topup', { orderId: 'order_c', paymentId: 'pay_c', signature: checkoutSig('order_c', 'pay_c') });
-      expect(res.status).toBe(409);
-      expect((await getUser(env, 'alice'))?.dpcoin).toBe(120);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it('a refunded order is not reported as "already processed"', async () => {
-    const { env } = env0();
-    await seedUser(env, 'alice', 0);
-    await seedOrder(env, 'order_x', 'alice', 120, { status: 'refunded', paymentId: 'pay_x' });
-    vi.stubGlobal('fetch', gateway('order_x', 'captured'));
-    try {
-      const res = await api(env, 'alice', 'topup', { orderId: 'order_x', paymentId: 'pay_x', signature: checkoutSig('order_x', 'pay_x') });
-      expect(res.status).toBe(412);
-      expect((await getUser(env, 'alice'))?.dpcoin).toBe(0);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-});
 
 // ===========================================================================
 describe('rewarded ads cannot be switched on from the admin panel alone', () => {
@@ -451,7 +146,7 @@ describe('admin role boundaries', () => {
     expect(Number((await getUser(env, 'adm'))?.tokensValidAfter)).toBeGreaterThan(1_000);
 
     // The old token still carries role=admin in its claim; it must not get in.
-    const stale = await adminCall(env, 'GET', '/withdrawals', undefined, 'adm:admin');
+    const stale = await adminCall(env, 'GET', '/money-health', undefined, 'adm:admin');
     expect(stale.status).toBe(403);
   });
 
@@ -472,8 +167,8 @@ describe('admin role boundaries', () => {
     const { env } = env0();
     await seedUser(env, 'mod', 0, { role: 'moderator' });
     await seedUser(env, 'alice', 100);
-    expect((await adminCall(env, 'GET', '/withdrawals', undefined, 'mod:moderator')).status).toBe(403);
-    expect((await adminCall(env, 'GET', '/deposits', undefined, 'mod:moderator')).status).toBe(403);
+    expect((await adminCall(env, 'GET', '/money-health', undefined, 'mod:moderator')).status).toBe(403);
+    expect((await adminCall(env, 'GET', '/transactions', undefined, 'mod:moderator')).status).toBe(403);
     const adj = await adminCall(env, 'POST', '/users/alice/wallet', { amount: 50, direction: 'add', reason: 'x' }, 'mod:moderator');
     expect(adj.status).toBe(403);
     expect((await getUser(env, 'alice'))?.dpcoin).toBe(100);

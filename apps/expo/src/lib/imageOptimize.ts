@@ -24,7 +24,7 @@ import { ImageManipulator, SaveFormat, type ImageRef } from 'expo-image-manipula
  * is returned and the upload proceeds as before.
  */
 
-export type ImagePreset = 'avatar' | 'story' | 'contest' | 'deposit';
+export type ImagePreset = 'avatar' | 'story' | 'contest';
 
 interface PresetConfig {
   /** Cap on the LONGEST edge, in px. Aspect ratio is always preserved. */
@@ -43,9 +43,6 @@ const PRESETS: Record<ImagePreset, PresetConfig> = {
   story: { maxEdge: 1920, compress: 0.8, reason: 'full-screen 1080x1920' },
   // Contest entries are judged by voters, so keep a little more detail.
   contest: { maxEdge: 1440, compress: 0.85, reason: 'judged by voters' },
-  // A UPI payment screenshot an admin has to read — text must stay legible, so
-  // this is the most conservative preset.
-  deposit: { maxEdge: 1600, compress: 0.9, reason: 'admin must read the text' },
 };
 
 /** Release a native image ref without letting cleanup failures surface. */

@@ -22,7 +22,7 @@ describe('classifyRoute', () => {
 
   it('personal screens need an account', () => {
     for (const s of [
-      'messages', 'messages/chat/[id]', 'notifications', 'wallet', 'wallet/deposit', 'wallet/store', 'wallet/withdraw',
+      'messages', 'messages/chat/[id]', 'notifications', 'wallet', 'wallet/gifts',
       'setting', 'setting/security', 'setting/delete-account', 'profile/manage', 'profile/manage/edit',
       'profile/manage/verification', 'story/create', 'contest/photo/setup', 'contest/joined', 'prizes', 'prizes/[matchId]',
     ]) {
@@ -84,9 +84,9 @@ describe('guardDecision', () => {
   });
 
   it('a guest on a private screen is sent to sign in with a safe return path', () => {
-    expect(guardDecision({ ...base, access: 'private', signedIn: false, currentPath: '/wallet/withdraw' })).toEqual({
+    expect(guardDecision({ ...base, access: 'private', signedIn: false, currentPath: '/wallet/gifts' })).toEqual({
       type: 'redirect',
-      to: '/auth/login?redirect=%2Fwallet%2Fwithdraw',
+      to: '/auth/login?redirect=%2Fwallet%2Fgifts',
     });
   });
 

@@ -40,8 +40,8 @@ const statusVariant = (status: string): "primary" | "success" | "danger" | "warn
 };
 
 const DEFERRAL_LABELS: Record<string, string> = {
-  pending_payout: "Payout in flight",
   active_contest: "Contest unfinished",
+  pending_prize: "Prize delivery pending",
 };
 
 export default function AccountDeletions() {

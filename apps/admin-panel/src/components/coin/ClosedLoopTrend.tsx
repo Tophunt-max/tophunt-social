@@ -4,7 +4,6 @@ import { api } from "@/lib/api";
 
 /**
  * Earning vs Shopping, per day (worker GET /admin/monetization/daily).
- * Replaced the old "Deposits vs Withdrawals" chart: no ₹ moves in or out now.
  */
 export function ClosedLoopTrend({ days = 14, title = "Earning vs Shopping" }: { days?: number; title?: string }) {
   const q = useQuery({ queryKey: ["monetization-daily", days], queryFn: () => api.monetization.daily(days), refetchInterval: 5 * 60_000 });

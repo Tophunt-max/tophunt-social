@@ -132,7 +132,6 @@ export const BANNER_PREFIX = "contest-banners";
 /** Photos of the physical products a contest can award (migration 0042). */
 export const PRODUCT_IMAGE_PREFIX = "product-images";
 export const VS_CARD_PREFIX = "vs-cards";
-export const PAYMENT_QR_PREFIX = "payment-qr";
 /** Images for the app's first-launch intro, set from the admin panel. */
 export const ONBOARDING_IMAGE_PREFIX = "onboarding";
 /** Promo banners for the Explore page carousel, set from the admin panel. */
@@ -262,22 +261,6 @@ export const MEDIA_CATEGORIES: readonly MediaCategory[] = [
 
   // --- Operational --------------------------------------------------------
   {
-    prefix: "deposits",
-    writer: "user",
-    kinds: ["image"],
-    cache: "immutable",
-    // Deliberately null. These are the evidence behind a manual money movement;
-    // deleting one while a dispute or chargeback is open would destroy the only
-    // proof of it. A retention rule here is a finance/legal decision, not a
-    // storage-cost one — see MEDIA_ARCHITECTURE.md.
-    retentionDays: null,
-    dateSharded: true,
-    legacyVideo: false,
-
-    proxyOnly: false,
-    description: "Manual UPI/QR deposit screenshots. An admin reads a reference number off these, which is also why video is refused: a clip in that queue wastes an operator's time and our egress.",
-  },
-  {
     prefix: "reports",
     writer: "user",
     kinds: ["image"],
@@ -333,18 +316,6 @@ export const MEDIA_CATEGORIES: readonly MediaCategory[] = [
     legacyVideo: false,
     proxyOnly: true,
     description: "Photos of physical prizes, set from the admin panel. Referenced by prize claims.",
-  },
-  {
-    prefix: PAYMENT_QR_PREFIX,
-    writer: "admin",
-    kinds: ["image"],
-    cache: "immutable",
-    retentionDays: null,
-    dateSharded: true,
-    legacyVideo: false,
-
-    proxyOnly: false,
-    description: "Manual payment QR code shown on the deposit screen.",
   },
   {
     prefix: ONBOARDING_IMAGE_PREFIX,

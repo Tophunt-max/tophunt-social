@@ -11,7 +11,6 @@ import {
   Loader2,
   MessageSquare,
   Mail,
-  CreditCard,
   Video,
   HardDrive,
   ShieldCheck,
@@ -40,7 +39,6 @@ const label = "block text-xs font-semibold text-muted-foreground mb-1.5 uppercas
 const GROUP_META: Record<string, { title: string; icon: any; blurb: string }> = {
   sms: { title: "SMS gateway", icon: MessageSquare, blurb: "Delivers login and password-reset codes." },
   email: { title: "Email", icon: Mail, blurb: "Transactional email for verification codes." },
-  payments: { title: "Payments", icon: CreditCard, blurb: "Razorpay checkout, webhook and reconciliation." },
   video: { title: "Video (Qencode)", icon: Video, blurb: "Optional. Without it, videos stay on R2 as uploaded." },
   storage: { title: "Storage (R2)", icon: HardDrive, blurb: "S3 keys for the video pipeline (Qencode reads and writes the bucket)." },
   auth: { title: "Authentication", icon: ShieldCheck, blurb: "Firebase admin operations and custom tokens." },
@@ -611,17 +609,6 @@ export default function Integrations() {
             </div>
           </div>
         </Card>
-
-        {/* ---------------- Payments: retired ---------------- */}
-        {/* Real money is retired (worker lib/cashRetirement.ts): no Razorpay checkout,
-            no UPI/QR deposits, no withdrawals. Nothing to configure here any more. */}
-        <div className="bg-card border border-border rounded-2xl p-5 text-sm">
-          <p className="font-bold text-foreground">Payments (Razorpay): band</p>
-          <p className="text-muted-foreground mt-1">
-            App mein ab asli paise na aate hain na jaate hain: Diamond free kamaaye jaate hain aur DP coin Shopping mein kharch hota hai.
-            Razorpay keys ki zaroorat nahi hai.
-          </p>
-        </div>
 
         {/* ---------------- Video ---------------- */}
         <Card

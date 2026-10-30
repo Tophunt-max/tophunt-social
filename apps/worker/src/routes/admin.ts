@@ -36,17 +36,6 @@ import {
 } from "../lib/feedWeights";
 import { AUDITED_SECTIONS, appConfigChannels, publicAppConfig, validateAppControlPatch } from "../lib/appControl";
 import { publishMany } from "../lib/publish";
-import { publishCoinCatalog } from "../lib/coinCatalog";
-import {
-  assertPackagesSafe,
-  buyRateFromConfig,
-  coinValueFromConfig,
-  hasExplicitBuyRate,
-  minSafeBuyRate,
-  packagePriceInr,
-  pricePackage,
-  ratesFromConfig,
-} from "../lib/coinPricing";
 import { assertSessionUsable } from "../middleware/auth";
 import { getAppConfig, getGamificationSettings, getSeoAudit, invalidateSetting } from "../lib/settings";
 import { awardXp } from "../lib/xpService";
@@ -56,8 +45,6 @@ import { deleteAuthUser, updateAuthUser, setCustomClaims, getUserByEmail } from 
 import { createNotification, createNotificationsBulk } from "../lib/notify";
 import { sendUserEmail } from "../lib/email";
 import {
-  withdrawalDecisionEmail,
-  coinsAddedEmail,
   contestWinEmail,
   prizeClaimEmail,
   contestRefundEmail,
@@ -67,7 +54,6 @@ import { bumpEngagement, finalizeVotes, getLiveTally } from "../lib/voteCounter"
 import { deleteMediaByUrl } from "../lib/mediaDelete";
 import { vsImageKeyFromPublicUrl } from "../lib/r2";
 import { settleRefund, settleWinner } from "../lib/contestSettlement";
-import { refundRejectedWithdrawal } from "../lib/payouts";
 import { closeRealtimeSessions, publish } from "../lib/publish";
 import { resolveContests, monthlyHallOfFame, seoAuditJob } from "../cron";
 import { newId, now } from "../lib/ids";
@@ -108,9 +94,6 @@ import {
   matchPrizeCeiling,
   assertProductCostFunded,
   perPlayerEntryFee,
-  roundFiat,
-  toPaise,
-  validateCoinPackage,
   WalletReplay,
 } from "../lib/money";
 import { fetchExternalImage } from "../lib/safeFetch";
@@ -118,7 +101,6 @@ import { enforceAdminIdempotency } from "../lib/idempotency";
 import { registerIntegrationRoutes } from "./integrations";
 import { registerGamificationRoutes } from "./adminGamification";
 import { registerMonetizationRoutes } from "./adminMonetization";
-import { CASH_RETIRED_REASON, cashFlowsRetired } from "../lib/cashRetirement";
 import { assertIdentifiersAvailable, recordUsernameTransition, validateUsername } from "../lib/userIdentifiers";
 import { revokeAllSessions } from "../lib/sessionRevocation";
 import {
@@ -141,17 +123,14 @@ import {
 } from "../lib/approvalPassword";
 import {
   assertLinkableBudget,
-  depositReservationId,
   getBudget,
   matchReservationId,
   platformLedgerStatement,
   listBudgets,
-  promoBonusCreditStatements,
-  releaseStatement,
   requireReason,
   validateBudgetInput,
 } from "../lib/promoBudget";
-import { budgetActivity, coinEconomyOverview, contestPnl, packagePnl, userStatement } from "../lib/coinEconomy";
+import { budgetActivity, coinEconomyOverview, contestPnl, userStatement } from "../lib/coinEconomy";
 import { buildCoinReport, runCoinAlerts } from "../lib/coinAlerts";
 import { sendEmail } from "../lib/email";
 import { cronHealth } from "../lib/ops";
@@ -272,13 +251,10 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["POST", /^\/users\/[^/]+\/logout-all$/],
   ["POST", /^\/users\/[^/]+\/wallet$/],
   ["POST", /^\/set-role$/],
-  ["PATCH", /^\/withdrawals\/[^/]+$/],
-  ["PATCH", /^\/deposits\/[^/]+$/],
   ["POST", /^\/account-deletions\/[^/]+\/purge$/],
   ["POST", /^\/broadcast$/],
   ["POST", /^\/app-settings$/],
   ["POST", /^\/rewards$/],
-  ["*", /^\/coin-packages(\/.*)?$/],
   // Promo budgets make the platform pay coins nobody paid for; they also need
   // the separate approval password (lib/approvalPassword.ts).
   ["*", /^\/promo-budgets(\/.*)?$/],
@@ -549,19 +525,6 @@ adminRoute.post("/app-settings", async (c) => {
     validateVerificationRewardConfig({ ...(existing.verificationReward || {}), ...(body.verificationReward || {}) });
   }
   const merged = mergeSettings(existing, body);
-  // Coin package pricing (lib/coinPricing.ts): if either rate moves, every
-  // active package must still not pay out more than it costs — refused BEFORE
-  // anything is written, naming the minimum safe buy rate.
-  const oldRates = ratesFromConfig(existing);
-  const newRates = ratesFromConfig(merged);
-  const ratesChanged = oldRates.buyRate !== newRates.buyRate || oldRates.payoutRate !== newRates.payoutRate;
-  const allPkgs = ratesChanged
-    ? await db
-        .select({ id: schema.coinPackages.id, name: schema.coinPackages.name, coins: schema.coinPackages.coins, bonusCoins: schema.coinPackages.bonusCoins, active: schema.coinPackages.active, budgetId: schema.coinPackages.budgetId })
-        .from(schema.coinPackages)
-        .all()
-    : [];
-  if (ratesChanged) assertPackagesSafe(allPkgs, newRates);
   // Monotonic: the app keeps whichever copy is newer (pushed vs polled).
   merged._version = Math.max(Date.now(), (Number(existing._version) || 0) + 1);
   // Sign-in / sign-up switches: validated against the MERGED result, so a save
@@ -579,18 +542,8 @@ adminRoute.post("/app-settings", async (c) => {
   edgePurgeUrl(c, "/read/app-config");
   // Push the new public config to every connected app instance (all shards), so
   // maintenance / flags / banner change within seconds instead of on the next poll.
-  const pushed = publicAppConfig(merged, Date.now(), cashFlowsRetired(c.env));
+  const pushed = publicAppConfig(merged, Date.now());
   c.executionCtx.waitUntil(publishMany(c.env, appConfigChannels(), { type: "config", config: pushed }));
-  // Package prices are base coins × buy rate: a new buy rate re-prices the whole
-  // store, and a new payout rate can change which packages are sellable, so push
-  // the catalog too (and refresh the stored price snapshots).
-  if (ratesChanged) {
-    const buyRate = buyRateFromConfig(merged);
-    for (const p of allPkgs) {
-      await db.update(schema.coinPackages).set({ priceInr: packagePriceInr(Number(p.coins), buyRate) }).where(eq(schema.coinPackages.id, p.id));
-    }
-    c.executionCtx.waitUntil(publishCoinCatalog(c.env));
-  }
   // Coin amounts credited to user balances are money settings: record who
   // changed them, from what, to what. (Only these sections — the rest of App
   // Control is cosmetic and is not audited by this handler.)
@@ -1096,16 +1049,6 @@ adminRoute.post("/media/explore-banner", async (c) => {
   return c.json(uploaded);
 });
 
-adminRoute.post("/media/payment-qr", async (c) => {
-  requireFullAdmin(c);
-  const fileType = assertAdminImageUpload(c);
-  const body = await readAdminImageBody(c);
-
-  const uploaded = await uploadToR2(c.env, fileType, "payment-qr", body, [fileType]);
-  await logAudit(c, "payment.qr.upload", "payment-qr", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
-  return c.json(uploaded);
-});
-
 /**
  * Upload a photo of a physical prize (migration 0042).
  *
@@ -1397,18 +1340,8 @@ adminRoute.patch("/stories/:id", async (c) => {
   return c.json({ message: "Stories support delete only" });
 });
 
-/**
- * Moderators see counts, not money. `/revenue` and `/finance-trends` are full-admin
- * only, but the dashboard (`/overview`) and `/analytics` returned the same coin and
- * rupee totals to every role. Every key starting with `revenue` is dropped.
- */
-function withoutRevenueForModerators<T extends Record<string, any>>(c: any, o: T): T {
-  if (isFullAdmin(c)) return o;
-  return Object.fromEntries(Object.entries(o).filter(([k]) => !/^revenue/i.test(k))) as T;
-}
-
 /** The dashboard also tells the panel which role it is talking to (role-aware menu). */
-const withViewerRole = (c: any, o: Record<string, any>) => ({ ...withoutRevenueForModerators(c, o), viewerRole: c.get("adminRole") ?? null });
+const withViewerRole = (c: any, o: Record<string, any>) => ({ ...o, viewerRole: c.get("adminRole") ?? null });
 
 // ---- reports ----
 /** Fetch a light preview (media/text) of a reported target for moderation. */
@@ -2630,7 +2563,7 @@ adminRoute.get("/overview", async (c) => {
   // The panel polls this every ~20s (sidebar badges + dashboard) and it runs a
   // dozen COUNT(*)/SUM() aggregates. They are index-backed and cheap while the
   // tables are small, but `count(*) from users`, `count(*) from posts` and the
-  // SUM over successful payments all scale with total history — so at real
+  // prize/shop counts all scale with total history — so at real
   // volume this endpoint alone would be a standing D1 cost. Memoise the whole
   // payload in isolate memory for 30s: the numbers are a glanceable dashboard,
   // not an authorization decision, so 30s of staleness is fine, and a warm
@@ -2644,28 +2577,10 @@ adminRoute.get("/overview", async (c) => {
   const reports = (await db.select({ v: count() }).from(schema.reports).get())?.v ?? 0;
   const support =
     (await db.select({ v: count() }).from(schema.supportTickets).where(ne(schema.supportTickets.status, "resolved")).get())?.v ?? 0;
-  // Money + engagement metrics.
-  //
-  // `revenue` is COINS SOLD (that is what payments.amount has always held, and
-  // what the dashboard card is labelled). `revenueInr` is the actual money.
-  const money = await db
-    .select({
-      coins: sql<number>`COALESCE(SUM(COALESCE(${schema.payments.coins}, ${schema.payments.amount})),0)`,
-      paise: sql<number>`COALESCE(SUM(${schema.payments.amountPaise}),0)`,
-    })
-    .from(schema.payments)
-    .where(eq(schema.payments.status, "success"))
-    .get();
-  const revenue = Number(money?.coins ?? 0);
-  const revenueInr = roundFiat(Number(money?.paise ?? 0) / 100);
   const activeMatches =
     (await db.select({ v: count() }).from(schema.contestMatches).where(eq(schema.contestMatches.status, "active")).get())?.v ?? 0;
   const liveContests =
     (await db.select({ v: count() }).from(schema.contests).where(eq(schema.contests.status, "live")).get())?.v ?? 0;
-  const pendingWithdrawals =
-    (await db.select({ v: count() }).from(schema.withdrawals).where(eq(schema.withdrawals.status, "pending")).get())?.v ?? 0;
-  const pendingDeposits =
-    (await db.select({ v: count() }).from(schema.deposits).where(eq(schema.deposits.status, "pending")).get())?.v ?? 0;
   // Prize claims that still need a human: anything not yet delivered or cancelled.
   // Counted by exclusion rather than by listing the open states, so a status added
   // to the lifecycle later shows up in the badge instead of being silently ignored.
@@ -2688,7 +2603,7 @@ adminRoute.get("/overview", async (c) => {
   const pendingShopReview = Number(
     (await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM shop_orders WHERE review_status = 'pending'`).first<{ n: number }>())?.n ?? 0,
   );
-  const overview = { users, posts, reports, support, revenue, revenueInr, activeMatches, liveContests, pendingWithdrawals, pendingDeposits, pendingPrizeClaims, pendingShopOrders, pendingShopReview };
+  const overview = { users, posts, reports, support, activeMatches, liveContests, pendingPrizeClaims, pendingShopOrders, pendingShopReview };
   memoPut(OVERVIEW_MEMO_KEY, overview, 30);
   return c.json(withViewerRole(c, overview));
 });
@@ -3174,168 +3089,6 @@ adminRoute.get("/transactions/types", async (c) => {
   const db = getDb(c.env);
   const rows = await db.select({ type: schema.coinTransactions.type }).from(schema.coinTransactions).groupBy(schema.coinTransactions.type).all();
   return c.json(rows.map((r) => r.type).filter(Boolean));
-});
-
-/**
- * Revenue analytics.
- *
- * IMPORTANT: money and coins are different units and are now reported as such.
- * `payments.amount` holds COINS (it always did), so summing it and calling the
- * result `totalRevenue` reported a coin count as rupees — every ₹ figure in the
- * admin panel was wrong. Revenue is read from `payments.amount_paise`, the actual
- * amount charged, in integer paise.
- *
- * Refunded and disputed payments are excluded from revenue, which is only
- * possible now that the clawback path marks them.
- */
-adminRoute.get("/revenue", async (c) => {
-  // Full admins only: revenue and top spenders.
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  /**
-   * Gross receipts. `partially_refunded` belongs here: the payment succeeded and
-   * most of it stands, so dropping the whole row (which is what happened while a
-   * partial refund flipped the status straight to `refunded`) wrote off revenue we
-   * actually kept. The part that WAS returned is netted off via `reversed` below.
-   */
-  const successful = inArray(schema.payments.status, ["success", "partially_refunded"]);
-
-  const totals = await db
-    .select({
-      paise: sql<number>`COALESCE(SUM(${schema.payments.amountPaise}),0)`,
-      coins: sql<number>`COALESCE(SUM(COALESCE(${schema.payments.coins}, ${schema.payments.amount})),0)`,
-      n: count(),
-      // Rows predating the split have no fiat value recorded. Surfacing the count
-      // is more honest than silently under-reporting revenue.
-      unpriced: sql<number>`SUM(CASE WHEN ${schema.payments.amountPaise} IS NULL THEN 1 ELSE 0 END)`,
-    })
-    .from(schema.payments)
-    .where(successful)
-    .get();
-
-  /**
-   * Money actually returned, read from `payment_orders.refunded_amount_paise`
-   * rather than by summing whole `payments` rows.
-   *
-   * Summing the payment total treated every reversal as total: a ₹1000 payment with
-   * a ₹100 refund was reported as ₹1000 reversed. The clawback path has always
-   * written the real figure to this column (and now accumulates it across several
-   * partial refunds), so this is both accurate and partial-aware.
-   */
-  const reversed = await db
-    .select({
-      paise: sql<number>`COALESCE(SUM(${schema.paymentOrders.refundedAmountPaise}),0)`,
-      n: count(),
-    })
-    .from(schema.paymentOrders)
-    .where(gt(schema.paymentOrders.refundedAmountPaise, 0))
-    .get();
-
-  const coinsInCirculation =
-    (await db.select({ v: sql<number>`COALESCE(SUM(${schema.users.dpcoin}),0)` }).from(schema.users).get())?.v ?? 0;
-
-  const byType = await db
-    .select({ type: schema.coinTransactions.type, total: sql<number>`COALESCE(SUM(${schema.coinTransactions.amount}),0)`, n: count() })
-    .from(schema.coinTransactions)
-    .groupBy(schema.coinTransactions.type)
-    .all();
-
-  // Last 14 days, bucketed by day (UTC). Both units are returned so the panel
-  // can label each correctly instead of guessing.
-  const since = now() - 14 * 86400000;
-  const recentPayments = await db
-    .select({
-      paise: schema.payments.amountPaise,
-      coins: schema.payments.coins,
-      legacyAmount: schema.payments.amount,
-      createdAt: schema.payments.createdAt,
-    })
-    .from(schema.payments)
-    .where(and(successful, gte(schema.payments.createdAt, since)))
-    .all();
-  const dayMap: Record<string, { paise: number; coins: number }> = {};
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date(now() - i * 86400000).toISOString().slice(0, 10);
-    dayMap[d] = { paise: 0, coins: 0 };
-  }
-  for (const p of recentPayments) {
-    const d = new Date(p.createdAt).toISOString().slice(0, 10);
-    if (!dayMap[d]) continue;
-    dayMap[d].paise += Number(p.paise) || 0;
-    dayMap[d].coins += Number(p.coins ?? p.legacyAmount) || 0;
-  }
-  const trend = Object.entries(dayMap).map(([date, v]) => ({
-    date,
-    revenueInr: roundFiat(v.paise / 100),
-    coins: v.coins,
-    // Legacy field name kept for the existing chart; now genuinely rupees.
-    amount: roundFiat(v.paise / 100),
-  }));
-
-  const topSpenders = await db
-    .select({
-      userId: schema.payments.userId,
-      totalInr: sql<number>`COALESCE(SUM(${schema.payments.amountPaise}),0)`,
-      totalCoins: sql<number>`COALESCE(SUM(COALESCE(${schema.payments.coins}, ${schema.payments.amount})),0)`,
-      username: schema.users.username,
-      fullName: schema.users.fullName,
-    })
-    .from(schema.payments)
-    .leftJoin(schema.users, eq(schema.users.uid, schema.payments.userId))
-    .where(successful)
-    .groupBy(schema.payments.userId)
-    .orderBy(desc(sql`SUM(${schema.payments.amountPaise})`))
-    .limit(10)
-    .all();
-
-  const grossPaise = Number(totals?.paise ?? 0);
-  const refundedPaise = Number(reversed?.paise ?? 0);
-  return c.json({
-    // Money (rupees).
-    totalRevenue: roundFiat(grossPaise / 100),
-    grossRevenueInr: roundFiat(grossPaise / 100),
-    refundedInr: roundFiat(refundedPaise / 100),
-    netRevenueInr: roundFiat((grossPaise - refundedPaise) / 100),
-    refundedCount: Number(reversed?.n ?? 0),
-    // Coins (not money).
-    coinsSold: Number(totals?.coins ?? 0),
-    coinsInCirculation,
-    // Data-quality signal for pre-migration rows with no recorded fiat amount.
-    paymentsWithoutRecordedAmount: Number(totals?.unpriced ?? 0),
-    paymentCount: Number(totals?.n ?? 0),
-    byType,
-    trend,
-    topSpenders: topSpenders.map((s) => ({
-      ...s,
-      totalInr: roundFiat(Number(s.totalInr) / 100),
-      // Legacy field the panel already renders.
-      total: roundFiat(Number(s.totalInr) / 100),
-    })),
-  });
-});
-
-// Raw payment (top-up) list.
-adminRoute.get("/payments", async (c) => {
-  // Full admins only: individual payment records.
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  const limit = boundedQueryInt(c.req.query("limit"), 100, 1, 500);
-  const rows = await db
-    .select({
-      id: schema.payments.id,
-      userId: schema.payments.userId,
-      amount: schema.payments.amount,
-      status: schema.payments.status,
-      createdAt: schema.payments.createdAt,
-      username: schema.users.username,
-      fullName: schema.users.fullName,
-    })
-    .from(schema.payments)
-    .leftJoin(schema.users, eq(schema.users.uid, schema.payments.userId))
-    .orderBy(desc(schema.payments.createdAt))
-    .limit(limit)
-    .all();
-  return c.json(rows.map((r) => ({ ...r, createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null })));
 });
 
 // ======================= CONTEST MATCHES (BATTLES) =======================
@@ -4210,372 +3963,6 @@ adminRoute.get("/users/:id/following", async (c) => {
   return c.json(rows);
 });
 
-// ======================= WITHDRAWALS =======================
-// List payout requests (optional ?status= filter).
-adminRoute.get("/withdrawals", async (c) => {
-  // Full admins only: payout PII (bank / UPI details).
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  const status = c.req.query("status");
-  const conds: any[] = [];
-  if (status) conds.push(eq(schema.withdrawals.status, status));
-  const rows = await db
-    .select({
-      id: schema.withdrawals.id,
-      userId: schema.withdrawals.userId,
-      amount: schema.withdrawals.amount,
-      cashAmount: schema.withdrawals.cashAmount,
-      grossAmount: schema.withdrawals.grossAmount,
-      feeAmount: schema.withdrawals.feeAmount,
-      method: schema.withdrawals.method,
-      accountDetails: schema.withdrawals.accountDetails,
-      status: schema.withdrawals.status,
-      adminNote: schema.withdrawals.adminNote,
-      payoutRef: schema.withdrawals.payoutRef,
-      paidAt: schema.withdrawals.paidAt,
-      riskLevel: schema.withdrawals.riskLevel,
-      riskFlags: schema.withdrawals.riskFlags,
-      createdAt: schema.withdrawals.createdAt,
-      updatedAt: schema.withdrawals.updatedAt,
-      username: schema.users.username,
-      fullName: schema.users.fullName,
-      // Total (DP coin + Diamond); the Diamond part is lockedCoins.
-      balance: schema.users.dpcoin,
-      lockedCoins: schema.users.lockedCoins,
-    })
-    .from(schema.withdrawals)
-    .leftJoin(schema.users, eq(schema.users.uid, schema.withdrawals.userId))
-    .where(conds.length ? and(...conds) : (undefined as any))
-    .orderBy(desc(schema.withdrawals.createdAt))
-    .limit(200)
-    .all();
-  return c.json(
-    rows.map((r) => ({
-      ...r,
-      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
-      updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
-    })),
-  );
-});
-
-/**
- * Allowed withdrawal status transitions. `paid` and `rejected` are terminal.
- *
- * This table is load-bearing, not documentation. Without it a `reserved` row
- * could be rejected (coins refunded) and then marked paid — the `w.reserved`
- * branch performs no deduction — leaving the user with their coins AND the
- * payout. It matches the buttons the admin panel actually renders:
- * pending → Approve/Reject, approved → Mark as paid.
- */
-const WITHDRAWAL_TRANSITIONS: Record<string, readonly string[]> = {
-  pending: ["approved", "rejected"],
-  approved: ["paid", "rejected"],
-  paid: [],
-  rejected: [],
-};
-
-/**
- * Action a withdrawal request. action: "approve" | "reject" | "paid".
- *
- * Coins are deducted (held) when moving to approved/paid; a rejection of a
- * still-held request refunds the coins. The user's balance is validated on
- * approval so we never approve more than they hold.
- *
- * Concurrency: the status is claimed with a compare-and-swap BEFORE any money
- * moves, so a double-clicked Reject or two admins acting at once cannot both
- * observe `pending` and both issue a refund.
- */
-adminRoute.patch("/withdrawals/:id", async (c) => {
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  const id = c.req.param("id");
-  const { action, adminNote, payoutRef } = await c.req.json<any>();
-  if (!["approve", "reject", "paid"].includes(action)) throw httpsError("invalid-argument", "Invalid action.");
-  const w = await db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, id)).get();
-  if (!w) throw httpsError("not-found", "Withdrawal not found.");
-  const admin = c.get("user");
-  const ts = now();
-
-  const status = action === "approve" ? "approved" : action === "paid" ? "paid" : "rejected";
-  const fromStatus = w.status;
-  // Withdrawals are retired (lib/cashRetirement.ts): nothing new is approved.
-  // Rejecting (refunds the held DP coin) and marking an ALREADY approved payout
-  // as paid (the money may already have been sent) stay possible.
-  if (action === "approve" && cashFlowsRetired(c.env)) {
-    throw httpsError("failed-precondition", "Withdrawals are retired. Reject this request to return the DP coin.", CASH_RETIRED_REASON);
-  }
-
-  if (!(WITHDRAWAL_TRANSITIONS[fromStatus] ?? []).includes(status))
-    throw httpsError(
-      "failed-precondition",
-      `Cannot ${action} a withdrawal that is already "${fromStatus}".`,
-    );
-
-  // Payouts are executed by hand in the banking app, so "we marked it paid" and
-  // "the bank actually sent it" were two facts with nothing linking them. A bank
-  // reference (UTR / RRN / NEFT ref) is now REQUIRED to mark a payout paid, which
-  // makes every outgoing rupee reconcilable against a statement.
-  let payoutReference: string | null = null;
-  if (action === "paid") {
-    payoutReference = String(payoutRef ?? "").trim();
-    if (payoutReference.length < 4 || payoutReference.length > 64 || !/^[A-Za-z0-9._/-]+$/.test(payoutReference)) {
-      throw httpsError(
-        "invalid-argument",
-        "A bank payout reference (UTR / RRN, 4–64 characters) is required to mark a payout as paid.",
-      );
-    }
-    // The same reference must not be recorded against two payouts.
-    const dupe = await db
-      .select({ id: schema.withdrawals.id })
-      .from(schema.withdrawals)
-      .where(and(eq(schema.withdrawals.payoutRef, payoutReference), ne(schema.withdrawals.id, id)))
-      .get();
-    if (dupe) {
-      throw httpsError("already-exists", `That payout reference is already recorded on withdrawal ${dupe.id}.`);
-    }
-  }
-
-  // Money must not leave while the account owes coins. A refund or chargeback
-  // that lands after the request was escrowed claws the purchase back by driving
-  // the balance NEGATIVE (lib/coinOrders.ts); nothing re-checked that here, so a
-  // payout bought with since-reversed money could still be approved and paid.
-  // Rejecting stays allowed: it returns the held coins and settles the debt.
-  if (action === "approve" || action === "paid") {
-    const owing = await db
-      .select({ dpcoin: schema.users.dpcoin })
-      .from(schema.users)
-      .where(eq(schema.users.uid, w.userId))
-      .get();
-    const openDispute = await db
-      .select({ orderId: schema.paymentOrders.orderId })
-      .from(schema.paymentOrders)
-      .where(and(eq(schema.paymentOrders.userId, w.userId), eq(schema.paymentOrders.status, "disputed")))
-      .get();
-    if (!owing || Number(owing.dpcoin) < 0 || openDispute) {
-      throw httpsError(
-        "failed-precondition",
-        openDispute
-          ? `This user has a disputed payment (order ${openDispute.orderId}). Resolve it before paying out.`
-          : "This user's balance is negative (a purchase was refunded or charged back). Reject or wait until it is settled.",
-      );
-    }
-  }
-
-  // Atomic claim: flip the status only if it is STILL the value we just read.
-  // The loser of this compare-and-swap does no accounting at all. Same pattern
-  // as the exactly-once coin credit in lib/coinOrders.ts.
-  const claim = await db
-    .update(schema.withdrawals)
-    .set({
-      status,
-      adminNote: adminNote || w.adminNote,
-      processedBy: admin?.uid ?? null,
-      payoutRef: payoutReference ?? w.payoutRef,
-      paidAt: action === "paid" ? ts : w.paidAt,
-      updatedAt: ts,
-    })
-    .where(and(eq(schema.withdrawals.id, id), eq(schema.withdrawals.status, fromStatus)))
-    .run();
-  if (claim.meta.changes === 0)
-    throw httpsError(
-      "failed-precondition",
-      "This withdrawal was just actioned by someone else. Reload and try again.",
-    );
-
-  /** Undo the claim so a failed accounting step doesn't strand the row. */
-  const revertClaim = async () => {
-    await db
-      .update(schema.withdrawals)
-      .set({
-        status: fromStatus,
-        adminNote: w.adminNote,
-        processedBy: w.processedBy,
-        payoutRef: w.payoutRef,
-        paidAt: w.paidAt,
-        updatedAt: w.updatedAt,
-      })
-      .where(and(eq(schema.withdrawals.id, id), eq(schema.withdrawals.status, status)))
-      .run();
-  };
-
-  // Coin accounting depends on WHEN the coins were held:
-  //   * reserved rows (new model): coins were already deducted at request time,
-  //     so approving/paying does NOT deduct again; a rejection refunds them.
-  //   * legacy rows (reserved = false, created before the escrow model): coins
-  //     are deducted here on approval and refunded only on a reject-from-approved.
-  try {
-    if (w.reserved) {
-      // Refund on rejection of a still-held request. The transition table
-      // guarantees fromStatus is "pending" or "approved" here.
-      if (action === "reject") {
-        await refundRejectedWithdrawal(c.env, id, w.userId, w.amount, ts);
-      }
-      // Settle the hold when the money actually leaves.
-      //
-      // The `withdrawal_hold` debit written at request time was never resolved:
-      // marking a reserved payout paid wrote NO ledger row at all, so the ledger
-      // carried a permanently dangling hold and could not be reconciled against
-      // a bank statement. This closes it with a zero-sum pair (release the hold,
-      // record the settled payout) so the balance is unchanged — the coins left
-      // at request time — while the ledger tells the true story.
-      if (action === "paid") {
-        await db.batch([
-          db.insert(schema.coinTransactions).values({
-            id: `withdrawal_hold_release:${id}`,
-            uid: w.userId,
-            amount: w.amount,
-            type: "withdrawal_hold_release",
-            description: "Payout hold released on settlement",
-            createdAt: ts,
-          }).onConflictDoNothing(),
-          db.insert(schema.coinTransactions).values({
-            id: `withdrawal_settled:${id}`,
-            uid: w.userId,
-            amount: -w.amount,
-            type: "withdrawal",
-            description: `Payout sent (${w.method}) — ref ${payoutReference}`,
-            createdAt: ts,
-          }).onConflictDoNothing(),
-        ]);
-      }
-    } else {
-      // Legacy rows are deducted on approval. `paid` can now only be reached
-      // from `approved`, where the deduction already happened.
-      if (action === "approve") {
-        // Deduct and ledger in ONE transaction. These were two separate writes,
-        // so a failure between them moved a balance with no ledger row. Both
-        // statements test the same pre-transaction balance snapshot (the INSERT
-        // runs first and does not touch `users`), so they cannot disagree.
-        //
-        // Exactly-once: the ledger row has a fixed id, so a repeated INSERT was
-        // ignored — but the balance UPDATE used to be ungated, so the
-        // claim → batch commits → later failure → revertClaim() → admin retries
-        // sequence debited the user TWICE against ONE ledger row. Both money
-        // statements are now gated on a per-request nonce claim that can only be
-        // won while the ledger row is absent. The `withdrawal` scope is not in the
-        // retention allowlist (lib/ops.ts), so the claim is never pruned, and the
-        // claim itself also re-checks the permanent ledger row.
-        const ledgerId = `withdrawal_legacy:${id}`;
-        const nonce = crypto.randomUUID();
-        const claimGate = `EXISTS (SELECT 1 FROM idempotency_keys WHERE key = ? AND nonce = ?)`;
-        const legacyResults = await c.env.DB.batch([
-          c.env.DB.prepare(
-            `INSERT OR IGNORE INTO idempotency_keys (key, nonce, scope, created_at)
-             SELECT ?, ?, 'withdrawal', ?
-              WHERE EXISTS (SELECT 1 FROM users WHERE uid = ? AND dpcoin - locked_coins >= ?)
-                AND NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)`,
-          ).bind(ledgerId, nonce, ts, w.userId, w.amount, ledgerId),
-          // A payout takes DP coins only (dpcoin - locked_coins); Diamonds are
-          // never withdrawn (lib/diamonds.ts), so locked_coins does not move.
-          c.env.DB.prepare(
-            `INSERT OR IGNORE INTO coin_transactions
-               (id, uid, amount, type, description, created_at, locked_delta)
-             SELECT ?, ?, ?, 'withdrawal', ?, ?, 0
-              WHERE ${claimGate}`,
-          ).bind(ledgerId, w.userId, -w.amount, `Payout ${status} (${w.method}) · DP coin`, ts, ledgerId, nonce),
-          c.env.DB.prepare(
-            `UPDATE users SET dpcoin = dpcoin - ?, updated_at = ?
-              WHERE uid = ? AND dpcoin - locked_coins >= ? AND ${claimGate}`,
-          ).bind(w.amount, ts, w.userId, w.amount, ledgerId, nonce),
-        ]);
-        if (Number(legacyResults[2]?.meta?.changes || 0) === 0) {
-          const alreadyDebited = await c.env.DB.prepare(`SELECT 1 AS x FROM coin_transactions WHERE id = ?`)
-            .bind(ledgerId)
-            .first();
-          // A previous attempt already took the coins (and wrote the ledger row);
-          // this retry just completes the approval without moving money again.
-          if (!alreadyDebited) {
-            await revertClaim();
-            throw httpsError("failed-precondition", "User ke paas itne DP coin nahi hain (Diamond withdraw nahi hote).");
-          }
-        }
-      }
-      // Rejecting a previously-approved legacy request refunds the held coins.
-      if (action === "reject" && fromStatus === "approved") {
-        await refundRejectedWithdrawal(c.env, id, w.userId, w.amount, ts);
-      }
-    }
-  } catch (err) {
-    // Insufficient-balance already reverted and is a clean precondition failure.
-    if (err instanceof ApiError) throw err;
-    await revertClaim();
-    throw err;
-  }
-
-  // The money action has committed: audit it FIRST. The notification below used
-  // to run before the audit and could throw, leaving a committed payout with no
-  // audit row and a 500 for the admin (whose retry then said "already actioned").
-  await logAudit(c, `withdrawal.${action}`, "withdrawal", id, {
-    amount: w.amount,
-    from: fromStatus,
-    to: status,
-    reserved: w.reserved,
-    ...(payoutReference ? { payoutRef: payoutReference } : {}),
-  });
-  await createNotification(c.env, w.userId, {
-    title: action === "reject" ? "Withdrawal Rejected" : action === "paid" ? "Payout Sent 💸" : "Withdrawal Approved",
-    body: action === "reject" ? `Your payout request was rejected. ${adminNote ? "Reason: " + adminNote : ""}` : action === "paid" ? `Your payout of ${w.amount} DP coin has been sent.` : "Your payout request was approved and is being processed.",
-    type: "withdrawal",
-    targetId: "wallet",
-  }).catch((e) => console.error("[withdrawal] notification failed (action already applied)", id, e));
-  // Real money moved (or was denied) — the user is owed a durable receipt, not
-  // just an in-app toast. `status` is "approved" | "paid" | "rejected".
-  c.executionCtx.waitUntil(
-    sendUserEmail(c.env, w.userId, withdrawalDecisionEmail(status as "approved" | "paid" | "rejected", w.amount, adminNote || "")),
-  );
-  return c.json({ message: `Withdrawal ${status}` });
-});
-
-// ======================= DEPOSITS (manual QR/UPI top-ups) =======================
-adminRoute.get("/deposits", async (c) => {
-  // Full admins only: deposit records and UTRs.
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  const status = c.req.query("status");
-  const conds: any[] = [];
-  if (status) conds.push(eq(schema.deposits.status, status));
-  const rows = await db
-    .select({
-      id: schema.deposits.id,
-      userId: schema.deposits.userId,
-      amount: schema.deposits.amount,
-      payAmount: schema.deposits.payAmount,
-      bonusCoins: schema.deposits.bonusCoins,
-      method: schema.deposits.method,
-      utr: schema.deposits.utr,
-      screenshotUrl: schema.deposits.screenshotUrl,
-      status: schema.deposits.status,
-      adminNote: schema.deposits.adminNote,
-      createdAt: schema.deposits.createdAt,
-      updatedAt: schema.deposits.updatedAt,
-      username: schema.users.username,
-      fullName: schema.users.fullName,
-    })
-    .from(schema.deposits)
-    .leftJoin(schema.users, eq(schema.users.uid, schema.deposits.userId))
-    .where(conds.length ? and(...conds) : (undefined as any))
-    .orderBy(desc(schema.deposits.createdAt))
-    .limit(200)
-    .all();
-  // Flag UTRs that appear on more than one deposit (possible reuse / fraud).
-  const dupRows = await db
-    .select({ utr: schema.deposits.utr })
-    .from(schema.deposits)
-    .where(sql`${schema.deposits.utr} IS NOT NULL AND ${schema.deposits.utr} != ''`)
-    .groupBy(schema.deposits.utr)
-    .having(sql`COUNT(*) > 1`)
-    .all();
-  const dupSet = new Set(dupRows.map((r) => (r.utr || "").toLowerCase()));
-  return c.json(
-    rows.map((r) => ({
-      ...r,
-      duplicateUtr: !!r.utr && dupSet.has((r.utr || "").toLowerCase()),
-      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : null,
-      updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : null,
-    })),
-  );
-});
-
 // ======================= REFERRALS =======================
 adminRoute.get("/referrals", async (c) => {
   // Full admins only: referral attribution names both accounts.
@@ -4696,274 +4083,6 @@ adminRoute.get("/referrals/:id/links", async (c) => {
   return c.json(await referralLinks(c.env, c.req.param("id")));
 });
 
-
-// ======================= FINANCE TRENDS =======================
-/**
- * 14-day daily series of approved deposits and paid/approved withdrawals.
- *
- * Deposits and withdrawals are reported in BOTH units. The previous version
- * summed `deposits.amount` and `withdrawals.amount` — both coin counts — and the
- * panel charted them as money. The rupee values live in `deposits.pay_amount`
- * (what the user transferred in) and `withdrawals.cash_amount` (what we pay out).
- */
-adminRoute.get("/finance-trends", async (c) => {
-  // Full admins only: financial trends.
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  const since = now() - 14 * 86400000;
-  const deps = await db
-    .select({
-      coins: schema.deposits.amount,
-      inr: schema.deposits.payAmount,
-      createdAt: schema.deposits.updatedAt,
-    })
-    .from(schema.deposits)
-    .where(and(eq(schema.deposits.status, "approved"), gte(schema.deposits.updatedAt, since)))
-    .all();
-  const wds = await db
-    .select({
-      coins: schema.withdrawals.amount,
-      inr: schema.withdrawals.cashAmount,
-      status: schema.withdrawals.status,
-      createdAt: schema.withdrawals.updatedAt,
-    })
-    .from(schema.withdrawals)
-    .where(and(inArray(schema.withdrawals.status, ["approved", "paid"]), gte(schema.withdrawals.updatedAt, since)))
-    .all();
-  const days: string[] = [];
-  const depMap: Record<string, { coins: number; inr: number }> = {};
-  const wdMap: Record<string, { coins: number; inr: number }> = {};
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date(now() - i * 86400000).toISOString().slice(0, 10);
-    days.push(d);
-    depMap[d] = { coins: 0, inr: 0 };
-    wdMap[d] = { coins: 0, inr: 0 };
-  }
-  for (const r of deps) {
-    const d = new Date(r.createdAt).toISOString().slice(0, 10);
-    if (!depMap[d]) continue;
-    depMap[d].coins += Number(r.coins) || 0;
-    depMap[d].inr += Number(r.inr) || 0;
-  }
-  for (const r of wds) {
-    const d = new Date(r.createdAt).toISOString().slice(0, 10);
-    if (!wdMap[d]) continue;
-    wdMap[d].coins += Number(r.coins) || 0;
-    wdMap[d].inr += Number(r.inr) || 0;
-  }
-  return c.json(
-    days.map((d) => ({
-      date: d,
-      // Legacy field names, now unambiguously RUPEES so the existing chart is
-      // finally labelled correctly.
-      deposits: roundFiat(depMap[d].inr),
-      withdrawals: roundFiat(wdMap[d].inr),
-      depositsInr: roundFiat(depMap[d].inr),
-      withdrawalsInr: roundFiat(wdMap[d].inr),
-      depositsCoins: depMap[d].coins,
-      withdrawalsCoins: wdMap[d].coins,
-    })),
-  );
-});
-
-/**
- * Action a manual deposit. action: "approve" | "reject".
- *
- * Approving credits the coins (`users.dpcoin`), records a `payments` row and a
- * coin ledger entry, and stamps `credited_at` — ALL IN ONE D1 BATCH, every
- * statement gated on the same `status = 'pending'` snapshot.
- *
- * That gating is the whole point. The status claim used to be its own statement
- * followed by a separate crediting batch whose balance update carried no gate, so
- * a failure between the two left the deposit reading `approved` with no coins, no
- * `payments` row and no ledger row — while the "already processed" guard below
- * made a retry impossible. The user had wired real INR against a verified UTR and
- * the loss was invisible: unlike a Razorpay order, nothing swept for it, because
- * `recoverStrandedPaidOrders` only ever looks at `payment_orders`.
- *
- * With one batch that window does not exist, so there is deliberately no recovery
- * sweeper here — there is no state for it to find. (A Razorpay order genuinely
- * needs one: its claim cannot share a transaction with the credit, because the
- * gateway decides the outcome.) `computeMoneyHealth` keeps that claim honest by
- * reporting any `approved` deposit with `credited_at IS NULL`.
- *
- * The ledger id is deterministic (`manual_deposit:<id>`) so that even a manual
- * operator re-run cannot write a second ledger row for one deposit — the same
- * reason `recoverStrandedPaidOrders` uses `purchase:<paymentId>`.
- */
-adminRoute.patch("/deposits/:id", async (c) => {
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  const id = c.req.param("id");
-  const { action, adminNote } = await c.req.json<any>();
-  if (!["approve", "reject"].includes(action)) throw httpsError("invalid-argument", "Invalid action.");
-  // Buying Diamonds is retired (lib/cashRetirement.ts): an old pending deposit
-  // can only be rejected (and the ₹ refunded outside the app).
-  if (action === "approve" && cashFlowsRetired(c.env)) {
-    throw httpsError("failed-precondition", "Deposits are retired. Reject this request and refund the payment outside the app.", CASH_RETIRED_REASON);
-  }
-  const d = await db.select().from(schema.deposits).where(eq(schema.deposits.id, id)).get();
-  if (!d) throw httpsError("not-found", "Deposit not found.");
-  if (d.status !== "pending") throw httpsError("failed-precondition", "Deposit is already processed.");
-  const admin = c.get("user");
-  const ts = now();
-  const status = action === "approve" ? "approved" : "rejected";
-
-  // Guard against crediting a UTR that was already credited on another deposit.
-  // Submit-time blocking covers new requests; this catches any duplicate rows
-  // that predate that check (or were created concurrently).
-  if (action === "approve" && d.utr) {
-    const already = await db
-      .select({ id: schema.deposits.id })
-      .from(schema.deposits)
-      .where(and(sql`lower(${schema.deposits.utr}) = ${d.utr.toLowerCase()}`, eq(schema.deposits.status, "approved"), ne(schema.deposits.id, id)))
-      .get();
-    if (already) throw httpsError("failed-precondition", "This UTR was already credited on another deposit.");
-  }
-
-  // `amount` already includes the package bonus; this just makes it visible in
-  // the ledger and the notification so the user can see the offer was applied.
-  const depBonus = Number(d.bonusCoins) || 0;
-  const bonusSuffix = depBonus > 0 ? ` (incl. ${depBonus} bonus)` : "";
-
-  if (action === "approve") {
-    const coins = assertCoinAmount(d.amount, "deposit amount");
-    /**
-     * Every statement is gated on the deposit STILL being pending and the
-     * recipient still existing, and the status claim comes LAST.
-     *
-     * Ordering matters: the claim is the only statement that changes
-     * `deposits.status`, so placing it last means all four evaluate the same
-     * pre-transaction snapshot and can only all apply or all no-op. Two
-     * overlapping approvals therefore still credit exactly once — the loser's
-     * gate is already false when its batch runs — and there is no window in
-     * which the row is `approved` but the coins are not there.
-     *
-     * The user-exists arm matters too: without it a deposit for a deleted
-     * account would flip to `approved` while the credit silently matched no
-     * row, which is ledger drift in the other direction.
-     */
-    //
-    // The UTR arm is inside the gate for the same reason. The pre-check above
-    // is a read before the batch, so two DIFFERENT pending deposits carrying
-    // the same bank reference, approved at the same time, both passed it and
-    // both credited: one transfer paid out twice. D1 runs a batch as one
-    // serialized transaction, so here the second approval sees the first one's
-    // `approved` row and no-ops.
-    const utrKey = d.utr ? d.utr.toLowerCase() : null;
-    const pendingGate = `EXISTS (SELECT 1 FROM deposits WHERE id = ? AND status = 'pending')
-        AND EXISTS (SELECT 1 FROM users WHERE uid = ?)
-        AND (? IS NULL OR NOT EXISTS (
-          SELECT 1 FROM deposits WHERE lower(utr) = ? AND status = 'approved' AND id <> ?))`;
-    const gateArgs = [id, d.userId, utrKey, utrKey, id];
-    const ledgerId = `manual_deposit:${id}`;
-    // A budget-funded bonus (lib/promoBudget.ts) is credited as its own locked,
-    // play-only `promo_bonus` row; the deposit row carries the paid coins only.
-    const promoBonus = d.budgetId && depBonus > 0 ? depBonus : 0;
-    const paidCoins = coins - promoBonus;
-    // A deposit buys Diamonds (lib/diamonds.ts): play-only, never withdrawable.
-    const results = await c.env.DB.batch([
-      c.env.DB.prepare(
-        `UPDATE users SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, updated_at = ?
-          WHERE uid = ? AND ${pendingGate}`,
-      ).bind(paidCoins, paidCoins, ts, d.userId, ...gateArgs),
-      c.env.DB.prepare(
-        `INSERT OR IGNORE INTO payments
-           (id, user_id, amount, coins, amount_paise, source, status, created_at)
-         SELECT ?, ?, ?, ?, ?, 'manual_deposit', 'success', ?
-          WHERE ${pendingGate}`,
-        // `amount` is the legacy coin column; the split fields record the coins
-        // credited and the rupees actually transferred, so revenue reporting can
-        // read real money instead of a coin count.
-      ).bind(`dep_${id}`, d.userId, coins, coins, toPaise(Number(d.payAmount) || 0), ts, ...gateArgs),
-      c.env.DB.prepare(
-        `INSERT OR IGNORE INTO coin_transactions
-           (id, uid, amount, type, description, created_at, locked_delta)
-         SELECT ?, ?, ?, 'manual_deposit', ?, ?, ?
-          WHERE ${pendingGate}`,
-      ).bind(
-        ledgerId,
-        d.userId,
-        paidCoins,
-        `Diamond deposit approved${bonusSuffix} (UTR ${d.utr || "-"})`,
-        ts,
-        paidCoins,
-        ...gateArgs,
-      ),
-      ...(promoBonus > 0
-        ? promoBonusCreditStatements(
-            c.env,
-            {
-              uid: d.userId,
-              coins: promoBonus,
-              budgetId: String(d.budgetId),
-              reservationId: depositReservationId(id),
-              ledgerId: `promo_bonus:deposit:${id}`,
-              refId: id,
-              description: `Bonus ${promoBonus} Diamond — deposit ${id}`,
-              ts,
-            },
-            pendingGate,
-            gateArgs,
-          )
-        : []),
-      c.env.DB.prepare(
-        `UPDATE deposits
-            SET status = 'approved', admin_note = ?, processed_by = ?, credited_at = ?, updated_at = ?
-          WHERE id = ? AND status = 'pending'
-            AND EXISTS (SELECT 1 FROM users WHERE uid = ?)
-            AND (? IS NULL OR NOT EXISTS (
-              SELECT 1 FROM deposits WHERE lower(utr) = ? AND status = 'approved' AND id <> ?))`,
-      ).bind(adminNote || null, admin?.uid ?? null, ts, ts, ...gateArgs),
-    ]);
-    if (Number(results[results.length - 1]?.meta?.changes || 0) === 0) {
-      // Nothing moved: another approval won the race, the same UTR was credited
-      // on another deposit in the meantime, or the recipient account no longer
-      // exists. In every case no coins were credited.
-      if (utrKey) {
-        const dup = await db
-          .select({ id: schema.deposits.id })
-          .from(schema.deposits)
-          .where(and(sql`lower(${schema.deposits.utr}) = ${utrKey}`, eq(schema.deposits.status, "approved"), ne(schema.deposits.id, id)))
-          .get();
-        if (dup) throw httpsError("failed-precondition", "This UTR was already credited on another deposit.");
-      }
-      const stillThere = await db
-        .select({ uid: schema.users.uid })
-        .from(schema.users)
-        .where(eq(schema.users.uid, d.userId))
-        .get();
-      if (!stillThere) throw httpsError("failed-precondition", "That user account no longer exists.");
-      throw httpsError("failed-precondition", "Deposit was already processed.");
-    }
-  } else {
-    // Rejection moves no money, so a plain compare-and-swap is enough.
-    const claim = await db
-      .update(schema.deposits)
-      .set({ status, adminNote: adminNote || null, processedBy: admin?.uid ?? null, updatedAt: ts })
-      .where(and(eq(schema.deposits.id, id), eq(schema.deposits.status, "pending")))
-      .run();
-    if (claim.meta.changes === 0) throw httpsError("failed-precondition", "Deposit was already processed.");
-    // The bonus held for this deposit goes back to its budget.
-    if (d.budgetId) await releaseStatement(c.env, depositReservationId(id), ts).run();
-  }
-
-  await createNotification(c.env, d.userId, {
-    title: action === "approve" ? "Deposit Approved 🎉" : "Deposit Rejected",
-    body: action === "approve" ? `${d.amount} Diamond have been added to your wallet${bonusSuffix}.` : `Your deposit request was rejected. ${adminNote ? "Reason: " + adminNote : ""}`,
-    type: "deposit",
-    targetId: "wallet",
-  });
-  // An approved manual deposit credits coins — same receipt as a card top-up.
-  if (action === "approve") {
-    c.executionCtx.waitUntil(sendUserEmail(c.env, d.userId, coinsAddedEmail(Number(d.amount) || 0)));
-  }
-  // Referral: an approved first deposit may qualify the user's pending referral
-  // (lib/referralProgram.ts — never throws).
-  if (action === "approve") c.executionCtx.waitUntil(qualifyReferral(c.env, d.userId, "purchase", { amountInr: Number(d.payAmount) || 0 }));
-  await logAudit(c, `deposit.${action}`, "deposit", id, { amount: d.amount, utr: d.utr });
-  return c.json({ message: `Deposit ${status}` });
-});
 
 // ======================= AUDIT LOG =======================
 adminRoute.get("/audit-log", async (c) => {
@@ -5245,144 +4364,6 @@ adminRoute.post("/seo/scan", async (c) => {
 });
 
 
-// ======================= COIN PACKAGES (top-up store) =======================
-adminRoute.get("/coin-packages", async (c) => {
-  const db = getDb(c.env);
-  const rows = await db.select().from(schema.coinPackages).orderBy(schema.coinPackages.sortOrder).all();
-  // The LIVE price (base coins × buy rate), not the stored snapshot, plus what
-  // the admin needs to keep it safe (lib/coinPricing.ts).
-  const cfg = await getAppConfig(c.env);
-  const rates = ratesFromConfig(cfg);
-  return c.json(
-    rows.map((r) => {
-      const priced = pricePackage(r, rates);
-      return {
-        ...r,
-        active: !!r.active,
-        priceInr: priced.priceInr,
-        payoutInr: priced.payoutInr,
-        purchasable: priced.purchasable,
-        reason: priced.reason ?? null,
-        minSafeBuyRate: minSafeBuyRate(r, rates.payoutRate),
-        buyRate: rates.buyRate,
-        payoutRate: rates.payoutRate,
-        buyRateSet: hasExplicitBuyRate(cfg),
-      };
-    }),
-  );
-});
-
-/**
- * `budgetId` on a coin package: a package_bonus promo budget pays its bonus,
- * credited as locked (play-only) coins (lib/promoBudget.ts). `undefined` = not
- * sent, `null` = unlink.
- */
-function packageBudgetInput(b: any): string | null | undefined {
-  if (!b || !Object.prototype.hasOwnProperty.call(b, "budgetId") || b.budgetId === undefined) return undefined;
-  if (b.budgetId === null || b.budgetId === "") return null;
-  if (typeof b.budgetId !== "string" || b.budgetId.length > 64) throw httpsError("invalid-argument", "budgetId must be a budget id.");
-  return b.budgetId;
-}
-
-adminRoute.post("/coin-packages", async (c) => {
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  const b = await c.req.json<any>();
-  const budgetId = packageBudgetInput(b) ?? null;
-  // Packages price every real purchase, so they are validated on the way IN.
-  const values = validateCoinPackage(b, undefined, { promoFunded: !!budgetId });
-  if (values.coins == null) {
-    throw httpsError("invalid-argument", "coins is required.");
-  }
-  if (budgetId) {
-    await assertLinkableBudget(c.env, budgetId, "package_bonus");
-    if (!(Number(values.bonusCoins) > 0)) throw httpsError("invalid-argument", "Budget wale package me bonus coins 0 se zyada hone chahiye.");
-    // A platform-funded bonus needs the approval password.
-    await assertApproval(c, b);
-  }
-  // The price is not entered: it is base coins × buy rate (lib/coinPricing.ts).
-  // The column keeps a snapshot of it, for reference only. A package that would
-  // pay out more than it costs is refused.
-  const rates = ratesFromConfig(await getAppConfig(c.env));
-  assertPackagesSafe([{ name: values.name, coins: values.coins, bonusCoins: values.bonusCoins ?? 0, active: values.active ?? true, budgetId }], rates);
-  values.priceInr = packagePriceInr(values.coins, rates.buyRate);
-  const id = newId();
-  const ts = now();
-  await db.insert(schema.coinPackages).values({
-    id,
-    name: values.name ?? null,
-    coins: values.coins,
-    bonusCoins: values.bonusCoins ?? 0,
-    priceInr: values.priceInr,
-    active: values.active ?? true,
-    sortOrder: values.sortOrder ?? 0,
-    budgetId,
-    createdAt: ts,
-    updatedAt: ts,
-  });
-  await logAudit(c, "coin-package.create", "coin_package", id, { ...values, budgetId });
-  c.executionCtx.waitUntil(publishCoinCatalog(c.env));
-  return c.json({ success: true, id });
-});
-
-adminRoute.patch("/coin-packages/:id", async (c) => {
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  const id = c.req.param("id");
-  const b = await c.req.json<any>();
-  const current = await db.select().from(schema.coinPackages).where(eq(schema.coinPackages.id, id)).get();
-  if (!current) throw httpsError("not-found", "Package not found.");
-  const budgetInput = packageBudgetInput(b);
-  const budgetId = budgetInput === undefined ? current.budgetId ?? null : budgetInput;
-  // Validate against the MERGED result so raising the bonus alone, or lowering
-  // the coins alone, is still checked against the other value.
-  const values = validateCoinPackage(b, {
-    coins: Number(current.coins),
-    bonusCoins: Number(current.bonusCoins),
-  }, { promoFunded: !!budgetId });
-  const set: any = { ...values, updatedAt: now() };
-  const budgetChanged = budgetInput !== undefined && budgetInput !== (current.budgetId ?? null);
-  if (budgetChanged) set.budgetId = budgetId;
-  if (budgetId) {
-    if (budgetChanged) await assertLinkableBudget(c.env, budgetId, "package_bonus");
-    if (!(Number(values.bonusCoins ?? current.bonusCoins) > 0)) {
-      throw httpsError("invalid-argument", "Budget wale package me bonus coins 0 se zyada hone chahiye.");
-    }
-  }
-  // Linking or unlinking a budget, or changing a platform-funded bonus, changes
-  // what the platform pays per purchase: approval password.
-  const bonusChanged = values.bonusCoins !== undefined && Number(values.bonusCoins) !== Number(current.bonusCoins);
-  if (budgetChanged || (budgetId && bonusChanged)) await assertApproval(c, b);
-  // Price follows the buy rate; keep the reference snapshot in step, and refuse
-  // an edit that would make the package pay out more than it costs.
-  const rates = ratesFromConfig(await getAppConfig(c.env));
-  assertPackagesSafe(
-    [{
-      name: values.name ?? current.name,
-      coins: values.coins ?? current.coins,
-      bonusCoins: values.bonusCoins ?? current.bonusCoins,
-      active: values.active ?? current.active,
-      budgetId,
-    }],
-    rates,
-  );
-  set.priceInr = packagePriceInr(values.coins ?? Number(current.coins), rates.buyRate);
-  await db.update(schema.coinPackages).set(set).where(eq(schema.coinPackages.id, id));
-  await logAudit(c, "coin-package.update", "coin_package", id, set);
-  c.executionCtx.waitUntil(publishCoinCatalog(c.env));
-  return c.json({ message: "Package updated" });
-});
-
-adminRoute.delete("/coin-packages/:id", async (c) => {
-  requireFullAdmin(c);
-  const db = getDb(c.env);
-  const id = c.req.param("id");
-  await db.delete(schema.coinPackages).where(eq(schema.coinPackages.id, id));
-  await logAudit(c, "coin-package.delete", "coin_package", id);
-  c.executionCtx.waitUntil(publishCoinCatalog(c.env));
-  return c.json({ message: "Package deleted" });
-});
-
 // ======================= COIN ECONOMY (promo budgets, ledger reports) =======
 // Approval password: a second secret for anything that makes the platform pay
 // coins nobody paid for (lib/approvalPassword.ts).
@@ -5428,14 +4409,12 @@ adminRoute.get("/promo-budgets/:id", async (c) => {
   const budget = await getBudget(c.env, id);
   if (!budget) throw httpsError("not-found", "Promo budget not found.");
   const db = getDb(c.env);
-  const [packages, contests, activity] = await Promise.all([
-    db.select({ id: schema.coinPackages.id, name: schema.coinPackages.name, coins: schema.coinPackages.coins, bonusCoins: schema.coinPackages.bonusCoins, active: schema.coinPackages.active })
-      .from(schema.coinPackages).where(eq(schema.coinPackages.budgetId, id)).all(),
+  const [contests, activity] = await Promise.all([
     db.select({ id: schema.contests.id, title: schema.contests.title, status: schema.contests.status, totalEntryFee: schema.contests.totalEntryFee, rewardCoins: schema.contests.rewardCoins })
       .from(schema.contests).where(eq(schema.contests.subsidyBudgetId, id)).all(),
     budgetActivity(c.env, id),
   ]);
-  return c.json({ budget, packages, contests, ...activity });
+  return c.json({ budget, contests, ...activity });
 });
 
 adminRoute.post("/promo-budgets", async (c) => {
@@ -5461,7 +4440,7 @@ adminRoute.post("/promo-budgets", async (c) => {
     endsAt: values.endsAt ?? null,
     // Per-user caps apply where the recipient is known up front: package bonus
     // and free rewards (e.g. "max 500 free coins per user this month").
-    perUserLimit: values.kind === "package_bonus" || values.kind === "free_rewards" ? values.perUserLimit ?? null : null,
+    perUserLimit: values.kind === "free_rewards" ? values.perUserLimit ?? null : null,
     note: values.note ?? null,
     createdBy: user?.email || user?.uid || "server",
     createdAt: ts,
@@ -5497,7 +4476,7 @@ adminRoute.patch("/promo-budgets/:id", async (c) => {
     throw httpsError("invalid-argument", "End date must be after the start date.");
   }
   const set: Record<string, any> = { ...values, updatedAt: now() };
-  if (current.kind !== "package_bonus" && current.kind !== "free_rewards") delete set.perUserLimit;
+  if (current.kind !== "free_rewards") delete set.perUserLimit;
   // Raising/lowering the total is re-checked in SQL against what is committed
   // NOW, so a purchase landing between the read above and this write cannot
   // leave the budget below what it has already paid.
@@ -5557,11 +4536,6 @@ adminRoute.post("/coin-economy/alerts/run", async (c) => {
 adminRoute.get("/coin-economy/contests", async (c) => {
   requireFullAdmin(c);
   return c.json(await contestPnl(c.env, boundedQueryInt(c.req.query("limit"), 200, 1, 500)));
-});
-
-adminRoute.get("/coin-economy/packages", async (c) => {
-  requireFullAdmin(c);
-  return c.json(await packagePnl(c.env));
 });
 
 adminRoute.get("/coin-economy/users/:uid", async (c) => {
@@ -5893,13 +4867,9 @@ adminRoute.get("/analytics", async (c) => {
   const day = 86400000;
   const cnt = async (tbl: any, col: any, since: number) =>
     (await db.select({ v: count() }).from(tbl).where(gte(col, since)).get())?.v ?? 0;
-  const sum = async (col: any, tbl: any, since: number, statusOk?: any) =>
-    (await db.select({ v: sql<number>`COALESCE(SUM(${col}),0)` }).from(tbl).where(statusOk ? and(gte(tbl.createdAt, since), statusOk) : gte(tbl.createdAt, since)).get())?.v ?? 0;
   // Range variants ([since, until)) for previous-period deltas.
   const cntRange = async (tbl: any, col: any, since: number, until: number) =>
     (await db.select({ v: count() }).from(tbl).where(and(gte(col, since), lt(col, until))).get())?.v ?? 0;
-  const sumRange = async (col: any, tbl: any, since: number, until: number, statusOk?: any) =>
-    (await db.select({ v: sql<number>`COALESCE(SUM(${col}),0)` }).from(tbl).where(statusOk ? and(gte(tbl.createdAt, since), lt(tbl.createdAt, until), statusOk) : and(gte(tbl.createdAt, since), lt(tbl.createdAt, until))).get())?.v ?? 0;
   const votersRange = async (since: number, until: number) =>
     (await db.select({ v: sql<number>`COUNT(DISTINCT ${schema.votes.voterUid})` }).from(schema.votes).where(and(gte(schema.votes.createdAt, since), lt(schema.votes.createdAt, until))).get())?.v ?? 0;
 
@@ -5911,22 +4881,6 @@ adminRoute.get("/analytics", async (c) => {
   // Active users (proxy): distinct voters in the window.
   const dau = (await db.select({ v: sql<number>`COUNT(DISTINCT ${schema.votes.voterUid})` }).from(schema.votes).where(gte(schema.votes.createdAt, nowMs - day)).get())?.v ?? 0;
   const mau = (await db.select({ v: sql<number>`COUNT(DISTINCT ${schema.votes.voterUid})` }).from(schema.votes).where(gte(schema.votes.createdAt, nowMs - 30 * day)).get())?.v ?? 0;
-
-  // `revenue*` are COIN counts (payments.amount is coins) — the dashboard cards
-  // are labelled "Coins Sold". `revenue*Inr` are the real rupee figures.
-  const revenueToday = await sum(schema.payments.amount, schema.payments, nowMs - day, eq(schema.payments.status, "success"));
-  const revenue7d = await sum(schema.payments.amount, schema.payments, nowMs - 7 * day, eq(schema.payments.status, "success"));
-  const revenue30d = await sum(schema.payments.amount, schema.payments, nowMs - 30 * day, eq(schema.payments.status, "success"));
-  const paiseToInr = (v: number) => roundFiat(Number(v || 0) / 100);
-  const revenueTodayInr = paiseToInr(
-    await sum(schema.payments.amountPaise, schema.payments, nowMs - day, eq(schema.payments.status, "success")),
-  );
-  const revenue7dInr = paiseToInr(
-    await sum(schema.payments.amountPaise, schema.payments, nowMs - 7 * day, eq(schema.payments.status, "success")),
-  );
-  const revenue30dInr = paiseToInr(
-    await sum(schema.payments.amountPaise, schema.payments, nowMs - 30 * day, eq(schema.payments.status, "success")),
-  );
 
   const matchesToday = await cnt(schema.contestMatches, schema.contestMatches.createdAt, nowMs - day);
   const votesToday = await cnt(schema.votes, schema.votes.createdAt, nowMs - day);
@@ -5940,21 +4894,17 @@ adminRoute.get("/analytics", async (c) => {
   const newUsersYesterday = await cntRange(schema.users, schema.users.createdAt, nowMs - 2 * day, nowMs - day);
   const votesYesterday = await cntRange(schema.votes, schema.votes.createdAt, nowMs - 2 * day, nowMs - day);
   const dauYesterday = await votersRange(nowMs - 2 * day, nowMs - day);
-  const revenueYesterday = await sumRange(schema.payments.amount, schema.payments, nowMs - 2 * day, nowMs - day, eq(schema.payments.status, "success"));
   const newUsersPrev7d = await cntRange(schema.users, schema.users.createdAt, nowMs - 14 * day, nowMs - 7 * day);
-  const revenuePrev7d = await sumRange(schema.payments.amount, schema.payments, nowMs - 14 * day, nowMs - 7 * day, eq(schema.payments.status, "success"));
 
-  return c.json(withoutRevenueForModerators(c, {
+  return c.json({
     totalUsers, newUsersToday, newUsers7d, newUsers30d,
     dau, mau,
-    revenueToday, revenue7d, revenue30d,
-    revenueTodayInr, revenue7dInr, revenue30dInr,
     matchesToday, votesToday, postsToday,
     activeMatches, completedMatches,
     // deltas
-    newUsersYesterday, votesYesterday, dauYesterday, revenueYesterday,
-    newUsersPrev7d, revenuePrev7d,
-  }));
+    newUsersYesterday, votesYesterday, dauYesterday,
+    newUsersPrev7d,
+  });
 });
 
 // ======================= OPS (manual cron triggers) =======================

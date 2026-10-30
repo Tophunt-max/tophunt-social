@@ -1,6 +1,6 @@
 /**
  * App Control (lib/appControl.ts): maintenance (manual + scheduled), force
- * update, announcement, feature flags and withdrawal rules — what the app is
+ * update, announcement, feature flags and coin values — what the app is
  * told, what an admin may save, the realtime push on save, and the server gate.
  */
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -112,13 +112,24 @@ describe('validateAppControlPatch', () => {
     expect(v({ forceUpdate: true })).toThrow(/minimum version/);
     expect(v({ updateUrls: { android: 'http://x' } })).toThrow(/https/);
     expect(v({ features: { chats: false } })).toThrow(/Unknown feature/);
-    expect(v({ withdrawal: { conversionRate: 0 } })).toThrow(/more than 0/);
-    expect(v({ withdrawal: { minAmount: 500, maxAmount: 100 } })).toThrow(/cannot be more/);
-    expect(v({ withdrawal: { minAmount: '' } })).toThrow(/whole number/);
+    // Real money is gone: its settings are refused, not stored.
+    expect(v({ withdrawal: { conversionRate: 0.1 } })).toThrow(/withdrawal settings no longer exist/);
+    expect(v({ withdrawal: { enabled: false } })).toThrow(/withdrawal settings no longer exist/);
+    expect(v({ paymentGateway: { mode: 'off' } })).toThrow(/paymentGateway no longer exists/);
+    expect(v({ coinPricing: { dpCoinInr: 0 } })).toThrow(/more than ₹0/);
+    expect(v({ coinPricing: { diamondInr: 0.12345 } })).toThrow(/4 decimal places/);
+    expect(v({ coinPricing: { sellRate: 1 } })).toThrow(/not a setting/);
     expect(v({ announcement: { enabled: true, message: '  ' } })).toThrow(/needs a message/);
     const now = Date.now();
     expect(v({ maintenanceSchedule: { startAt: now + 2 * H, endAt: now + H } })).toThrow(/after its start/);
     expect(v({ maintenanceSchedule: { startAt: now - 3 * H, endAt: now - H } })).toThrow(/past/);
+  });
+  it('drops the retired topups/withdrawals switches and the old buy rate instead of refusing them', () => {
+    const body: any = { features: { topups: true, withdrawals: true, chat: true }, featureRollout: { topups: 50 }, coinPricing: { buyRate: 2, dpCoinInr: 0.5 } };
+    validateAppControlPatch(body, {});
+    expect(body.features).toEqual({ chat: true });
+    expect(body.featureRollout).toEqual({});
+    expect(body.coinPricing).toEqual({ dpCoinInr: 0.5 });
   });
   it('a changed announcement gets a new id, an unchanged one keeps it', () => {
     const a1 = { announcement: { message: 'Hello' } };
@@ -165,7 +176,8 @@ describe('admin save -> app, instantly', () => {
 
   it('rejects an invalid save without pushing anything', async () => {
     const { env } = makeEnv();
-    expect((await admin(env, { withdrawal: { conversionRate: -1 } })).status).toBe(400);
+    expect((await admin(env, { withdrawal: { conversionRate: 0.1 } })).status).toBe(400);
+    expect((await admin(env, { coinPricing: { dpCoinInr: -1 } })).status).toBe(400);
     expect(pushes).toHaveLength(0);
   });
 });

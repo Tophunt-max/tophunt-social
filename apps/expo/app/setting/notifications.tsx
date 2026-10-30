@@ -35,7 +35,7 @@ import { useToast } from '@/src/components/toast/ToastProvider';
  * Important behaviour to keep in mind when editing this screen: these toggles
  * only stop the OS **push**. The in-app notifications list still receives
  * everything, so turning a category off never leaves a gap in the user's history
- * (and nobody misses a payout confirmation because they muted notifications).
+ * (and nobody misses a prize or shop-order update because they muted notifications).
  * The copy below says so explicitly.
  */
 

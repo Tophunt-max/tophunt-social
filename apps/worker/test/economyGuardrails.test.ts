@@ -42,7 +42,7 @@ async function seedUser(env: TestEnv, uid: string, extra: Record<string, any> = 
 }
 async function seedPlayer(env: TestEnv, uid: string, diamonds: number) {
   await seedUser(env, uid);
-  await adjustUserWallet(env as any, { uid, amount: diamonds, direction: 'add', type: 'purchase', description: 'test diamonds', locked: true });
+  await adjustUserWallet(env as any, { uid, amount: diamonds, direction: 'add', type: 'admin_adjustment', description: 'test diamonds', locked: true });
 }
 const user = (env: TestEnv, uid: string) => drizzleOf(env).select().from(schema.users).where(eq(schema.users.uid, uid)).get();
 async function settings(env: TestEnv, data: any) {

@@ -143,10 +143,10 @@ describe('when the limiter is unreachable', () => {
     // Unchanged policy from the KV implementation: for endpoints where an
     // unlimited burst costs real money, a brief refusal beats no throttle at all.
     expect(
-      await consumeRateLimit(brokenEnv() as any, 'withdraw:alice', 5, 3600, { failClosed: true }),
+      await consumeRateLimit(brokenEnv() as any, 'reauth:alice', 5, 3600, { failClosed: true }),
     ).toBe(false);
     await expect(
-      rateLimit(brokenEnv() as any, 'withdraw:alice', 5, 3600, { failClosed: true }),
+      rateLimit(brokenEnv() as any, 'reauth:alice', 5, 3600, { failClosed: true }),
     ).rejects.toMatchObject({ code: 'resource-exhausted' });
   });
 

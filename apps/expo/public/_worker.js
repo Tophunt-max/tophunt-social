@@ -79,7 +79,7 @@ export const CONTENT_SECURITY_POLICY =
   // apis.google.com serves gapi (`/js/api.js`), which Firebase's web SDK loads to
   // run Google / Facebook / Apple sign-in. Without it every social sign-in failed
   // with "auth/internal-error" before the popup even opened.
-  "script-src 'self' 'unsafe-inline' https://apis.google.com https://checkout.razorpay.com https://*.gstatic.com https://*.googleapis.com https://static.cloudflareinsights.com; " +
+  "script-src 'self' 'unsafe-inline' https://apis.google.com https://*.gstatic.com https://*.googleapis.com https://static.cloudflareinsights.com; " +
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data: blob: https:; " +
   "media-src 'self' blob: https:; " +
@@ -92,12 +92,12 @@ export const CONTENT_SECURITY_POLICY =
   'https://tophunt-social-api-staging.weadown-in.workers.dev wss://tophunt-social-api-staging.weadown-in.workers.dev ' +
   'https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com ' +
   'https://securetoken.googleapis.com https://identitytoolkit.googleapis.com ' +
-  'https://fcmregistrations.googleapis.com https://lumberjack.razorpay.com https://api.razorpay.com ' +
+  'https://fcmregistrations.googleapis.com ' +
   // The analytics beacon POSTs its payload back to this host.
   'https://cloudflareinsights.com; ' +
   // 'self': on tophunt.in the Firebase auth iframe is served first-party from
   // `/__/auth/iframe` (see FIREBASE_AUTH_PROXY below).
-  "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://*.firebaseapp.com; " +
+  "frame-src 'self' https://*.firebaseapp.com; " +
   // `blob:` is required by hls.js, which plays HLS on the web: it spawns
   // its demuxer in a Web Worker created from a blob URL. Without this the worker
   // is blocked and playback degrades to the main thread (or fails outright).
@@ -182,9 +182,9 @@ export function withAssetCaching(res, path) {
 //
 // The table below is the source of truth for what is public. Anything NOT listed
 // here and not a blog post or battle is treated as PRIVATE and gets
-// `noindex, nofollow`, which is the safe default: this app has wallet, deposit,
-// withdrawal, chat, settings and auth screens, and a crawler that indexes
-// `/wallet/withdraw` or an OTP screen is a problem, not a win.
+// `noindex, nofollow`, which is the safe default: this app has wallet, chat,
+// settings and auth screens, and a crawler that indexes `/wallet/gifts` or an
+// OTP screen is a problem, not a win.
 //
 // `description` is what shows in a search result and in a share preview, so it is
 // written per route rather than falling back to one site-wide sentence.
@@ -252,7 +252,7 @@ const PUBLIC_ROUTES = {
  */
 const PRIVATE_PREFIXES = [
   '/auth', //         login, signup, OTP, password reset
-  '/wallet', //       balances, deposits, withdrawals, coin store
+  '/wallet', //       balances, rewards, gift history
   '/setting', //      account settings, blocked list, account deletion
   '/messages', //     direct messages
   '/notifications',
@@ -951,7 +951,7 @@ export default {
     // deliberately.
     //
     // The STATUS, though, has to distinguish two things this branch had merged.
-    // `/wallet/withdraw` and `/messages/chat/<id>` are live screens: they are
+    // `/wallet/gifts` and `/messages/chat/<id>` are live screens: they are
     // noindex, but they exist, and answering 404 for a screen a signed-in user is
     // looking at is wrong. `/foo/bar` does not exist, and answering 200 for it is
     // the soft-404 pattern. The first segment decides — RESERVED mirrors the
@@ -986,7 +986,7 @@ const SHARE_MEDIA_PATH = '/share-media/';
 const SHARE_MEDIA_ORIGIN = 'https://media.tophunt.in';
 /** R2 key prefixes a share surface can legitimately need. */
 // (mirrors worker/src/lib/mediaCategories.ts: entries, avatars, VS cards, prize
-// product photos — never deposits, reports, chat or payment QR codes)
+// product photos — never reports or chat media)
 const SHARE_MEDIA_PREFIXES = ['contests/', 'contest-entries/', 'avatars/', 'vs-cards/', 'product-images/'];
 /** Encoded-video posters (`videos/<uuid>/thumbnail.jpg`) — the poster only, never playlists or segments. */
 const VIDEO_POSTER_KEY = /^videos\/[0-9a-f-]{36}\/thumbnail\.jpg$/i;
@@ -1630,7 +1630,7 @@ function injectBattleSeo(shellResp, match, origin, battleId, opts = {}) {
  * The `Disallow` list is belt-and-braces alongside the `noindex` tags: a meta tag
  * only works if the crawler fetched and rendered the page, and these paths should
  * not be crawled in the first place. Crawl budget spent re-fetching
- * `/wallet/withdraw` is budget not spent on the 4,000+ blog posts.
+ * `/wallet/gifts` is budget not spent on the 4,000+ blog posts.
  *
  * Note that `noindex` and `Disallow` do not substitute for each other — a
  * disallowed URL can still be indexed from external links, which is exactly why

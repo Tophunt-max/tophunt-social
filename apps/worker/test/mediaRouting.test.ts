@@ -100,7 +100,7 @@ describe('assertR2AcceptsKind', () => {
     // An avatar was never allowed to be a video and must not become one just
     // because the cutover is unfinished.
     await expect(assertR2AcceptsKind(env, 'video', 'avatars')).rejects.toThrow(/images only/i);
-    await expect(assertR2AcceptsKind(env, 'video', 'deposits')).rejects.toThrow(/images only/i);
+    await expect(assertR2AcceptsKind(env, 'video', 'reports')).rejects.toThrow(/images only/i);
   });
 });
 
@@ -195,8 +195,16 @@ describe('the upload allow-list is derived, not maintained by hand', () => {
   it('excludes every prefix a client must not name', () => {
     // `videos` and `video-src` especially: a client that could write there could
     // publish an unencoded or forged "encoded" video under someone's video id.
-    for (const prefix of ['contest-banners', 'payment-qr', 'blog/imported', 'videos', 'video-src']) {
+    for (const prefix of ['contest-banners', 'blog/imported', 'videos', 'video-src']) {
       expect(isUserWritablePrefix(prefix)).toBe(false);
     }
+  });
+
+  it('has no real-money categories any more', () => {
+    // Manual deposit screenshots and the payment QR went with real money.
+    const prefixes = MEDIA_CATEGORIES.map((c) => c.prefix);
+    expect(prefixes).not.toContain('deposits');
+    expect(prefixes).not.toContain('payment-qr');
+    expect(isUserWritablePrefix('deposits')).toBe(false);
   });
 });

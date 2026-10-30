@@ -42,7 +42,7 @@ export function GiftsTab({ range }: { range: Range }) {
             <Num label="Max coins per send" value={settings.maxCoinsPerSend} onChange={(v) => setSettings({ ...settings, maxCoinsPerSend: v })} />
             <Num label="Creator share (basis points)" value={settings.creatorShareBps} onChange={(v) => setSettings({ ...settings, creatorShareBps: v })} hint="Recorded on each send for reporting. Nothing is paid out." />
           </div>
-          <Notice tone="warning">Senders spend DP coin. Recipients receive the gift and a notification, never coins or cash. Creator payouts need identity checks, tax handling and a settlement ledger first.</Notice>
+          <Notice tone="warning">Senders spend DP coin. Recipients receive the gift and a notification, never coins or cash.</Notice>
         </Card>
       )}
 

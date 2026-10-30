@@ -9,7 +9,6 @@ import { inRollout } from './rollout';
  */
 
 export type ClientPlatform = 'web' | 'android' | 'ios';
-// `earning` / `shopping` replaced the retired `topups` / `withdrawals` switches.
 export type FeatureKey = 'contests' | 'chat' | 'stories' | 'earning' | 'shopping' | 'posts';
 export type AnnouncementTone = 'info' | 'warning' | 'success' | 'danger';
 

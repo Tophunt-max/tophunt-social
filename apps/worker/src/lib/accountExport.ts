@@ -100,9 +100,6 @@ export async function exportUserData(env: Env, uid: string): Promise<UserDataExp
     following,
     followers,
     coinTransactions,
-    payments,
-    deposits,
-    withdrawals,
     referralsMade,
     supportTickets,
     votesCast,
@@ -152,9 +149,6 @@ export async function exportUserData(env: Env, uid: string): Promise<UserDataExp
       .orderBy(desc(schema.coinTransactions.createdAt))
       .limit(CAP)
       .all(),
-    db.select().from(schema.payments).where(eq(schema.payments.userId, uid)).limit(CAP).all(),
-    db.select().from(schema.deposits).where(eq(schema.deposits.userId, uid)).limit(CAP).all(),
-    db.select().from(schema.withdrawals).where(eq(schema.withdrawals.userId, uid)).limit(CAP).all(),
     db
       .select()
       .from(schema.referrals)
@@ -295,9 +289,6 @@ export async function exportUserData(env: Env, uid: string): Promise<UserDataExp
       balance: Number((profile as any).dpcoin || 0),
       transactions: capped(coinTransactions),
     },
-    payments: capped(payments),
-    deposits: capped(deposits),
-    withdrawals: capped(withdrawals),
     referrals: capped(referralsMade),
     supportTickets: capped(supportTickets),
     votesCast: capped(votesCast),

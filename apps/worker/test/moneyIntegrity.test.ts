@@ -1,7 +1,7 @@
 /**
  * Balance/ledger integrity.
  *
- * money.test.ts covers the happy paths of buying, spending and withdrawing.
+ * money.test.ts covers the happy paths of earning and spending.
  * This file covers the invariant underneath all of them, stated in the README as
  * "every balance change and its ledger row are written in one D1 transaction,
  * gated on the same claim token" — and specifically the places that used to break
@@ -37,8 +37,6 @@ vi.mock('../src/lib/firebaseAdmin', () => ({
 import { makeEnv, makeApp, fakeCtx, drizzleOf, type TestEnv } from './helpers/harness';
 import * as schema from '../src/db/schema';
 import { getSettings } from '../src/lib/gamification';
-import { refundRejectedWithdrawal } from '../src/lib/payouts';
-import { reconcilePaymentOrders } from '../src/lib/coinOrders';
 import { deleteOwnAccount } from '../src/lib/accountDeletion';
 
 const app = makeApp();
@@ -101,98 +99,6 @@ async function seedContest(env: TestEnv, id: string, totalEntryFee: number, extr
       minVotes: 0, createdAt: Date.now(), ...extra,
     } as any);
 }
-
-async function seedWithdrawal(env: TestEnv, id: string, uid: string, amount: number, extra: Record<string, any> = {}) {
-  const ts = Date.now();
-  await drizzleOf(env)
-    .insert(schema.withdrawals)
-    .values({
-      id, userId: uid, amount, cashAmount: amount, method: 'upi',
-      accountDetails: 'someone@upi', status: 'pending', reserved: true,
-      createdAt: ts, updatedAt: ts, ...extra,
-    } as any);
-}
-
-// ===========================================================================
-describe('rejected withdrawal refunds exactly once', () => {
-  // The balance UPDATE used to be unconditional while its ledger insert was
-  // guarded by a deterministic id + onConflictDoNothing. A retry therefore
-  // re-credited the coins while the ledger silently no-opped — a double refund
-  // recorded as one. The reject path IS retryable: a failure in the accounting
-  // step calls revertClaim() so an admin can try again.
-  it('credits the balance and ledger once, and a second call moves nothing', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0); // coins already escrowed at request time
-    await seedWithdrawal(env, 'w1', 'alice', 100);
-
-    expect(await refundRejectedWithdrawal(env as any, 'w1', 'alice', 100, Date.now())).toBe(true);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(100);
-
-    // The retry an admin would perform after a partial failure.
-    expect(await refundRejectedWithdrawal(env as any, 'w1', 'alice', 100, Date.now())).toBe(false);
-
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(100);
-    const rows = await ledger(env, 'alice');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].id).toBe('withdrawal_refund:w1');
-    expect(await ledgerSum(env, 'alice')).toBe(100);
-  });
-
-  it('does not refund a deleted account or leave an orphan ledger row', async () => {
-    const { env } = makeEnv();
-    // No users row at all — the account was already anonymised and its coins
-    // forfeited, so there is nothing to refund to.
-    expect(await refundRejectedWithdrawal(env as any, 'w1', 'ghost', 100, Date.now())).toBe(false);
-    expect(await ledger(env, 'ghost')).toHaveLength(0);
-  });
-
-  it('refunds through the admin route and stays balanced', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedWithdrawal(env, 'w1', 'alice', 250);
-    // The hold written when the request was made.
-    await drizzleOf(env).insert(schema.coinTransactions).values({
-      id: 'withdrawal_hold:w1', uid: 'alice', amount: -250, type: 'withdrawal_hold',
-      description: 'hold', createdAt: Date.now(),
-    } as any);
-
-    const res = await admin(env, 'PATCH', '/withdrawals/w1', { action: 'reject', adminNote: 'bad details' });
-
-    expect(res.status).toBe(200);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(250);
-    // hold (-250) + refund (+250) = 0, and the balance moved from 0 to 250 only
-    // because the hold had already taken it out.
-    expect(await ledgerSum(env, 'alice')).toBe(0);
-  });
-
-  it('refunds a legacy (non-reserved) request rejected after approval', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedWithdrawal(env, 'w1', 'alice', 80, { reserved: false, status: 'approved' });
-
-    const res = await admin(env, 'PATCH', '/withdrawals/w1', { action: 'reject' });
-
-    expect(res.status).toBe(200);
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(80);
-    expect((await ledger(env, 'alice')).map((r: any) => r.id)).toEqual(['withdrawal_refund:w1']);
-  });
-
-  it('marking a reserved payout paid leaves the balance alone and closes the hold', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedWithdrawal(env, 'w1', 'alice', 60, { status: 'approved' });
-
-    const res = await admin(env, 'PATCH', '/withdrawals/w1', { action: 'paid', payoutRef: 'UTR12345' });
-
-    expect(res.status).toBe(200);
-    // Coins left at request time; paying must not deduct a second time.
-    expect((await getUser(env, 'alice'))?.dpcoin).toBe(0);
-    const ids = (await ledger(env, 'alice')).map((r: any) => r.id).sort();
-    expect(ids).toEqual(['withdrawal_hold_release:w1', 'withdrawal_settled:w1']);
-    // The pair is zero-sum: it explains the payout without moving the balance.
-    expect(await ledgerSum(env, 'alice')).toBe(0);
-  });
-});
 
 // ===========================================================================
 describe('startMatch charges atomically', () => {
@@ -375,7 +281,7 @@ describe('account deletion records the forfeiture in the ledger', () => {
     await seedUser(env, 'alice', 250);
     // Give the balance a provenance so the ledger starts consistent.
     await drizzleOf(env).insert(schema.coinTransactions).values({
-      id: 'purchase:seed', uid: 'alice', amount: 250, type: 'purchase',
+      id: 'admin_adjustment:seed', uid: 'alice', amount: 250, type: 'admin_adjustment',
       description: 'seed', createdAt: Date.now(),
     } as any);
 
@@ -400,99 +306,6 @@ describe('account deletion records the forfeiture in the ledger', () => {
     await deleteOwnAccount(env as any, 'alice');
 
     expect((await ledger(env, 'alice')).filter((r: any) => r.type === 'account_deletion_forfeit')).toHaveLength(0);
-  });
-});
-
-// ===========================================================================
-describe('payment orders stranded at paid are recovered', () => {
-  /** An order whose status CAS committed but whose credit batch never ran. */
-  async function seedStrandedOrder(env: TestEnv, overrides: Record<string, any> = {}) {
-    const old = Date.now() - 60 * 60 * 1000; // an hour ago, past the min age
-    await drizzleOf(env).insert(schema.paymentOrders).values({
-      orderId: 'order_stranded', userId: 'alice', coins: 120, bonusCoins: 20,
-      amountPaise: 19900, status: 'paid', paymentId: 'pay_stranded',
-      source: 'callback', reconcileAttempts: 0,
-      createdAt: old, updatedAt: old, ...overrides,
-    } as any);
-  }
-
-  it('credits the customer whose coins were lost, exactly once', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedStrandedOrder(env);
-    // The gateway is never called for this phase — the captured payment id was
-    // already recorded by the claim — but credentials gate the whole sweeper.
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"items":[]}', { status: 200 })));
-
-    const first = await reconcilePaymentOrders(env as any);
-
-    expect(first.recovered).toBe(1);
-    expect(first.coins).toBe(120);
-    expect(Number((await getUser(env, 'alice'))?.dpcoin)).toBe(120);
-    const rows = await ledger(env, 'alice');
-    expect(rows).toHaveLength(1);
-    expect(rows[0].type).toBe('purchase');
-    expect(rows[0].id).toBe('purchase:pay_stranded');
-    // The payments marker is now present, which is what makes it exactly-once.
-    const payment: any = await drizzleOf(env)
-      .select().from(schema.payments).where(eq(schema.payments.id, 'pay_stranded')).get();
-    expect(Number(payment.coins)).toBe(120);
-    expect(Number(payment.amountPaise)).toBe(19900);
-
-    // Running the sweeper again must not credit a second time.
-    const second = await reconcilePaymentOrders(env as any);
-    expect(second.recovered).toBe(0);
-    expect(Number((await getUser(env, 'alice'))?.dpcoin)).toBe(120);
-    expect(await ledger(env, 'alice')).toHaveLength(1);
-
-    vi.unstubAllGlobals();
-  });
-
-  it('ignores a healthy paid order that was already credited', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 120);
-    await seedStrandedOrder(env);
-    // The payments row proves the credit batch applied.
-    await drizzleOf(env).insert(schema.payments).values({
-      id: 'pay_stranded', userId: 'alice', amount: 120, coins: 120,
-      amountPaise: 19900, source: 'razorpay', status: 'success', createdAt: Date.now(),
-    } as any);
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"items":[]}', { status: 200 })));
-
-    const summary = await reconcilePaymentOrders(env as any);
-
-    expect(summary.recovered).toBe(0);
-    expect(Number((await getUser(env, 'alice'))?.dpcoin)).toBe(120);
-    expect(await ledger(env, 'alice')).toHaveLength(0);
-
-    vi.unstubAllGlobals();
-  });
-
-  it('leaves a freshly claimed order alone', async () => {
-    // Recovering immediately would race the credit batch that is probably still
-    // in flight, so anything younger than the minimum age is skipped.
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedStrandedOrder(env, { createdAt: Date.now(), updatedAt: Date.now() });
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"items":[]}', { status: 200 })));
-
-    const summary = await reconcilePaymentOrders(env as any);
-
-    expect(summary.recovered).toBe(0);
-    expect(Number((await getUser(env, 'alice'))?.dpcoin)).toBe(0);
-
-    vi.unstubAllGlobals();
-  });
-
-  it('does nothing at all without gateway credentials', async () => {
-    const { env } = makeEnv({ RAZORPAY_KEY_ID: '', RAZORPAY_KEY_SECRET: '' });
-    await seedUser(env, 'alice', 0);
-    await seedStrandedOrder(env);
-
-    const summary = await reconcilePaymentOrders(env as any);
-
-    expect(summary.recovered).toBe(0);
-    expect(Number((await getUser(env, 'alice'))?.dpcoin)).toBe(0);
   });
 });
 

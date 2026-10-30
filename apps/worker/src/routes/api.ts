@@ -7,7 +7,7 @@
  * count to prevent double-spend / races.
  */
 import { Hono } from "hono";
-import { eq, and, or, desc, sql, count, like, gte, lt, lte, ne, isNull, inArray, getTableColumns } from "drizzle-orm";
+import { eq, and, or, desc, sql, count, like, lte, inArray, getTableColumns } from "drizzle-orm";
 import type { Env, Variables } from "../types";
 import { getDb, schema } from "../db";
 import { httpsError } from "../lib/http";
@@ -27,7 +27,6 @@ import { recordFeedDismissal, removeFeedDismissal } from "../lib/feedDismissals"
 import { mintWsTicket } from "../lib/wsTicket";
 import {
   assertIdentifiersAvailable,
-  normalizePhone,
   recordUsernameTransition,
   validateUsername,
 } from "../lib/userIdentifiers";
@@ -52,7 +51,6 @@ import {
   hasPendingRequest,
 } from "../lib/followRequests";
 import { assertContestOpenNow, createContestExtra, validateContestInput } from "../lib/contestAdmin";
-import { parsePayoutDestination, readWithdrawalPolicy } from "../lib/payouts";
 import { parseDeliveryAddress } from "../lib/deliveryAddress";
 import { normalizePrizeType } from "../lib/prizes";
 import {
@@ -76,12 +74,8 @@ import {
   assertPrizeFundedByPot,
   matchPot,
   perPlayerEntryFee,
-  roundFiat,
   WalletReplay,
 } from "../lib/money";
-import { verifyRazorpaySignature } from "../lib/payments";
-import { getRazorpayCredentials } from "../lib/integrations";
-import { creditPaymentOrder, fetchGatewayPayment } from "../lib/coinOrders";
 import {
   getVerificationStatus,
   recordPromptShown,
@@ -109,9 +103,7 @@ import { mediaRouting } from "../lib/mediaRouting";
 import { getAppConfig, getAppControlConfig, getRewardedAdConfig } from "../lib/settings";
 import { appControlGate } from "../lib/appControl";
 import { PROFILE_INCOMPLETE_CODE } from "../lib/accountStatus";
-import { chargeablePackage } from "../lib/coinPricing";
 import { applyReferralCode, ensureReferralCode, qualifyReferral } from "../lib/referralProgram";
-import { chargeableWithdrawal, feeRuleFromConfig } from "../lib/withdrawalFee";
 import { assertLevelEligible, getProgression } from "../lib/progression";
 import { xpAwardStatements, xpEventOutcome, xpReversalStatements } from "../lib/xpService";
 import { syncProgressionSafe } from "../lib/achievements";
@@ -125,27 +117,16 @@ import { passwordChangedEmail, dataExportEmail } from "../lib/emailTemplates";
 import { newId, now, generateJoinId } from "../lib/ids";
 import { lockedPart } from "../lib/rewardLocking";
 import { DIAMONDS_COVER, notEnoughDiamonds } from "../lib/diamonds";
-import { assessWithdrawalRisk, RISK_FLAG_LABELS } from "../lib/withdrawalRisk";
 import {
   FREE_REWARDS_EXHAUSTED,
   freeRewardBudgetStatements,
   freeRewardsBudgetId,
   notifyBudgetExhausted,
-  ORDER_RESERVATION_TTL_MS,
-  depositReservationId,
   matchReservationId,
-  orderReservationId,
   releaseStatement,
   reserveStatement,
   tryReserve,
 } from "../lib/promoBudget";
-
-/** Fire-and-forget admin email alert (only if an alert address is configured). */
-function alertAdminEmail(c: any, cfg: any, subject: string, html: string): void {
-  const to = (cfg?.adminAlertEmail as string) || "";
-  if (!to) return;
-  c.executionCtx.waitUntil(sendEmail(c.env, { to, subject, html }).catch(() => {}));
-}
 
 /** Days since epoch in UTC (stable daily bucket key). */
 /**
@@ -432,8 +413,8 @@ apiRoute.post("/", async (c) => {
 
   // Idempotency guard — only enforced when the client opts in with a key
   // (safe for retries on critical writes like purchases/joins/claims).
-  // Real-money deposits / withdrawals are retired (lib/cashRetirement.ts).
-  assertCashActionAllowed(env, String(action));
+  // Old app builds may still send the removed real-money actions (lib/cashRetirement.ts).
+  assertCashActionAllowed(String(action));
   if (body.idempotencyKey) await enforceIdempotency(env, uid, String(body.idempotencyKey));
 
   try {
@@ -737,7 +718,7 @@ apiRoute.post("/", async (c) => {
       // no match; and if the refund also failed, the coins were simply gone with
       // no trace. Same pattern as joinMatch and lib/money.ts#adjustUserWallet.
       // Entry fees are paid in Diamonds only (users.locked_coins, see
-      // lib/diamonds.ts). DP coins (dpcoin - locked_coins) are for withdrawal
+      // lib/diamonds.ts). DP coins (dpcoin - locked_coins) are for Shopping
       // and never pay an entry. The ledger row records the Diamonds spent, so a
       // refund gives them back as Diamonds.
       const solvent = `EXISTS (SELECT 1 FROM users WHERE uid = ? AND ${DIAMONDS_COVER})`;
@@ -2301,506 +2282,6 @@ apiRoute.post("/", async (c) => {
       const taskXpEarned = taskXp.active ? (await xpEventOutcome(env, taskXp.eventId, taskXp.nonce)).delta : 0;
       if (taskXpEarned) c.executionCtx.waitUntil(syncProgressionSafe(env, uid));
       return c.json({ success: true, reward, lockedCoins: taskLocked, xpEarned: taskXpEarned });
-    }
-
-    // ================= WALLET =================
-    // Step 1 of the purchase flow: create a Razorpay order priced SERVER-SIDE
-    // from the coin package. The client never dictates the price or the number
-    // of coins — that is derived here and stashed so `topup` can trust it.
-    case "createOrder": {
-      const { packageId } = body;
-      if (!packageId) throw httpsError("invalid-argument", "packageId is required.");
-      // Every call makes an authenticated outbound order-create at Razorpay plus
-      // a D1 insert, and it had no limit at all. Generous for a real buyer;
-      // fail-closed because this is a payment path.
-      await rateLimit(env, `createorder:${uid}`, 20, 3600, { failClosed: true });
-      const rzp = await getRazorpayCredentials(env);
-      if (!rzp.keyId || !rzp.keySecret)
-        throw httpsError("failed-precondition", "Payments are not configured on the server.");
-
-      const pkg = await db
-        .select()
-        .from(schema.coinPackages)
-        .where(and(eq(schema.coinPackages.id, String(packageId)), eq(schema.coinPackages.active, true)))
-        .get();
-      if (!pkg) throw httpsError("not-found", "Diamond package not found.");
-
-      // Price = base coins × the admin's coin value, bonus free (lib/coinPricing.ts),
-      // read NOW on the server — the same formula the store displays. The order
-      // row below locks this amount for the payment's whole life.
-      const priced = chargeablePackage(pkg, await getAppConfig(env));
-      const amountPaise = Math.round(priced.priceInr * 100);
-      let bonusCoins = priced.bonusCoins;
-      let totalCoins = priced.totalCoins;
-
-      // Create the order at Razorpay (HTTP Basic auth = key_id:key_secret).
-      const authHeader = btoa(`${rzp.keyId}:${rzp.keySecret}`);
-      const rzpRes = await fetch("https://api.razorpay.com/v1/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Basic ${authHeader}` },
-        body: JSON.stringify({
-          amount: amountPaise,
-          currency: "INR",
-          receipt: `rcpt_${uid.slice(0, 8)}_${Date.now()}`,
-          notes: { uid, packageId: String(packageId), coins: totalCoins },
-        }),
-      });
-      if (!rzpRes.ok) {
-        const errTxt = await rzpRes.text().catch(() => "");
-        console.error("[createOrder] Razorpay error", rzpRes.status, errTxt);
-        throw httpsError("internal", "Could not create payment order. Please try again.");
-      }
-      const order = (await rzpRes.json()) as any;
-
-      // A budget-funded bonus (lib/promoBudget.ts) is RESERVED for this order now,
-      // so a budget can never promise more than it holds. If the budget is out of
-      // room, paused, outside its window, or this user hit its per-user limit,
-      // the order still goes through at the same price — just without the bonus.
-      // The price never depended on the bonus (base coins × buy rate).
-      let orderBudgetId: string | null = null;
-      if (priced.bonusLocked && pkg.budgetId) {
-        const got = await tryReserve(env, {
-          id: orderReservationId(String(order.id)),
-          budgetId: pkg.budgetId,
-          kind: "package_bonus",
-          uid,
-          coins: bonusCoins,
-          refType: "order",
-          refId: String(order.id),
-          expiresAt: now() + ORDER_RESERVATION_TTL_MS,
-          ts: now(),
-        });
-        if (got) {
-          orderBudgetId = pkg.budgetId;
-        } else {
-          bonusCoins = 0;
-          totalCoins = priced.baseCoins;
-        }
-      }
-
-      // Persist the server-authoritative intent DURABLY in D1 so a webhook (or a
-      // late client callback) can reconcile and credit the order even if the
-      // client never returns. This is the authoritative record going forward.
-      const orderTs = now();
-      try {
-        await db
-          .insert(schema.paymentOrders)
-          .values({
-            orderId: String(order.id),
-            userId: uid,
-            packageId: String(packageId),
-            coins: totalCoins,
-            bonusCoins,
-            budgetId: orderBudgetId,
-            amountPaise,
-            currency: "INR",
-            status: "created",
-            createdAt: orderTs,
-            updatedAt: orderTs,
-          })
-          .onConflictDoNothing()
-          .run();
-      } catch (e) {
-        console.error("[createOrder] payment_orders insert failed", e);
-        throw httpsError("internal", "Could not initialize payment. Please try again.");
-      }
-
-      // NOTE: there used to be a duplicate of this intent in KV
-      // (`rzp_order:{id}`, 1h ttl), kept as a fast path and to cover orders in
-      // flight across the deploy that introduced `payment_orders`. It is gone.
-      //
-      // It was never a fallback that could fire: the insert above THROWS on
-      // failure, so an order id cannot be handed to the client without a durable
-      // row, and `payment_orders` stores a strict superset of what the KV copy did
-      // (`userId`, `coins`, `bonusCoins`, `amountPaise`, `packageId`, status).
-      // Everything the 1-hour KV entry could have answered for expired long ago.
-      // Keeping it meant a write plus a delete per top-up on the account's scarcest
-      // quota, and — worse — a SECOND crediting path with its own weaker
-      // idempotency story running beside the CAS-guarded one in lib/coinOrders.ts.
-
-      return c.json({
-        orderId: order.id,
-        amount: amountPaise,
-        currency: "INR",
-        keyId: rzp.keyId,
-        coins: totalCoins,
-        bonusCoins,
-        // Budget-funded bonus coins are play-only (cannot be withdrawn).
-        bonusLocked: !!orderBudgetId,
-        bonusApplied: !priced.bonusLocked || !!orderBudgetId,
-        name: pkg.name || `${totalCoins} Diamond`,
-      });
-    }
-
-    // Step 2: verify the checkout result and credit coins. The coin count comes
-    // from the order record created above — NOT from the client — so a client
-    // can never mint arbitrary coins by calling this directly.
-    case "topup": {
-      const { paymentId, orderId, signature } = body;
-      if (!paymentId || !orderId || !signature)
-        throw httpsError("invalid-argument", "paymentId, orderId and signature are required.");
-
-      // SECURITY: verify the payment server-side. Fail closed if the gateway is
-      // not configured — never credit coins without a verified payment.
-      if (!(await getRazorpayCredentials(env)).keySecret)
-        throw httpsError("failed-precondition", "Payments are not configured on the server.");
-      const verified = await verifyRazorpaySignature(env, { orderId, paymentId, signature });
-      if (!verified) throw httpsError("permission-denied", "Payment verification failed.");
-
-      const orderRow = await db
-        .select({
-          userId: schema.paymentOrders.userId,
-          status: schema.paymentOrders.status,
-          paymentId: schema.paymentOrders.paymentId,
-          coins: schema.paymentOrders.coins,
-        })
-        .from(schema.paymentOrders)
-        .where(eq(schema.paymentOrders.orderId, String(orderId)))
-        .get();
-      if (!orderRow) throw httpsError("not-found", "Payment order not found or expired.");
-      if (orderRow.userId !== uid) throw httpsError("permission-denied", "Order does not belong to this user.");
-
-      // The signature proves the order/payment pair is genuine, but it is issued
-      // on AUTHORIZATION, not capture. Confirm with the gateway that the money
-      // was actually captured — and for how much, in which currency, against
-      // which order — before minting withdrawable coins. Anything short of a
-      // confirmed capture is reported as pending, not credited: the webhook and
-      // the reconcile sweep both credit a captured payment later, through the
-      // same exactly-once path.
-      const gateway = await fetchGatewayPayment(env, String(paymentId));
-      if (gateway?.orderId && gateway.orderId !== String(orderId))
-        throw httpsError("permission-denied", "Payment does not belong to this order.");
-      if (gateway && (gateway.status === "failed" || gateway.status === "refunded"))
-        throw httpsError("failed-precondition", "This payment was not completed.");
-      if (!gateway || gateway.status !== "captured") {
-        if (orderRow.status === "paid" && orderRow.paymentId === String(paymentId))
-          throw httpsError("already-exists", "Payment already processed.");
-        return c.json({
-          success: true,
-          pending: true,
-          coins: 0,
-          message: "Payment received. Your Diamonds will be added as soon as the bank confirms it.",
-        });
-      }
-
-      // Primary path: credit the persisted order (shared with the webhook so we
-      // never double-credit regardless of which arrives first).
-      const res = await creditPaymentOrder(env, db, {
-        orderId: String(orderId),
-        paymentId: String(paymentId),
-        source: "callback",
-        expectedFromUid: uid,
-        capturedAmountPaise: gateway.amountPaise,
-        capturedCurrency: gateway.currency,
-      });
-      if (res.reason === "owner_mismatch")
-        throw httpsError("permission-denied", "Order does not belong to this user.");
-      if (res.reason === "invalid_amount")
-        throw httpsError("failed-precondition", "Invalid order amount.");
-      if (res.reason === "already") {
-        // `already` covers both "credited by the webhook first" and "terminal
-        // (refunded / disputed)". Only the first is a success the app may show
-        // as coins added; the second must not be reported as a purchase.
-        const after = await db
-          .select({ status: schema.paymentOrders.status, paymentId: schema.paymentOrders.paymentId })
-          .from(schema.paymentOrders)
-          .where(eq(schema.paymentOrders.orderId, String(orderId)))
-          .get();
-        if (after?.status === "paid" && after.paymentId === String(paymentId))
-          throw httpsError("already-exists", "Payment already processed.");
-        throw httpsError("failed-precondition", "This payment was refunded or cancelled.");
-      }
-      if (res.credited) {
-        return c.json({ success: true, message: "Diamond added successfully!", coins: res.coins });
-      }
-
-      /**
-       * `creditPaymentOrder` is now the ONLY crediting path on this action.
-       *
-       * There used to be a second one here, reading the legacy `rzp_order:{id}` KV
-       * intent and doing its own insert/update/ledger by hand. It has been removed
-       * rather than ported, for two reasons beyond the KV cost:
-       *
-       *  - IT COULD NOT BE REACHED. `createOrder` throws if the `payment_orders`
-       *    insert fails, so no order id reaches a client without a durable row, and
-       *    the KV entry it depended on had a 1-hour ttl.
-       *  - IT WAS THE WEAKER PATH. It guarded double-credit with a `payments`
-       *    insert alone, whereas `creditPaymentOrder` takes an atomic status CAS on
-       *    the order (created|expired -> paid) FIRST, which is what makes the
-       *    client callback and the gateway webhook safe to race. Two crediting
-       *    paths with different idempotency models is precisely the shape that
-       *    produces a double credit under retry.
-       *
-       * `amount_mismatch` means the gateway captured less than the server-set
-       * price, or in a different currency.
-       */
-      if (res.reason === "amount_mismatch")
-        throw httpsError("failed-precondition", "Invalid order amount.");
-      throw httpsError("not-found", "Payment order not found or expired.");
-    }
-
-    case "requestWithdrawal": {
-      const { amount, method, accountDetails } = body;
-      const amt = assertCoinAmount(amount, "amount");
-      // Anti-spam: max 5 withdrawal requests per hour per user.
-      await rateLimit(env, `withdraw:${uid}`, 5, 3600, { failClosed: true });
-
-      // Honor the admin App Control withdrawal config. `payoutsFrozen` is an
-      // emergency kill-switch that blocks all new payout requests instantly
-      // (e.g. during a suspected-fraud incident) without disabling the feature.
-      const cfg = await getAppConfig(env);
-      const policy = readWithdrawalPolicy(cfg);
-      if (!policy.enabled || policy.payoutsFrozen)
-        throw httpsError("failed-precondition", "Withdrawals are currently disabled.");
-      // The superadmin's coins are the platform's own (house account, left out
-      // of the coin economy reports in lib/coinEconomy.ts), so they never pay out.
-      const requester = await env.DB.prepare(`SELECT role FROM users WHERE uid = ?`).bind(uid).first<{ role: string | null }>();
-      if (requester?.role === "superadmin")
-        throw httpsError("permission-denied", "Superadmin ke coin platform ke hain, inka withdrawal nahi hota.");
-      if (amt < policy.minAmount)
-        throw httpsError("failed-precondition", `Minimum withdrawal is ${policy.minAmount} DP coin.`);
-      if (policy.maxAmount > 0 && amt > policy.maxAmount)
-        throw httpsError("failed-precondition", `Maximum withdrawal is ${policy.maxAmount} DP coin per request.`);
-
-      // Validate the destination BEFORE reserving coins: a typo'd UPI id or a
-      // malformed IFSC used to reach the admin panel — and a real bank transfer
-      // — completely unchecked.
-      const destination = parsePayoutDestination(method, accountDetails);
-
-      // Rolling 24h velocity cap. The 5-per-hour rate limit bounded the number
-      // of requests but not their total, so a whole balance could still leave in
-      // one go. Rejected requests don't count against the cap.
-      if (policy.maxPerDay > 0) {
-        const since = now() - 24 * 60 * 60 * 1000;
-        const recent = await db
-          .select({ total: sql<number>`COALESCE(SUM(${schema.withdrawals.amount}), 0)` })
-          .from(schema.withdrawals)
-          .where(and(
-            eq(schema.withdrawals.userId, uid),
-            gte(schema.withdrawals.createdAt, since),
-            ne(schema.withdrawals.status, "rejected"),
-          ))
-          .get();
-        const already = Number(recent?.total ?? 0);
-        if (already + amt > policy.maxPerDay) {
-          throw httpsError(
-            "failed-precondition",
-            `Daily payout limit is ${policy.maxPerDay} DP coin. You have already requested ${already} in the last 24 hours.`,
-          );
-        }
-      }
-
-      // Platform fee (lib/withdrawalFee.ts): deducted from the payout, quoted to
-      // the user before they confirm, and LOCKED on the row below. If the app's
-      // quote no longer matches (the fee changed while the screen was open), refuse
-      // instead of charging an amount the user never saw.
-      const quote = chargeableWithdrawal(amt, policy.conversionRate, feeRuleFromConfig(cfg));
-      if (body.quotedFee !== undefined && body.quotedFee !== null) {
-        const seen = Number(body.quotedFee);
-        if (!Number.isFinite(seen) || Math.abs(seen - quote.feeInr) > 0.005) {
-          throw httpsError(
-            "failed-precondition",
-            `FEE_CHANGED: Platform fee badal gayi hai: ab ₹${quote.feeInr.toFixed(2)} hai, aapko ₹${quote.netInr.toFixed(2)} milenge. Dobara confirm karo.`,
-          );
-        }
-      }
-
-      const ts = now();
-      const id = newId();
-      const cashAmount = quote.netInr;
-      // Risk review for the admin who approves this payout (lib/withdrawalRisk.ts).
-      const risk = await assessWithdrawalRisk(env, uid, ts);
-
-      // Escrow the coins, create the withdrawal row and write the hold ledger
-      // entry in ONE transaction.
-      //
-      // Previously the deduct was its own statement followed by a separate
-      // batch, with no compensating revert: if that batch failed, the user's
-      // coins were simply gone — no withdrawal row, no ledger entry, nothing to
-      // reconcile against. Both inserts are gated on the same pre-transaction
-      // balance snapshot as the deduct, so all three apply or none do.
-      //
-      // The rolling 24h cap is ALSO enforced inside this transaction. The SELECT
-      // above is only a friendly early message: it is a read-then-write, so
-      // several parallel requests all saw the same `already` total and together
-      // exceeded `maxPerDay`. Only the withdrawal INSERT evaluates solvency and
-      // the cap; the ledger row and the deduct are gated on that row existing, so
-      // the cap sees the same snapshot and all three still apply or none do.
-      // Only WITHDRAWABLE coins can leave: locked (play-only) promo coins stay.
-      const solvent = `EXISTS (SELECT 1 FROM users WHERE uid = ? AND dpcoin - locked_coins >= ?)`;
-      const capGate =
-        policy.maxPerDay > 0
-          ? `AND (SELECT COALESCE(SUM(amount), 0) FROM withdrawals
-                   WHERE user_id = ? AND created_at >= ? AND status != 'rejected') + ? <= ?`
-          : "";
-      const capBindings =
-        policy.maxPerDay > 0 ? [uid, ts - 24 * 60 * 60 * 1000, amt, policy.maxPerDay] : [];
-      const created = `EXISTS (SELECT 1 FROM withdrawals WHERE id = ?)`;
-      const withdrawalResults = await env.DB.batch([
-        env.DB.prepare(
-          `INSERT INTO withdrawals
-             (id, user_id, amount, cash_amount, gross_amount, fee_amount, fee_detail, method, account_details, status, reserved, created_at, updated_at, risk_level, risk_flags)
-           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?
-            WHERE ${solvent} ${capGate}`,
-        ).bind(
-          id,
-          uid,
-          amt,
-          cashAmount,
-          quote.grossInr,
-          quote.feeInr,
-          JSON.stringify(quote.rule),
-          destination.method,
-          destination.accountDetails,
-          ts,
-          ts,
-          risk.level,
-          JSON.stringify(risk.flags),
-          uid,
-          amt,
-          ...capBindings,
-        ),
-        env.DB.prepare(
-          `INSERT OR IGNORE INTO coin_transactions
-             (id, uid, amount, type, description, created_at)
-           SELECT ?, ?, ?, 'withdrawal_hold', ?, ?
-            WHERE ${created}`,
-        ).bind(
-          `withdrawal_hold:${id}`,
-          uid,
-          -amt,
-          `Payout requested (${destination.method}) — DP coin reserved`,
-          ts,
-          id,
-        ),
-        env.DB.prepare(
-          `UPDATE users SET dpcoin = dpcoin - ?, updated_at = ?
-            WHERE uid = ? AND dpcoin - locked_coins >= ? AND ${created}`,
-        ).bind(amt, ts, uid, amt, id),
-      ]);
-      if (Number(withdrawalResults[2]?.meta?.changes || 0) === 0) {
-        const me = await env.DB.prepare(`SELECT dpcoin, locked_coins FROM users WHERE uid = ?`).bind(uid).first<{ dpcoin: number; locked_coins: number }>();
-        const withdrawable = Math.max(0, Number(me?.dpcoin ?? 0) - Number(me?.locked_coins ?? 0));
-        if (withdrawable < amt && Number(me?.dpcoin ?? 0) >= amt) {
-          throw httpsError(
-            "failed-precondition",
-            `Diamond withdraw nahi hote, sirf DP coin withdraw hote hain. Abhi withdraw kar sakte ho: ${withdrawable} DP coin.`,
-          );
-        }
-        if (policy.maxPerDay > 0 && withdrawable >= amt) {
-          throw httpsError(
-            "failed-precondition",
-            `Daily payout limit is ${policy.maxPerDay} DP coin. Try a smaller amount or wait 24 hours.`,
-          );
-        }
-        throw httpsError("failed-precondition", "DP coin balance kam hai.");
-      }
-
-      await db.insert(schema.adminNotifications).values({
-        id: newId(), title: risk.level === "high" ? "⚠️ HIGH RISK Withdrawal Request" : "New Withdrawal Request",
-        message: `${risk.level !== "low" ? `[Risk: ${risk.level} — ${risk.flags.map((f) => RISK_FLAG_LABELS[f] ?? f).join(", ")}] ` : ""}A user requested a payout of ${amt} DP coin to ${destination.masked} — pay ₹${quote.netInr.toFixed(2)} (gross ₹${quote.grossInr.toFixed(2)} − platform fee ₹${quote.feeInr.toFixed(2)}).`,
-        link: "/withdrawals", isRead: false, createdAt: ts,
-      });
-      alertAdminEmail(c, cfg, "New Withdrawal Request",
-        `<p>A user requested a payout of <b>${amt} DP coin</b> via ${destination.method}: pay <b>₹${cashAmount.toFixed(2)}</b> (gross ₹${quote.grossInr.toFixed(2)} − platform fee ₹${quote.feeInr.toFixed(2)}).</p><p>Review it in the admin panel → Withdrawals.</p>`);
-      return c.json({ success: true, withdrawalId: id, cashAmount, grossAmount: quote.grossInr, feeAmount: quote.feeInr });
-    }
-
-    // Manual QR/UPI deposit: user pays externally then submits the UTR here.
-    // Admin approves/rejects in the panel; coins are credited on approval.
-    case "requestDeposit": {
-      const { packageId, utr, method, screenshotUrl } = body;
-      if (!packageId) throw httpsError("invalid-argument", "Select a coin package to continue.");
-      if (!utr || String(utr).trim().length < 4)
-        throw httpsError("invalid-argument", "A valid UTR / transaction reference is required.");
-      // Anti-spam: max 5 deposit submissions per hour per user.
-      await rateLimit(env, `deposit:${uid}`, 5, 3600, { failClosed: true });
-
-      const cfg = await getAppConfig(env);
-      const gw = (cfg?.paymentGateway as any) || {};
-      const mode = gw.mode || "auto";
-      if (mode === "auto") throw httpsError("failed-precondition", "Manual deposits are currently disabled.");
-
-      // ONE pricing rule for every path: base coins × the admin's coin value,
-      // bonus free (lib/coinPricing.ts) — the same price the store shows and
-      // Razorpay charges. Never trust a client-sent amount: the coins credited
-      // come from the package row, the rupees expected from that rule, and both
-      // are stored on the deposit when it is submitted.
-      const pkg = await db
-        .select()
-        .from(schema.coinPackages)
-        .where(and(eq(schema.coinPackages.id, String(packageId)), eq(schema.coinPackages.active, true)))
-        .get();
-      if (!pkg) throw httpsError("not-found", "Diamond package not found.");
-
-      const priced = chargeablePackage(pkg, cfg);
-      let bonusCoins = priced.bonusCoins;
-      let amt = priced.totalCoins;
-      const payAmount = priced.priceInr;
-
-      // Hard-block reused UTRs: a bank reference can only fund one deposit. Reject
-      // at submit time if a non-rejected deposit already carries this UTR (any
-      // user) — stops replaying one payment reference across multiple requests.
-      const utrClean = String(utr).trim();
-      const utrDupe = await db
-        .select({ id: schema.deposits.id })
-        .from(schema.deposits)
-        .where(and(sql`lower(${schema.deposits.utr}) = ${utrClean.toLowerCase()}`, sql`${schema.deposits.status} != 'rejected'`))
-        .get();
-      if (utrDupe) throw httpsError("already-exists", "This UTR / transaction reference has already been submitted.");
-
-      const ts = now();
-      const id = newId();
-      // Budget-funded bonus: held (no expiry) until the deposit is approved or
-      // rejected. Out of room → the deposit is still accepted, without the bonus.
-      let depositBudgetId: string | null = null;
-      if (priced.bonusLocked && pkg.budgetId) {
-        const got = await tryReserve(env, {
-          id: depositReservationId(id),
-          budgetId: pkg.budgetId,
-          kind: "package_bonus",
-          uid,
-          coins: bonusCoins,
-          refType: "deposit",
-          refId: id,
-          expiresAt: null,
-          ts,
-        });
-        if (got) {
-          depositBudgetId = pkg.budgetId;
-        } else {
-          bonusCoins = 0;
-          amt = priced.baseCoins;
-        }
-      }
-      try {
-        await db.insert(schema.deposits).values({
-          id,
-          userId: uid,
-          amount: amt,
-          payAmount,
-          packageId: String(packageId),
-          bonusCoins,
-          budgetId: depositBudgetId,
-          method: method || "qr",
-          utr: String(utr).trim(),
-          screenshotUrl: screenshotUrl ? String(screenshotUrl) : null,
-          status: "pending",
-          createdAt: ts,
-          updatedAt: ts,
-        });
-      } catch (e) {
-        // No deposit row → nothing will ever use or release the hold.
-        if (depositBudgetId) await releaseStatement(env, depositReservationId(id), now()).run().catch(() => {});
-        throw e;
-      }
-      await db.insert(schema.adminNotifications).values({
-        id: newId(), title: "New Deposit Request",
-        message: `A user submitted a ${amt}-Diamond deposit (UTR ${String(utr).trim()}).`, link: "/deposits", isRead: false, createdAt: ts,
-      });
-      alertAdminEmail(c, cfg, "New Deposit Request",
-        `<p>A user submitted a <b>${amt}-coin</b> deposit (₹${payAmount.toFixed(2)}${pkg.name ? ` — ${pkg.name}` : ""}).</p><p>UTR: <b>${String(utr).trim()}</b></p><p>Verify & approve in the admin panel → Deposits.</p>`);
-      return c.json({ success: true, depositId: id });
     }
 
     // ================= ADMIN =================

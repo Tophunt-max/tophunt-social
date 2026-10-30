@@ -124,10 +124,10 @@ describe('the counter admits exactly `max`', () => {
   it('forgets a key on reset', () => {
     const db = freshActor();
     const now = Date.UTC(2026, 0, 1);
-    consume(db, 'withdraw:alice', 1, 3600, now);
-    expect(consume(db, 'withdraw:alice', 1, 3600, now)).toBe(false);
-    db.prepare(SQL_RESET).run('withdraw:alice');
-    expect(consume(db, 'withdraw:alice', 1, 3600, now)).toBe(true);
+    consume(db, 'reauth:alice', 1, 3600, now);
+    expect(consume(db, 'reauth:alice', 1, 3600, now)).toBe(false);
+    db.prepare(SQL_RESET).run('reauth:alice');
+    expect(consume(db, 'reauth:alice', 1, 3600, now)).toBe(true);
   });
 });
 

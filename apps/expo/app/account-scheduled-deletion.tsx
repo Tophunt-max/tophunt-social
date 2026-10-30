@@ -175,11 +175,9 @@ export default function AccountScheduledDeletionScreen() {
 
         {info?.deferredReason && !processing ? (
           <Text style={[styles.body, { color: secondary, marginTop: 10 }]}>
-            {info.deferredReason === 'pending_payout'
-              ? 'We are finishing your payout first, then the countdown continues.'
-              : info.deferredReason === 'active_contest'
-                ? 'We are waiting for a contest you entered to finish first.'
-                : 'We are waiting for something to finish first.'}
+            {info.deferredReason === 'active_contest'
+              ? 'We are waiting for a contest you entered to finish first.'
+              : 'We are waiting for something to finish first.'}
           </Text>
         ) : null}
 

@@ -1,13 +1,11 @@
 /**
  * Diamonds and DP coins: the two balances a user sees.
  *
- *   Diamond   users.locked_coins. Play-only: the ONLY way to pay a contest
- *             entry fee. Comes from coin packages, signup / verification,
- *             daily rewards, tasks, ads, referrals and promo bonuses (each
- *             free reward can be switched to DP coin in App Control,
- *             appConfig.rewardLocking). Never withdrawable.
- *   DP coin   users.dpcoin - users.locked_coins. Contest prizes. The only
- *             balance a withdrawal can take.
+ *   Diamond   users.locked_coins. Free: the ONLY way to pay a contest entry
+ *             fee. Comes from the signup bonus, daily rewards, tasks, ads,
+ *             referrals, Hall of Fame and XP conversion.
+ *   DP coin   users.dpcoin - users.locked_coins. Contest prizes, spent only in
+ *             Shopping (gifts, digital items, physical products).
  *
  * Storage is unchanged: `users.dpcoin` holds the total and `locked_coins` the
  * Diamond part of it, and every ledger row's `locked_delta` is its Diamond part,
@@ -23,9 +21,9 @@ export const DIAMONDS_COVER = "MIN(locked_coins, dpcoin) >= ?";
 export const NOT_ENOUGH_DIAMONDS = "not_enough_diamonds";
 
 export interface Balances {
-  /** Withdrawable DP coins. */
+  /** DP coins (Shopping). */
   dpcoin: number;
-  /** Play-only Diamonds. */
+  /** Diamonds (contest entry). */
   diamonds: number;
 }
 

@@ -243,7 +243,7 @@ export function ContestPrizeLine({
       <Text style={[styles.prizeLabel, { color: labelColor }]} maxFontSizeMultiplier={MAX_SCALE}>
         WINNER GETS
       </Text>
-      {/* A coin prize is DP coins: the withdrawable balance (src/lib/balances.ts). */}
+      {/* A coin prize is paid in DP coins (src/lib/balances.ts). */}
       <View style={styles.prizeValueRow} accessible accessibilityLabel={`Winner gets ${prize.coins} DP coins`}>
         <CoinIcon size={16} color={COIN_FG} />
         <Text style={[styles.prizeValue, { color: COIN_FG }]} numberOfLines={1} maxFontSizeMultiplier={MAX_SCALE}>

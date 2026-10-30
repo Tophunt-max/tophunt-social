@@ -15,7 +15,6 @@ import {
   Trophy,
   Swords,
   Crown,
-  Banknote,
   ArrowDownToLine,
   Scale,
   Package,

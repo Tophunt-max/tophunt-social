@@ -30,7 +30,6 @@ import * as schema from '../src/db/schema';
 import { pruneOpsTables, pruneAlertClaims, PRUNABLE_CLAIM_SCOPES } from '../src/lib/ops';
 import { monthlyHallOfFame, previousMonthPeriod } from '../src/cron';
 import { adjustUserWallet, WalletReplay } from '../src/lib/money';
-import { computeMoneyHealth } from '../src/lib/moneyHealth';
 
 const app = makeApp();
 
@@ -55,7 +54,7 @@ async function seedUser(env: TestEnv, uid: string, dpcoin = 0, extra: Record<str
         uid,
         amount: dpcoin,
         lockedDelta: (extra.lockedCoins ?? dpcoin),
-        type: 'purchase',
+        type: 'admin_adjustment',
         description: 'Opening balance (test fixture)',
         createdAt: ts,
       } as any);
@@ -379,8 +378,8 @@ describe('adjustUserWallet idempotency', () => {
       uid: 'alice',
       amount: 400,
       direction: 'add',
-      type: 'topup',
-      description: 'topup',
+      type: 'admin_adjustment',
+      description: 'support credit',
     });
     const retried = await adjustUserWallet(env as any, subtract);
 
@@ -405,196 +404,6 @@ describe('adjustUserWallet idempotency', () => {
 
     expect(await balanceOf(env, 'alice')).toBe(900);
     await expectNoDrift(env, 'alice');
-  });
-});
-
-// ===========================================================================
-/**
- * Manual deposits. The approval used to CAS the status in one statement and credit
- * in a separate, ungated batch — so a failure between them left the deposit
- * `approved` with no coins, no payment and no ledger row, and the handler then
- * refused to retry. Real INR, invisibly lost, with no sweeper looking for it.
- */
-describe('manual deposit approval', () => {
-  const adminHeaders = { 'Content-Type': 'application/json', 'X-Admin-Secret': 'test-admin-secret' };
-
-  async function seedDeposit(env: TestEnv, id: string, uid: string, coins: number, extra: any = {}) {
-    const ts = Date.now();
-    await drizzleOf(env)
-      .insert(schema.deposits)
-      .values({
-        id,
-        userId: uid,
-        amount: coins,
-        payAmount: 199,
-        status: 'pending',
-        utr: `utr-${id}`,
-        createdAt: ts,
-        updatedAt: ts,
-        ...extra,
-      } as any);
-  }
-
-  const action = (env: TestEnv, id: string, act: 'approve' | 'reject') =>
-    app.request(
-      `/admin/deposits/${id}`,
-      { method: 'PATCH', headers: adminHeaders, body: JSON.stringify({ action: act }) },
-      env,
-      fakeCtx(),
-    );
-
-  it('credits coins, the payment row, the ledger row and credited_at together', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedDeposit(env, 'dep1', 'alice', 120);
-
-    const res = await action(env, 'dep1', 'approve');
-    expect(res.status).toBe(200);
-
-    expect(await balanceOf(env, 'alice')).toBe(120);
-    await expectNoDrift(env, 'alice');
-    const db = drizzleOf(env);
-    const payment = await db.select().from(schema.payments).where(eq(schema.payments.id, 'dep_dep1')).get();
-    expect(payment?.status).toBe('success');
-    expect(Number(payment?.amountPaise)).toBe(19900); // rupees, not coins
-    const deposit = await db.select().from(schema.deposits).where(eq(schema.deposits.id, 'dep1')).get();
-    expect(deposit?.status).toBe('approved');
-    expect(deposit?.creditedAt).toBeTruthy();
-    // Deterministic, so an operator re-run cannot write a second ledger row.
-    const ledger = await db
-      .select()
-      .from(schema.coinTransactions)
-      .where(eq(schema.coinTransactions.id, 'manual_deposit:dep1'))
-      .get();
-    expect(Number(ledger?.amount)).toBe(120);
-  });
-
-  it('a second approval credits nothing further', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedDeposit(env, 'dep1', 'alice', 120);
-
-    await action(env, 'dep1', 'approve');
-    const second = await action(env, 'dep1', 'approve');
-
-    expect(second.status).toBeGreaterThanOrEqual(400);
-    expect(await balanceOf(env, 'alice')).toBe(120);
-    await expectNoDrift(env, 'alice');
-  });
-
-  it('rejecting moves no money', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedDeposit(env, 'dep1', 'alice', 120);
-
-    const res = await action(env, 'dep1', 'reject');
-
-    expect(res.status).toBe(200);
-    expect(await balanceOf(env, 'alice')).toBe(0);
-    const deposit = await drizzleOf(env)
-      .select()
-      .from(schema.deposits)
-      .where(eq(schema.deposits.id, 'dep1'))
-      .get();
-    expect(deposit?.status).toBe('rejected');
-    expect(deposit?.creditedAt).toBeFalsy();
-  });
-
-  /**
-   * A deposit for an account that no longer exists must not flip to `approved`
-   * with the credit silently matching no row — that is ledger drift in the other
-   * direction, and it also destroys the record that the money is still owed.
-   */
-  it('refuses to approve a deposit whose user is gone, leaving it pending', async () => {
-    const { env } = makeEnv();
-    await seedDeposit(env, 'dep1', 'ghost', 120);
-
-    const res = await action(env, 'dep1', 'approve');
-
-    expect(res.status).toBeGreaterThanOrEqual(400);
-    const deposit = await drizzleOf(env)
-      .select()
-      .from(schema.deposits)
-      .where(eq(schema.deposits.id, 'dep1'))
-      .get();
-    expect(deposit?.status).toBe('pending');
-    const payments = await drizzleOf(env).select().from(schema.payments).all();
-    expect(payments).toHaveLength(0);
-  });
-
-  /**
-   * Two DIFFERENT pending deposits carrying one bank reference. The duplicate-
-   * UTR check used to be a read before the crediting batch, so if the first
-   * approval committed between the second one's check and its batch, both
-   * credited and one transfer paid out twice. The interleaving is injected at
-   * that exact point: dep1 is approved from inside dep2's batch call, after
-   * dep2's pre-check has already passed.
-   */
-  it('two deposits sharing a UTR approved concurrently credit exactly once', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedDeposit(env, 'dep1', 'alice', 120, { utr: 'UTR-555' });
-    await seedDeposit(env, 'dep2', 'alice', 120, { utr: 'utr-555' }); // case differs
-
-    const realBatch = env.DB.batch.bind(env.DB);
-    let injected = false;
-    (env.DB as any).batch = async (stmts: any[]) => {
-      if (!injected) {
-        injected = true;
-        const first = await action(env, 'dep1', 'approve');
-        expect(first.status).toBe(200);
-      }
-      return realBatch(stmts);
-    };
-
-    const second = await action(env, 'dep2', 'approve');
-    expect(injected).toBe(true);
-
-    expect(second.status).toBeGreaterThanOrEqual(400);
-    expect(((await second.json()) as any)?.error?.message ?? '').toMatch(/UTR was already credited/);
-    expect(await balanceOf(env, 'alice')).toBe(120);
-    await expectNoDrift(env, 'alice');
-    const dep2 = await drizzleOf(env).select().from(schema.deposits).where(eq(schema.deposits.id, 'dep2')).get();
-    expect(dep2?.status).toBe('pending'); // left for an admin to reject, not silently consumed
-    const payments = await drizzleOf(env).select().from(schema.payments).all();
-    expect(payments.map((p) => p.id)).toEqual(['dep_dep1']);
-  });
-
-  it('a deposit without a UTR is not blocked by the UTR gate', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedDeposit(env, 'dep1', 'alice', 50, { utr: null });
-    await seedDeposit(env, 'dep2', 'alice', 70, { utr: null });
-
-    expect((await action(env, 'dep1', 'approve')).status).toBe(200);
-    expect((await action(env, 'dep2', 'approve')).status).toBe(200);
-    expect(await balanceOf(env, 'alice')).toBe(120);
-    await expectNoDrift(env, 'alice');
-  });
-
-  /** The health probe that keeps the atomicity claim honest. */
-  it('money health flags an approved deposit that was never credited', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedDeposit(env, 'dep1', 'alice', 120, { status: 'approved', creditedAt: null });
-
-    const health = await computeMoneyHealth(env as any);
-
-    expect(health.strandedApprovedDeposits).toBe(1);
-    expect(health.ok).toBe(false);
-  });
-
-  it('money health is clean after a real approval', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedDeposit(env, 'dep1', 'alice', 120);
-    await action(env, 'dep1', 'approve');
-
-    const health = await computeMoneyHealth(env as any);
-
-    expect(health.strandedApprovedDeposits).toBe(0);
-    expect(health.ledgerDrift.count).toBe(0);
-    expect(health.ok).toBe(true);
   });
 });
 

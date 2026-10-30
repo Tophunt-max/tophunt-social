@@ -1,7 +1,7 @@
 /**
  * Coin economy (migration 0068): promo budgets, locked (play-only) coins, prize
- * and product subsidies, free-reward locking and caps, withdrawal risk, referral
- * holds, the approval password and its reset, and the coin alerts.
+ * and product subsidies, free-reward locking and caps, referral holds, the
+ * approval password and its reset, and the coin alerts.
  *
  * Every scenario ends by checking the two ledger invariants:
  *   users.dpcoin       == SUM(coin_transactions.amount)
@@ -33,8 +33,6 @@ import * as schema from '../src/db/schema';
 import { settleRefund, settleWinner } from '../src/lib/contestSettlement';
 import { computeMoneyHealth } from '../src/lib/moneyHealth';
 import { coinEconomyOverview } from '../src/lib/coinEconomy';
-import { listPublicCoinPackages } from '../src/lib/coinCatalog';
-import { creditPaymentOrder, clawbackPaymentOrder } from '../src/lib/coinOrders';
 import { adjustUserWallet } from '../src/lib/money';
 import { monthlyHallOfFame } from '../src/cron';
 import { runCoinAlerts, maybeSendCoinReport } from '../src/lib/coinAlerts';
@@ -65,7 +63,7 @@ async function seedUser(env: TestEnv, uid: string, dpcoin = 0, extra: Record<str
 /** A player with `diamonds` play-only coins (ledgered), the only way to pay an entry fee. */
 async function seedPlayer(env: TestEnv, uid: string, diamonds: number) {
   await seedUser(env, uid);
-  await adjustUserWallet(env as any, { uid, amount: diamonds, direction: 'add', type: 'purchase', description: 'test diamonds', locked: true });
+  await adjustUserWallet(env as any, { uid, amount: diamonds, direction: 'add', type: 'admin_adjustment', description: 'test diamonds', locked: true });
 }
 const user = (env: TestEnv, uid: string) => drizzleOf(env).select().from(schema.users).where(eq(schema.users.uid, uid)).get();
 async function settings(env: TestEnv, data: any) {
@@ -89,16 +87,20 @@ describe('approval password', () => {
     const { env } = makeEnv();
     await seedUser(env, 'boss');
     await seedUser(env, 'root');
-    let r = await admin(env, 'POST', '/promo-budgets', { name: 'Xx', kind: 'package_bonus', totalCoins: 30, reason: 'test budget' });
+    let r = await admin(env, 'POST', '/promo-budgets', { name: 'Xx', kind: 'contest_prize', totalCoins: 30, reason: 'test budget' });
     expect(r.body.error.reason).toBe('approval_not_set');
     expect((await admin(env, 'POST', '/approval-password', { next: PW })).status).toBe(200);
     expect((await admin(env, 'POST', '/approval-password', { next: 'other-123' })).status).toBe(412);
-    r = await admin(env, 'POST', '/promo-budgets', { name: 'Xx', kind: 'package_bonus', totalCoins: 30, reason: 'test budget' });
+    r = await admin(env, 'POST', '/promo-budgets', { name: 'Xx', kind: 'contest_prize', totalCoins: 30, reason: 'test budget' });
     expect(r.body.error.reason).toBe('approval_required');
-    r = await admin(env, 'POST', '/promo-budgets', { name: 'Xx', kind: 'package_bonus', totalCoins: 30, reason: 'test budget', approvalPassword: 'wrong' });
+    r = await admin(env, 'POST', '/promo-budgets', { name: 'Xx', kind: 'contest_prize', totalCoins: 30, reason: 'test budget', approvalPassword: 'wrong' });
     expect(r.body.error.reason).toBe('approval_invalid');
-    r = await admin(env, 'POST', '/promo-budgets', { name: 'Xx', kind: 'package_bonus', totalCoins: 30, reason: 'x', approvalPassword: PW });
+    r = await admin(env, 'POST', '/promo-budgets', { name: 'Xx', kind: 'contest_prize', totalCoins: 30, reason: 'x', approvalPassword: PW });
     expect(r.status).toBe(400); // reason too short
+    // The package-bonus kind went with coin packages.
+    r = await admin(env, 'POST', '/promo-budgets', { name: 'Xx', kind: 'package_bonus', totalCoins: 30, reason: 'test budget', approvalPassword: PW });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/kind must be one of: contest_prize, product_prize, free_rewards/);
 
     // Reset: admin cannot, superadmin can with the emailed code.
     expect((await admin(env, 'POST', '/approval-password/reset/request', {})).status).toBe(403);
@@ -107,73 +109,12 @@ describe('approval password', () => {
     const code = /(\d{6})/.exec(sentEmails.at(-1)!.subject)![1];
     expect((await admin(env, 'POST', '/approval-password/reset/confirm', { code: '000000', next: 'brand-new-1' }, 'root:superadmin')).status).toBe(400);
     expect((await admin(env, 'POST', '/approval-password/reset/confirm', { code, next: 'brand-new-1' }, 'root:superadmin')).status).toBe(200);
-    r = await admin(env, 'POST', '/promo-budgets', { name: 'Yy', kind: 'package_bonus', totalCoins: 30, reason: 'after reset', approvalPassword: 'brand-new-1' });
+    r = await admin(env, 'POST', '/promo-budgets', { name: 'Yy', kind: 'contest_prize', totalCoins: 30, reason: 'after reset', approvalPassword: 'brand-new-1' });
     expect(r.status).toBe(200);
 
     const audit = await env.DB.prepare(`SELECT action, detail FROM admin_audit_log`).all<any>();
     expect(JSON.stringify(audit.results)).not.toMatch(/secret-123|brand-new-1/);
     expect(audit.results.map((a: any) => a.action)).toEqual(expect.arrayContaining(['approval-password.reset.request', 'approval-password.reset']));
-  });
-});
-
-describe('package bonus budget + locked coins', () => {
-  it('sells a package (with its loss-making bonus) as Diamonds, honours the per-user limit, and never pays Diamonds out', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'boss');
-    await seedUser(env, 'alice');
-    await seedUser(env, 'bob', 100);
-    await settings(env, { coinPricing: { buyRate: 0.1 }, withdrawal: { enabled: true, minAmount: 10, conversionRate: 0.1 }, paymentGateway: { mode: 'manual' } });
-    await admin(env, 'POST', '/approval-password', { next: PW });
-    const b = await budget(env, 'package_bonus', 30, { perUserLimit: 20 });
-
-    let r = await admin(env, 'POST', '/coin-packages', { name: 'Bb', coins: 100, bonusCoins: 20 });
-    expect(r.body.error.message).toMatch(/Nuksaan/);
-    r = await admin(env, 'POST', '/coin-packages', { name: 'Bb', coins: 100, bonusCoins: 20, budgetId: b, approvalPassword: PW });
-    expect(r.status).toBe(200);
-    const pkg = r.body.id;
-    expect((await listPublicCoinPackages(env as any))[0]).toMatchObject({ totalCoins: 120, bonusLocked: true, priceInr: 10 });
-
-    r = await call(env, 'alice', 'requestDeposit', { packageId: pkg, utr: 'UTR-0001' });
-    expect((await admin(env, 'PATCH', `/deposits/${r.body.depositId}`, { action: 'approve' })).status).toBe(200);
-    expect(await user(env, 'alice')).toMatchObject({ dpcoin: 120, lockedCoins: 120 });
-
-    // Per-user limit reached → no bonus; room left (10) < bonus → catalog hides it.
-    r = await call(env, 'alice', 'requestDeposit', { packageId: pkg, utr: 'UTR-0002' });
-    expect(await drizzleOf(env).select().from(schema.deposits).where(eq(schema.deposits.id, r.body.depositId)).get()).toMatchObject({ bonusCoins: 0, amount: 100, budgetId: null });
-    expect((await listPublicCoinPackages(env as any))[0]).toMatchObject({ bonusCoins: 0, bonusLocked: false });
-
-    // Bought coins are Diamonds: none of them can be withdrawn.
-    r = await call(env, 'alice', 'requestWithdrawal', { amount: 100, method: 'upi', accountDetails: 'alice@okhdfc' });
-    expect(r.status).toBe(412);
-    expect(r.body.error.message).toMatch(/Diamond withdraw nahi/);
-    expect(await user(env, 'alice')).toMatchObject({ dpcoin: 120, lockedCoins: 120 });
-    await expectBalanced(env);
-  });
-
-  it('razorpay: reserves at order, credits the whole package as Diamonds, a refund takes the Diamonds back', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'boss');
-    await seedUser(env, 'carol');
-    await settings(env, { coinPricing: { buyRate: 0.1 }, withdrawal: { enabled: true, minAmount: 10, conversionRate: 0.1 } });
-    await admin(env, 'POST', '/approval-password', { next: PW });
-    const b = await budget(env, 'package_bonus', 100);
-    const pkg = (await admin(env, 'POST', '/coin-packages', { name: 'P', coins: 100, bonusCoins: 50, budgetId: b, approvalPassword: PW })).body.id;
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: 'order_1' }), { status: 200 })));
-    const r = await call(env, 'carol', 'createOrder', { packageId: pkg });
-    expect(r.body).toMatchObject({ coins: 150, bonusCoins: 50, bonusLocked: true, amount: 1000 });
-    expect((await admin(env, 'GET', `/promo-budgets/${b}`)).body.budget).toMatchObject({ heldCoins: 50, remainingCoins: 50 });
-    expect((await creditPaymentOrder(env as any, drizzleOf(env) as any, { orderId: 'order_1', paymentId: 'pay_1', source: 'webhook', capturedAmountPaise: 1000 })).credited).toBe(true);
-    expect(await user(env, 'carol')).toMatchObject({ dpcoin: 150, lockedCoins: 150 });
-    expect((await call(env, 'carol', 'requestWithdrawal', { amount: 100, method: 'upi', accountDetails: 'carol@okhdfc' })).status).toBe(412);
-    // carol then wins 30 DP coins and loses 20 to a debit (taken from DP coins):
-    // 160 total, 150 Diamonds. The refund takes all 150 back from the Diamonds.
-    await adjustUserWallet(env as any, { uid: 'carol', amount: 30, direction: 'add', type: 'contest_win_reward', description: 'won' });
-    await adjustUserWallet(env as any, { uid: 'carol', amount: 20, direction: 'subtract', type: 'contest_entry_fee', description: 'spent' });
-    await clawbackPaymentOrder(env as any, drizzleOf(env) as any, { paymentId: 'pay_1', kind: 'refund' });
-    expect(await user(env, 'carol')).toMatchObject({ dpcoin: 10, lockedCoins: 0 });
-    const h = await computeMoneyHealth(env as any);
-    expect(h.ledgerDrift.count).toBe(0);
-    expect(h.lockedDrift.count).toBe(0);
   });
 });
 
@@ -328,27 +269,6 @@ describe('free rewards', () => {
   });
 });
 
-describe('withdrawal risk', () => {
-  it('flags new accounts on a shared device living on free coins', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'old', 0, { deviceId: 'dev-1' });
-    await seedUser(env, 'fresh', 0, { deviceId: 'dev-1', createdAt: Date.now() - 86_400_000 });
-    await seedUser(env, 'clean', 500);
-    await settings(env, { withdrawal: { enabled: true, minAmount: 10, conversionRate: 0.1 }, rewardLocking: { referral: false } });
-    await adjustUserWallet(env as any, { uid: 'fresh', amount: 200, direction: 'add', type: 'referral_bonus', description: 'ref' });
-    let r = await call(env, 'fresh', 'requestWithdrawal', { amount: 100, method: 'upi', accountDetails: 'fresh@okhdfc' });
-    expect(r.status).toBe(200);
-    r = await call(env, 'clean', 'requestWithdrawal', { amount: 100, method: 'upi', accountDetails: 'clean@okhdfc' });
-    const list = (await admin(env, 'GET', '/withdrawals')).body;
-    const fresh = list.find((w: any) => w.userId === 'fresh');
-    expect(fresh.riskLevel).toBe('high');
-    expect(fresh.riskFlags).toEqual(expect.arrayContaining(['new_account', 'shared_device', 'mostly_free_coins', 'never_played']));
-    expect(list.find((w: any) => w.userId === 'clean').riskFlags).not.toContain('shared_device');
-    const note = await env.DB.prepare(`SELECT title FROM admin_notifications WHERE title LIKE '%HIGH RISK%'`).first<any>();
-    expect(note).toBeTruthy();
-  });
-});
-
 describe('referral fraud holds', () => {
   it('holds the third referral from one IP for the same referrer, and pays it only via review', async () => {
     const { env } = makeEnv();
@@ -381,7 +301,7 @@ describe('coin alerts and report', () => {
     await env.DB.prepare(`UPDATE promo_budgets SET spent_coins = 85 WHERE id = ?`).bind(b).run();
     await adjustUserWallet(env as any, { uid: 'farm', amount: 80, direction: 'add', type: 'daily_task', description: 'x', locked: true });
     const out = await runCoinAlerts(env as any);
-    expect(out).toMatchObject({ budgets: 1, heavyEarners: 1 });
+    expect(out).toEqual({ budgets: 1, heavyEarners: 1 }); // no liability alert any more
     expect(sentEmails.map((e) => e.subject)).toEqual(expect.arrayContaining([expect.stringMatching(/Budget 80%/), expect.stringMatching(/free coin/)]));
     // Dedupe: a second run sends nothing new.
     sentEmails.length = 0;
@@ -416,31 +336,7 @@ describe('admin wallet: DP coin or Diamond', () => {
   });
 });
 
-describe('Diamond / DP coin money rules', () => {
-  it('a legacy (unreserved) payout approval takes DP coins only, never Diamonds', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'boss');
-    await seedUser(env, 'lee');
-    await adjustUserWallet(env as any, { uid: 'lee', amount: 40, direction: 'add', type: 'contest_win_reward', description: 'won' });
-    await adjustUserWallet(env as any, { uid: 'lee', amount: 100, direction: 'add', type: 'purchase', description: 'bought', locked: true });
-    const ts = Date.now();
-    const add = (id: string, amount: number) => env.DB.prepare(
-      `INSERT INTO withdrawals (id, user_id, amount, cash_amount, method, account_details, status, reserved, created_at, updated_at)
-       VALUES (?, 'lee', ?, ?, 'upi', 'lee@okhdfc', 'pending', 0, ?, ?)`,
-    ).bind(id, amount, amount / 10, ts, ts).run();
-    await add('w_big', 100);
-    // 140 total but only 40 DP coins: refused, nothing moves.
-    let r = await admin(env, 'PATCH', '/withdrawals/w_big', { action: 'approve' });
-    expect(r.status).toBe(412);
-    expect(r.body.error.message).toMatch(/DP coin/);
-    expect(await user(env, 'lee')).toMatchObject({ dpcoin: 140, lockedCoins: 100 });
-    await add('w_ok', 40);
-    r = await admin(env, 'PATCH', '/withdrawals/w_ok', { action: 'approve' });
-    expect(r.status).toBe(200);
-    expect(await user(env, 'lee')).toMatchObject({ dpcoin: 100, lockedCoins: 100 });
-    await expectBalanced(env);
-  });
-
+describe('Diamond / DP coin rules', () => {
   it('a match refund is always Diamonds, even for an entry row without a Diamond part', async () => {
     const { env } = makeEnv();
     await seedUser(env, 'old', 0);

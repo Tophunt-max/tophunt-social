@@ -51,18 +51,6 @@ export function assertCoinAmountOrZero(value: unknown, field = "amount"): number
   return assertCoinAmount(value, field);
 }
 
-/** Round a fiat value to 2 decimals so INR never carries float dust. */
-export function roundFiat(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.round(value * 100) / 100;
-}
-
-/** Convert a rupee value to integer paise. */
-export function toPaise(rupees: number): number {
-  if (!Number.isFinite(rupees)) return 0;
-  return Math.round(rupees * 100);
-}
-
 /**
  * A match is funded by two players paying half of `totalEntryFee` each.
  *
@@ -142,7 +130,7 @@ export function matchPrizeCeiling(totalEntryFee: unknown, subsidyCoins: unknown)
 
 /**
  * SQL for `users.locked_coins` after a debit of `?` coins that is NOT an entry
- * fee (a clawback, an admin subtraction, a legacy payout): locked coins can
+ * fee (a clawback or an admin subtraction): locked coins can
  * never exceed what is left of the balance. Bind the debit amount once.
  */
 export const LOCKED_AFTER_DEBIT = "MIN(locked_coins, MAX(0, dpcoin - ?))";
@@ -173,7 +161,7 @@ export interface WalletAdjustment {
   claimKey?: string;
   /**
    * Diamonds (users.locked_coins, lib/diamonds.ts) instead of DP coins.
-   * "add": credit Diamonds (play-only, never withdrawable).
+   * "add": credit Diamonds (contest entry only).
    * "subtract": take Diamonds only, and fail if the user has fewer.
    * Without it a subtraction takes DP coins first, as before.
    */
@@ -371,82 +359,4 @@ export async function adjustUserWallet(
 
   // newBalance is the TOTAL (DP coin + Diamond); newDiamonds its Diamond part.
   return { newBalance: Number(updated?.dpcoin || 0), applied: delta, newDiamonds: Number(updated?.locked_coins || 0) };
-}
-
-
-export interface CoinPackageInput {
-  name: string | null;
-  coins: number;
-  bonusCoins: number;
-  priceInr: number;
-  active: boolean;
-  sortOrder: number;
-}
-
-/**
- * Validate a coin package before it is written.
- *
- * `coin_packages` is the ONLY pricing authority for both Razorpay checkout and
- * manual deposits, yet writes accepted anything: a 0-rupee package, a negative
- * price, or a fractional coin count would all have been stored and then used to
- * price real purchases. Reads validated the row defensively; writes did not
- * validate at all, which is the wrong end to catch it.
- */
-export function validateCoinPackage(
-  body: Record<string, any>,
-  existing?: Partial<CoinPackageInput>,
-  opts: { promoFunded?: boolean } = {},
-): Partial<CoinPackageInput> {
-  const out: Partial<CoinPackageInput> = {};
-  const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key) && body[key] !== undefined;
-
-  if (has("name")) {
-    const name = body.name === null ? null : String(body.name).trim();
-    if (name !== null && (name.length === 0 || name.length > 120)) {
-      throw httpsError("invalid-argument", "Package name must be 1–120 characters.");
-    }
-    out.name = name;
-  }
-
-  if (has("coins")) out.coins = assertCoinAmount(body.coins, "coins");
-  if (has("bonusCoins")) out.bonusCoins = assertCoinAmountOrZero(body.bonusCoins, "bonusCoins");
-
-  if (has("priceInr")) {
-    const price = Number(body.priceInr);
-    if (!Number.isFinite(price) || price <= 0 || price > 1_000_000) {
-      throw httpsError("invalid-argument", "priceInr must be a positive amount up to 1,000,000.");
-    }
-    // Razorpay charges in integer paise, so a price with sub-paise precision
-    // could never be charged exactly.
-    if (Math.round(price * 100) !== Number((price * 100).toFixed(4))) {
-      throw httpsError("invalid-argument", "priceInr cannot have more than 2 decimal places.");
-    }
-    out.priceInr = roundFiat(price);
-  }
-
-  if (has("active")) out.active = !!body.active;
-
-  if (has("sortOrder")) {
-    const order = Number(body.sortOrder);
-    if (!Number.isInteger(order) || order < 0 || order > 10_000) {
-      throw httpsError("invalid-argument", "sortOrder must be a whole number between 0 and 10,000.");
-    }
-    out.sortOrder = order;
-  }
-
-  // A bonus larger than the paid amount is almost always a typo (a misplaced
-  // zero), and it silently doubles the coins sold for a fixed price.
-  const coins = out.coins ?? existing?.coins;
-  const bonus = out.bonusCoins ?? existing?.bonusCoins;
-  // A budget-funded bonus is a deliberate promotion capped by its budget, and it
-  // is credited as locked (play-only) coins, so "bigger than the paid coins" is
-  // allowed there.
-  if (coins != null && bonus != null && bonus > coins && !opts.promoFunded) {
-    throw httpsError(
-      "invalid-argument",
-      `bonusCoins (${bonus}) cannot exceed the paid coins (${coins}).`,
-    );
-  }
-
-  return out;
 }

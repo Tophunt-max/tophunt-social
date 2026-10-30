@@ -9,7 +9,7 @@ import { Skeleton } from '../ui/Skeleton';
  * this; everything below mirrors app/wallet/index.tsx:
  *
  *   balance card (marginH 20, radius 28, padding 25, mb 25): label + badge,
- *     42pt balance, 48-tall Top Up button
+ *     42pt balance, 48-tall "Diamond kamao" button
  *   "Daily Check-in" header (18pt title over 13pt subtitle, padH 20, mb 15)
  *   seven 44 × 60 day cards (radius 22) in (width − 40) / 7 slots
  *   "Daily Tasks" header (mt 25), task cards (padding 12, radius 20, 48 icon)

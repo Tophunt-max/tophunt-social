@@ -51,11 +51,16 @@ async function api(env: TestEnv, token: string, action: string, data: any = {}) 
 const walletBody = { amount: 5, type: 'add', reason: 'goodwill credit', requestId: 'req_12345678' };
 
 describe('admin sudo mode', () => {
-  it('lists money, role, lifecycle and config writes; reads are never gated', () => {
+  it('lists coin, role, lifecycle and config writes; reads are never gated', () => {
     expect(isSensitiveAdminRoute('POST', '/users/u1/wallet')).toBe(true);
     expect(isSensitiveAdminRoute('DELETE', '/users/u1')).toBe(true);
-    expect(isSensitiveAdminRoute('PATCH', '/withdrawals/w1')).toBe(true);
-    expect(isSensitiveAdminRoute('PUT', '/integrations/razorpay')).toBe(true);
+    expect(isSensitiveAdminRoute('PUT', '/integrations/secrets/MAILEROO_API_KEY')).toBe(true);
+    expect(isSensitiveAdminRoute('POST', '/promo-budgets')).toBe(true);
+    // The real-money routes are gone, so the list no longer names them.
+    expect(isSensitiveAdminRoute('PATCH', '/withdrawals/w1')).toBe(false);
+    expect(isSensitiveAdminRoute('PATCH', '/deposits/d1')).toBe(false);
+    expect(isSensitiveAdminRoute('POST', '/coin-packages')).toBe(false);
+    expect(isSensitiveAdminRoute('PATCH', '/coin-packages/p1')).toBe(false);
     expect(isSensitiveAdminRoute('GET', '/users/u1')).toBe(false);
     expect(isSensitiveAdminRoute('POST', '/reports/r1/resolve')).toBe(false);
   });

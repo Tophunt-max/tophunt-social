@@ -2,13 +2,13 @@
  * Coin value (₹ per DP coin) as the app shows it.
  *
  * Set by the admin in Coin Economy → Coin value (`coinValues.dpCoinInr` in the
- * public app config). It is what a DP coin is worth in the shop; nobody is paid
- * ₹ for coins. Falls back to the legacy withdrawal rate for older servers.
+ * public app config). It is what a DP coin is worth in the shop, shown for
+ * reference only.
  */
 
 /** ₹ per DP coin, or null when not configured / invalid (then nothing is shown). */
 export function coinRate(config: any): number | null {
-  const r = Number(config?.coinValues?.dpCoinInr ?? config?.withdrawal?.conversionRate);
+  const r = Number(config?.coinValues?.dpCoinInr);
   return Number.isFinite(r) && r > 0 ? r : null;
 }
 
@@ -23,51 +23,4 @@ export function formatInr(amount: number): string {
 export function coinsInInr(coins: number, rate: number | null): string | null {
   if (rate === null) return null;
   return `≈ ${formatInr((Number(coins) || 0) * rate)}`;
-}
-
-export interface CoinPackage {
-  id: string;
-  name?: string | null;
-  coins: number;
-  bonusCoins: number;
-  /** Base coins × the admin's buy rate (bonus free), computed by the Worker. */
-  priceInr: number;
-  /** False when under ₹1, or when it would pay out more than it costs: shown, not sold. */
-  purchasable?: boolean;
-  /** The bonus is a platform promo: play-only coins, spendable on contests, never withdrawable. */
-  bonusLocked?: boolean;
-  totalCoins: number;
-  popular?: boolean;
-}
-
-/** Flag the best value (most coins per rupee) for the store badge. Pure. */
-export function markBestValue(rows: CoinPackage[] | null | undefined): CoinPackage[] {
-  if (!Array.isArray(rows) || !rows.length) return [];
-  let best = -1;
-  let bestRatio = 0;
-  rows.forEach((p, i) => {
-    const ratio = p.priceInr > 0 ? p.totalCoins / p.priceInr : 0;
-    if (ratio > bestRatio) {
-      bestRatio = ratio;
-      best = i;
-    }
-  });
-  return rows.map((p, i) => ({ ...p, popular: i === best }));
-}
-
-/**
- * What changed for a package the user has selected, between two catalogs:
- * 'gone' (removed / deactivated), 'price' (price or coins changed), or null.
- */
-export function selectedPackageChange(
-  before: CoinPackage[] | null | undefined,
-  after: CoinPackage[] | null | undefined,
-  id: string | null,
-): 'gone' | 'price' | null {
-  if (!id || !before || !after) return null;
-  const a = before.find((p) => p.id === id);
-  if (!a) return null;
-  const b = after.find((p) => p.id === id);
-  if (!b) return 'gone';
-  return a.priceInr !== b.priceInr || a.totalCoins !== b.totalCoins ? 'price' : null;
 }

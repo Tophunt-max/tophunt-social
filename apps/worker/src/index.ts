@@ -45,7 +45,6 @@ import { processBroadcastJob } from "./lib/broadcast";
 import { captureError, logErrorToDb, pruneErrorLogs } from "./lib/observability";
 import { pruneOpsTables, runCronJob } from "./lib/ops";
 import { gamificationHourly } from "./lib/gamificationCron";
-import { reconcilePaymentOrders } from "./lib/coinOrders";
 import { moneyHealthAlert } from "./lib/moneyHealth";
 import { maybeSendCoinReport, runCoinAlerts } from "./lib/coinAlerts";
 import { reconcileVideos } from "./lib/videoReconcile";
@@ -188,7 +187,7 @@ app.get("/health", (c) => c.json({ ok: true, ts: Date.now() }));
  *
  * `/health` returning `{ok:true}` was previously the ONLY health signal, and it
  * checked nothing: a Worker with a dead D1 binding or a missing
- * RAZORPAY_KEY_SECRET (which makes every top-up fail closed) still answered 200.
+ * FIREBASE_SERVICE_ACCOUNT (which makes every sign-in fail) still answered 200.
  * This endpoint actually exercises each dependency and reports which required
  * secrets are absent, so an uptime monitor can alert on a broken deploy instead
  * of a broken process.
@@ -650,9 +649,6 @@ export default {
             // public list already hides an expired template; this is what stops
             // the admin panel showing it as Live forever.
             await runCronJob(env, "expireContests", () => expireContests(env));
-            // Money that was captured at the gateway but never credited here
-            // (client died AND webhook lost) is invisible without this sweep.
-            await runCronJob(env, "reconcilePayments", () => reconcilePaymentOrders(env));
             // NOTE: retention sweeps (pruneErrorLogs / pruneNotifications /
             // pruneOpsTables) moved to the hourly "0 * * * *" trigger above —
             // they are not time-critical and do not need to run every 10 min.

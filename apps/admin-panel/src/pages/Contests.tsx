@@ -836,8 +836,8 @@ function ContestDialog({
    * snapshot restores it. No object URL is created either — the preview IS the
    * uploaded image — so there is no `blob:` handle to leak.
    *
-   * Same pattern as the payment-QR upload on the Deposits page, and the same
-   * trade-off: an image can exist in R2 before any contest references it.
+   * Same trade-off as the banner: an image can exist in R2 before any contest
+   * references it.
    * `discardOrphanImages` covers Cancel and Save, but NOT a closed tab — and the
    * image categories have `retentionDays: null` with no background sweep, so a
    * genuinely abandoned upload persists. That is the cheaper of the two failures
@@ -1370,7 +1370,7 @@ function ContestDialog({
                   disabled={saving}
                   icon={Coins}
                   title="DP coin"
-                  description="Winner ko DP coin milte hain (withdraw ho sakte). Entry-fee pot (Diamond) tak, upar ka budget se."
+                  description="Winner ko DP coin milte hain (Shopping me kharch hote hain). Entry-fee pot (Diamond) tak, upar ka budget se."
                   onSelect={() => set("prizeType", "coins")}
                 />
                 <PrizeTypeOption
@@ -1479,7 +1479,7 @@ function ContestDialog({
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <NumberField label="Total entry fee (Diamond, dono players ka)" value={form.totalEntryFee} min={0} max={1_000_000} error={errors.totalEntryFee} disabled={saving} onChange={(value) => set("totalEntryFee", value)} />
                 <NumberField
-                  label="Prize (DP coin, withdraw hone wala)"
+                  label="Prize (DP coin, Shopping ke liye)"
                   value={isProduct ? "0" : form.rewardCoins}
                   min={0}
                   max={10_000_000}
@@ -1502,7 +1502,7 @@ function ContestDialog({
               {(
                 <div className="sm:col-span-2 space-y-1.5">
                   <label className="text-sm font-medium text-foreground" htmlFor="contest-subsidy-budget">
-                    {isProduct ? "Product prize budget (DP coin value isse katega)" : "Promo prize budget (DP coin, asli ₹)"}
+                    {isProduct ? "Product prize budget (DP coin value isse katega)" : "Promo prize budget (DP coin)"}
                   </label>
                   <select
                     id="contest-subsidy-budget"
@@ -1525,7 +1525,7 @@ function ContestDialog({
                     {subsidyPerMatch > 0
                       ? isProduct
                         ? ` Har product par budget se ${fmtNumber(subsidyPerMatch)} katenge (value ${fmtNumber(productCost)} − pot ${fmtNumber(pot)}). Ye app me kisi ko nahi dikhega.`
-                        : ` Har match par platform ${fmtNumber(subsidyPerMatch)} DP coin apni taraf se dega (asli ₹).`
+                        : ` Har match par platform ${fmtNumber(subsidyPerMatch)} DP coin apni taraf se dega (budget se).`
                       : isProduct
                         ? " Value pot se zyada ho tabhi budget lagta hai."
                         : " Prize pot se zyada ho tabhi budget lagta hai."}

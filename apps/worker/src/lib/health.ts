@@ -13,8 +13,7 @@
  */
 import type { Env } from "../types";
 import { cronHealth } from "./ops";
-import { resolveSecret, getRazorpayCredentials } from "./integrations";
-import { cashFlowsRetired } from "./cashRetirement";
+import { resolveSecret } from "./integrations";
 import { integrationHealth } from "../routes/integrations";
 import { mediaRouting } from "./mediaRouting";
 
@@ -87,17 +86,10 @@ export async function computeDeepHealth(env: Env): Promise<DeepHealth> {
   // credentials are resolved through the credential store (panel value first,
   // env fallback), NOT read from env directly — otherwise a key configured in
   // the admin panel is reported "missing" here even though it is live.
-  const [faSvc, rzp] = await Promise.all([
-    resolveSecret(env, "FIREBASE_SERVICE_ACCOUNT"),
-    getRazorpayCredentials(env),
-  ]);
+  const faSvc = await resolveSecret(env, "FIREBASE_SERVICE_ACCOUNT");
   const requiredSecrets: Record<string, unknown> = {
     FIREBASE_SERVICE_ACCOUNT: faSvc,
     FIREBASE_PROJECT_ID: env.FIREBASE_PROJECT_ID,
-    // Razorpay is only needed while real-money payments exist (lib/cashRetirement.ts).
-    ...(cashFlowsRetired(env)
-      ? {}
-      : { RAZORPAY_KEY_ID: rzp.keyId, RAZORPAY_KEY_SECRET: rzp.keySecret, RAZORPAY_WEBHOOK_SECRET: rzp.webhookSecret }),
     R2_PUBLIC_BASE_URL: env.R2_PUBLIC_BASE_URL,
     ALLOWED_ORIGINS: env.ALLOWED_ORIGINS,
   };
@@ -115,7 +107,7 @@ export async function computeDeepHealth(env: Env): Promise<DeepHealth> {
   try {
     const providers = await integrationHealth(env);
     const missing = Object.entries(providers)
-      .filter(([name, ok]) => !ok && !(name === "razorpay" && cashFlowsRetired(env)))
+      .filter(([, ok]) => !ok)
       .map(([name]) => name);
     checks.integrations = {
       ok: missing.filter((m) => m !== "qencodeVideo").length === 0,

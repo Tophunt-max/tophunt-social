@@ -336,7 +336,7 @@ export const MAX_PENDING_ACTIONS = 200;
  * (routes/api.ts, story_views onConflictDoUpdate), so a replay after a lost
  * response cannot double-count. `create` / `delete` were never replayed by
  * `syncPendingActions` and are refused here rather than stored and dropped.
- * Money, contest-entry, wallet and withdrawal actions must NEVER be added: they go
+ * Coin, contest-entry, wallet and shop actions must NEVER be added: they go
  * through callApi with server idempotency keys and must be re-confirmed by the user,
  * not replayed blindly.
  */

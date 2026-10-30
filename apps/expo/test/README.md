@@ -1,6 +1,6 @@
 # Client tests (service / logic layer)
 
-Unit tests for the app's pure service & utility layer — the code where money and
+Unit tests for the app's pure service & utility layer — the code where balance and
 integrity logic lives. They run in plain Node via Vitest, with native modules
 mocked, so **no React Native renderer or `jest-expo` setup is required** and they
 stay fast and portable.
@@ -16,12 +16,8 @@ npm run test:watch
 
 ## Coverage
 
-- **walletService** — `createOrder` sends only the packageId (server prices it),
-  `confirmTopup` forwards the Razorpay proof, `claimDailyBonus` maps to the right
-  action.
-- **razorpayCheckout.purchasePackage** — full orchestration
-  (createOrder → native checkout → confirmTopup), user-cancellation and gateway
-  failure handling (no credit attempted on failure).
+- **walletService** — `claimDailyBonus`, `getDailyReward` and `claimAdReward`
+  map to the right server actions and send nothing the server should decide.
 - **getDeviceId** — generates + persists a stable per-install id, reuses the
   stored value, caches within a session, and falls back gracefully when storage
   throws.

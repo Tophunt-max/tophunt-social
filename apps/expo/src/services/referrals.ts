@@ -10,7 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { callApi, readApiLive } from '@/src/services/api';
 import { getDeviceId } from '@/src/lib/deviceId';
 
-export type QualifyAction = 'signup' | 'verified' | 'first_contest' | 'first_purchase';
+export type QualifyAction = 'signup' | 'verified' | 'first_contest';
 export type ReferralStatus = 'pending' | 'review' | 'rewarded' | 'rejected' | 'expired' | 'reversed';
 
 export interface ReferralProgramPublic {
@@ -21,8 +21,6 @@ export interface ReferralProgramPublic {
   applyWindowDays: number;
   qualifyWindowDays: number;
   milestones: { count: number; bonus: number }[];
-  /** first_purchase only: smallest purchase that qualifies (₹, 0 = any). */
-  minPurchaseInr?: number;
   /** How rewards are credited (App Control → reward locking). */
   rewardUnit?: 'Diamond' | 'DP coin';
 }
@@ -52,8 +50,12 @@ export const QUALIFY_COPY: Record<QualifyAction, { short: string; step: string }
   signup: { short: 'sign up', step: 'Dost TopHunt par signup kare' },
   verified: { short: 'email aur mobile verify', step: 'Dost apna email aur mobile dono verify kare' },
   first_contest: { short: 'pehla contest join', step: 'Dost apna pehla contest join kare' },
-  first_purchase: { short: 'pehli Diamond purchase', step: 'Dost apni pehli Diamond purchase kare' },
 };
+
+/** Copy for a qualifying action; an action this build does not know reads generically. */
+export function qualifyCopy(action: string | null | undefined): { short: string; step: string } {
+  return QUALIFY_COPY[action as QualifyAction] ?? { short: 'qualify', step: 'Dost qualifying step poora kare' };
+}
 
 export const REFERRALS_QUERY_KEY = ['me', 'referrals'] as const;
 
@@ -133,5 +135,5 @@ export function offerLine(
   const unit = p.rewardUnit ?? 'Diamond';
   return p.qualifyAction === 'signup'
     ? `Friend ka code lagao aur ${p.refereeReward} ${unit} pao!`
-    : `Friend ka code lagao — ${QUALIFY_COPY[p.qualifyAction].short} karte hi ${p.refereeReward} ${unit} milenge!`;
+    : `Friend ka code lagao — ${qualifyCopy(p.qualifyAction).short} karte hi ${p.refereeReward} ${unit} milenge!`;
 }

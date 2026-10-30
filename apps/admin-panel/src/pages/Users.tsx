@@ -567,7 +567,7 @@ function WalletDialog({
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<"add" | "subtract">("add");
   const [reason, setReason] = useState("");
-  // Which balance: DP coin (withdrawable prizes) or Diamond (users.locked_coins,
+  // Which balance: DP coin (contest prizes, for Shopping) or Diamond (users.locked_coins,
   // entry fees only). Subtracting Diamonds takes only Diamonds.
   const [locked, setLocked] = useState(false);
   // One id per dialog: a double click or a retry of this adjustment is applied once.

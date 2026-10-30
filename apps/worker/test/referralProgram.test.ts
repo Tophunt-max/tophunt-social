@@ -159,7 +159,7 @@ describe('qualifying and paying', () => {
   it('first contest: pays both sides exactly once, ledgered, only on the right event', async () => {
     const env = await setup();
     await applyReferralCode(env as any, 'friend', 'THREF1', { deviceId: 'dev-friend' });
-    await qualifyReferral(env as any, 'friend', 'purchase');
+    await qualifyReferral(env as any, 'friend', 'signup');
     await qualifyReferral(env as any, 'friend', 'verified');
     expect((await referral(env, 'friend'))?.status).toBe('pending');
 
@@ -172,13 +172,16 @@ describe('qualifying and paying', () => {
     expect((await ledger(env, 'ref')).map((r: any) => r.id)).toEqual(['referral_bonus:referrer:friend']);
   });
 
-  it('first purchase', async () => {
-    const env = await setup({ qualifyAction: 'first_purchase' });
-    await applyReferralCode(env as any, 'friend', 'THREF1', { deviceId: 'dev-friend' });
-    await qualifyReferral(env as any, 'friend', 'contest');
-    expect(await coins(env, 'friend')).toBe(0);
-    await qualifyReferral(env as any, 'friend', 'purchase');
-    expect(await coins(env, 'friend')).toBe(20);
+  it('first purchase is no longer a qualifying action (nothing can be bought)', async () => {
+    const { env } = makeEnv();
+    expect((await admin(env, 'POST', '/app-settings', { referralProgram: { qualifyAction: 'first_purchase' } })).status).toBe(400);
+    // A stored legacy value falls back to the default, first contest.
+    expect(parseReferralConfig({ referralProgram: { qualifyAction: 'first_purchase' } }).qualifyAction).toBe('first_contest');
+    const env2 = await setup({ qualifyAction: 'first_purchase' });
+    await applyReferralCode(env2 as any, 'friend', 'THREF1', { deviceId: 'dev-friend' });
+    expect((await referral(env2, 'friend'))?.qualifyAction).toBe('first_contest');
+    await qualifyReferral(env2 as any, 'friend', 'contest');
+    expect(await coins(env2, 'friend')).toBe(20);
   });
 
   it('verified needs BOTH email and mobile', async () => {

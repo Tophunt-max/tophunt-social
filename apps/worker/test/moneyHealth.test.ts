@@ -28,7 +28,7 @@ describe('computeMoneyHealth — ledger drift (the core invariant)', () => {
     const { env } = makeEnv();
     const db = drizzleOf(env);
     await user(db, 'alice', 100);
-    await ledger(db, 'alice', 60, 'purchase');
+    await ledger(db, 'alice', 60, 'daily_reward');
     await ledger(db, 'alice', 40, 'reward');
 
     const h = await computeMoneyHealth(env);
@@ -41,7 +41,7 @@ describe('computeMoneyHealth — ledger drift (the core invariant)', () => {
     const db = drizzleOf(env);
     // Balance 100 but ledger only accounts for 70 → 30 coins appeared unledgered.
     await user(db, 'bob', 100);
-    await ledger(db, 'bob', 70, 'purchase');
+    await ledger(db, 'bob', 70, 'daily_reward');
 
     const h = await computeMoneyHealth(env);
     expect(h.ledgerDrift.count).toBe(1);
@@ -75,90 +75,63 @@ describe('computeMoneyHealth — negative balances', () => {
   });
 });
 
-describe('computeMoneyHealth — payment orders', () => {
-  it('counts a paid order whose coins never landed (no payments row)', async () => {
-    const { env } = makeEnv();
-    const db = drizzleOf(env);
+describe('computeMoneyHealth — Diamonds (locked_coins)', () => {
+  async function lockedUser(env: any, uid: string, dpcoin: number, locked: number, ledgerAmount: number, ledgerLocked: number) {
     const ts = Date.now();
-    await db.insert(schema.paymentOrders).values({
-      orderId: 'ord_stranded', userId: 'u1', coins: 100, amountPaise: 10000, currency: 'INR',
-      status: 'paid', paymentId: 'pay_missing', createdAt: ts, updatedAt: ts,
-    } as any).run();
+    await env.DB.prepare(`INSERT INTO users (uid, signup_completed, dpcoin, locked_coins, created_at, updated_at) VALUES (?, 1, ?, ?, ?, ?)`)
+      .bind(uid, dpcoin, locked, ts, ts).run();
+    await env.DB.prepare(`INSERT INTO coin_transactions (id, uid, amount, locked_delta, type, created_at) VALUES (?, ?, ?, ?, 'daily_reward', ?)`)
+      .bind(`${uid}-seed`, uid, ledgerAmount, ledgerLocked, ts).run();
+  }
 
-    const h = await computeMoneyHealth(env);
-    expect(h.strandedPaidOrders).toBe(1);
-    expect(h.ok).toBe(false);
-  });
-
-  it('does NOT count a paid order that has its payments row', async () => {
+  it('is clean when Diamonds match their ledger and sit inside the balance', async () => {
     const { env } = makeEnv();
-    const db = drizzleOf(env);
-    const ts = Date.now();
-    await db.insert(schema.paymentOrders).values({
-      orderId: 'ord_ok', userId: 'u1', coins: 100, amountPaise: 10000, currency: 'INR',
-      status: 'paid', paymentId: 'pay_ok', createdAt: ts, updatedAt: ts,
-    } as any).run();
-    await db.insert(schema.payments).values({
-      id: 'pay_ok', userId: 'u1', amount: 100, coins: 100, amountPaise: 10000, source: 'razorpay', status: 'success', createdAt: ts,
-    } as any).run();
-
+    await lockedUser(env, 'erin', 50, 20, 50, 20);
     const h = await computeMoneyHealth(env);
-    expect(h.strandedPaidOrders).toBe(0);
-  });
-
-  it('counts an order stuck in created past the reconcile window, but not a fresh one', async () => {
-    const { env } = makeEnv();
-    const db = drizzleOf(env);
-    const ts = Date.now();
-    await db.insert(schema.paymentOrders).values({
-      orderId: 'ord_stuck', userId: 'u1', coins: 50, amountPaise: 5000, currency: 'INR',
-      status: 'created', createdAt: ts - 20 * 60 * 1000, updatedAt: ts,
-    } as any).run();
-    await db.insert(schema.paymentOrders).values({
-      orderId: 'ord_fresh', userId: 'u1', coins: 50, amountPaise: 5000, currency: 'INR',
-      status: 'created', createdAt: ts, updatedAt: ts,
-    } as any).run();
-
-    const h = await computeMoneyHealth(env);
-    expect(h.stuckCreatedOrders).toBe(1);
-    // Stuck `created` orders are a reconcile-lag signal, not an invariant breach.
+    expect(h.lockedDrift).toMatchObject({ count: 0, overBalance: 0 });
     expect(h.ok).toBe(true);
   });
 
-  it('sums clawback shortfalls (refund-farming signal)', async () => {
+  it('flags Diamonds out of step with their ledger', async () => {
     const { env } = makeEnv();
-    const db = drizzleOf(env);
-    const ts = Date.now();
-    await db.insert(schema.paymentOrders).values({
-      orderId: 'ord_claw', userId: 'u1', coins: 100, amountPaise: 10000, currency: 'INR',
-      status: 'refunded', clawbackShortfall: 30, createdAt: ts, updatedAt: ts,
-    } as any).run();
-
+    await lockedUser(env, 'fay', 50, 30, 50, 20);
     const h = await computeMoneyHealth(env);
-    expect(h.clawbackShortfalls.count).toBe(1);
-    expect(h.clawbackShortfalls.coins).toBeCloseTo(30);
+    expect(h.lockedDrift.count).toBe(1);
+    expect(h.lockedDrift.samples[0]).toMatchObject({ uid: 'fay', locked: 30, ledger: 20 });
+    expect(h.ok).toBe(false);
+  });
+
+  it('flags Diamonds above the balance they are part of', async () => {
+    const { env } = makeEnv();
+    await lockedUser(env, 'gus', 10, 40, 10, 40);
+    const h = await computeMoneyHealth(env);
+    expect(h.lockedDrift.count).toBe(0);
+    expect(h.lockedDrift.overBalance).toBe(1);
     expect(h.ok).toBe(false);
   });
 });
 
-describe('computeMoneyHealth — pending queues (informational)', () => {
-  it('reports pending deposits/withdrawals with the oldest age, without failing health', async () => {
+describe('computeMoneyHealth — promo-budget holds', () => {
+  it('counts a held reservation on a finished match, not one on a live match', async () => {
     const { env } = makeEnv();
-    const db = drizzleOf(env);
     const ts = Date.now();
-    await db.insert(schema.deposits).values({
-      id: 'd1', userId: 'u1', amount: 100, payAmount: 100, status: 'pending', createdAt: ts - 60_000, updatedAt: ts,
-    } as any).run();
-    await db.insert(schema.withdrawals).values({
-      id: 'w1', userId: 'u1', amount: 50, cashAmount: 50, status: 'pending', createdAt: ts - 120_000, updatedAt: ts,
-    } as any).run();
-
+    await env.DB.prepare(`INSERT INTO contest_matches (id, status, created_at) VALUES ('m-done', 'completed', ?), ('m-live', 'active', ?)`).bind(ts, ts).run();
+    await env.DB.prepare(
+      `INSERT INTO promo_reservations (id, budget_id, uid, coins, status, ref_type, ref_id, created_at, updated_at)
+       VALUES ('r1', 'b1', 'u1', 5, 'held', 'match', 'm-done', ?, ?), ('r2', 'b1', 'u1', 5, 'held', 'match', 'm-live', ?, ?),
+              ('r3', 'b1', 'u1', 5, 'committed', 'match', 'm-done', ?, ?)`,
+    ).bind(ts, ts, ts, ts, ts, ts).run();
     const h = await computeMoneyHealth(env);
-    expect(h.pendingDeposits.count).toBe(1);
-    expect(h.pendingDeposits.oldestAgeMs).toBeGreaterThanOrEqual(60_000);
-    expect(h.pendingWithdrawals.count).toBe(1);
-    expect(h.pendingWithdrawals.oldestAgeMs).toBeGreaterThanOrEqual(120_000);
-    // Queues alone do not make the books unhealthy.
+    expect(h.staleReservations).toBe(1);
+    expect(h.ok).toBe(false);
+  });
+});
+
+describe('computeMoneyHealth — shape', () => {
+  it('reports only the coin checks: no payment, deposit or withdrawal metrics', async () => {
+    const { env } = makeEnv();
+    const h = await computeMoneyHealth(env);
+    expect(Object.keys(h).sort()).toEqual(['ledgerDrift', 'lockedDrift', 'negativeBalances', 'ok', 'staleReservations', 'ts']);
     expect(h.ok).toBe(true);
   });
 });
@@ -169,7 +142,7 @@ describe('GET /admin/money-health route', () => {
     const { env } = makeEnv();
     const db = drizzleOf(env);
     await user(db, 'bob', 100);
-    await ledger(db, 'bob', 70, 'purchase');
+    await ledger(db, 'bob', 70, 'daily_reward');
 
     const app = makeApp();
     const res = await app.request('/admin/money-health', { headers: { 'X-Admin-Secret': 'test-admin-secret' } }, env);

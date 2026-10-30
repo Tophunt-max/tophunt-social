@@ -185,13 +185,11 @@ describe('folder policy', () => {
     },
   );
 
-  it.each(['avatars', 'deposits', 'vs-cards', 'profile', 'reports', 'misc'])(
+  it.each(['avatars', 'vs-cards', 'profile', 'reports', 'misc'])(
     '%s refuses video even with the legacy path allowed',
     (folder) => {
       // An avatar was never allowed to be a video and must not become one just
-      // because the cutover is unfinished. `deposits` matters beyond tidiness: an
-      // admin reads a UPI reference off those, and a clip in that queue wastes an
-      // operator's time and our egress.
+      // because the cutover is unfinished.
       expect(folderAcceptsVideo(folder)).toBe(false);
       expect(allowedMimesForCategory(folder, { allowLegacyVideo: true })).toEqual([...IMAGE_MIME_TYPES]);
     },
@@ -210,7 +208,7 @@ describe('folder policy', () => {
   it('never exposes a deployment-owned prefix to POST /upload', () => {
     // The allow-list is derived from each category's `writer`, so an admin- or
     // server-written prefix cannot appear here by omission.
-    for (const prefix of ['contest-banners', 'payment-qr', 'blog/imported']) {
+    for (const prefix of ['contest-banners', 'blog/imported']) {
       expect(USER_UPLOAD_FOLDERS as readonly string[]).not.toContain(prefix);
       expect(isUserWritablePrefix(prefix)).toBe(false);
     }

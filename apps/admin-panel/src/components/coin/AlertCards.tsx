@@ -76,7 +76,6 @@ export function CoinAlertsCard({ data, pending, onSave }: CardProps) {
     onSuccess: (r) => {
       const parts = [
         r.budgets ? `${r.budgets} budget 80%+` : "",
-        r.liability ? "liability > net cash" : "",
         r.heavyEarners ? `${r.heavyEarners} heavy earner` : "",
       ].filter(Boolean);
       toast.success(parts.length ? `Alert bheje: ${parts.join(", ")}` : "Sab theek, koi alert nahi");
@@ -96,7 +95,7 @@ export function CoinAlertsCard({ data, pending, onSave }: CardProps) {
   return (
     <Card icon={BellRing} title="Diamond / DP coin alerts aur report email" tint="text-red-500" onSave={save} pending={pending}>
       <p className="mb-3 text-xs text-muted-foreground">
-        Har 6 ghante check: koi budget 80% se zyada use hua, liability net cash se zyada, ya kisi user ne 24 ghante me threshold se zyada free coin
+        Har 6 ghante check: koi budget 80% se zyada use hua, ya kisi user ne 24 ghante me threshold se zyada free coin
         liye. Alert notification me aata hai aur email par bhi.
       </p>
       <p className="mb-3 text-sm">

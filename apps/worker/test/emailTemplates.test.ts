@@ -14,9 +14,6 @@ import {
   welcomeEmail,
   accountDeletionScheduledEmail,
   testEmail,
-  coinsAddedEmail,
-  coinsReversedEmail,
-  withdrawalDecisionEmail,
   contestWinEmail,
   contestRefundEmail,
   passwordChangedEmail,
@@ -29,11 +26,6 @@ const all = [
   ['welcome', welcomeEmail('Alice')],
   ['deletion', accountDeletionScheduledEmail('30 September 2026')],
   ['test', testEmail()],
-  ['coins-added', coinsAddedEmail(500)],
-  ['coins-reversed', coinsReversedEmail(500, 'refunded')],
-  ['withdrawal-approved', withdrawalDecisionEmail('approved', 1000)],
-  ['withdrawal-paid', withdrawalDecisionEmail('paid', 1000)],
-  ['withdrawal-rejected', withdrawalDecisionEmail('rejected', 1000, 'invalid UPI id')],
   ['contest-win', contestWinEmail('Sunset vs Sunrise', 200)],
   ['contest-refund', contestRefundEmail('Sunset vs Sunrise', 'it ended in a tie')],
   ['password-changed', passwordChangedEmail()],
@@ -107,32 +99,7 @@ describe('deletion scheduled', () => {
   });
 });
 
-describe('financial receipts', () => {
-  it('coins-added names the amount in both parts', () => {
-    const e = coinsAddedEmail(500);
-    expect(e.subject).toContain('500');
-    expect(e.html).toContain('500');
-    expect(e.text).toContain('500');
-  });
-
-  it('coins-reversed names the amount and the reason', () => {
-    const e = coinsReversedEmail(750, 'charged back');
-    expect(e.html).toContain('750');
-    expect(e.html.toLowerCase()).toContain('charged back');
-    expect(e.text).toContain('750');
-  });
-
-  it('withdrawal-paid reads as sent, rejected reads as returned + reason', () => {
-    const paid = withdrawalDecisionEmail('paid', 1000);
-    expect(paid.subject.toLowerCase()).toContain('sent');
-    expect(paid.html).toContain('1000');
-
-    const rejected = withdrawalDecisionEmail('rejected', 1000, 'invalid UPI id');
-    expect(rejected.subject.toLowerCase()).toContain('reject');
-    expect(rejected.html.toLowerCase()).toContain('returned to your wallet');
-    expect(rejected.html).toContain('invalid UPI id');
-  });
-
+describe('contest receipts', () => {
   it('contest-win names the battle and the prize', () => {
     const e = contestWinEmail('Sunset vs Sunrise', 200);
     expect(e.html).toContain('Sunset vs Sunrise');
@@ -151,8 +118,7 @@ describe('financial receipts', () => {
     const win = contestWinEmail(null, undefined);
     expect(win.html).toContain('your battle');
     expect(win.html).toContain('0');
-    const added = coinsAddedEmail(undefined);
-    expect(added.subject).toContain('0');
+    expect(win.subject).toContain('0');
   });
 });
 
@@ -170,5 +136,12 @@ describe('password-changed security alert', () => {
     const e = contestWinEmail('<img onerror=x>', 10);
     expect(e.html).not.toContain('<img onerror=x>');
     expect(e.html).toContain('&lt;img');
+  });
+});
+
+describe('real-money templates are gone', () => {
+  it('exports no purchase, reversal or withdrawal email', async () => {
+    const mod: Record<string, unknown> = await import('../src/lib/emailTemplates');
+    for (const name of ['coinsAddedEmail', 'coinsReversedEmail', 'withdrawalDecisionEmail']) expect(name in mod, name).toBe(false);
   });
 });

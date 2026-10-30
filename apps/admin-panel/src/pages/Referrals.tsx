@@ -21,7 +21,7 @@ import { Modal } from "@/components/ui/Modal";
  * signup bonus: this is the only way a new user earns coins for joining.
  */
 
-type QualifyAction = "signup" | "verified" | "first_contest" | "first_purchase";
+type QualifyAction = "signup" | "verified" | "first_contest";
 
 interface Program {
   enabled: boolean;
@@ -35,7 +35,6 @@ interface Program {
   requireReview: boolean;
   milestones: { count: number; bonus: number }[];
   maxCoinsPerMonth: number;
-  minPurchaseInr: number;
 }
 
 const DEFAULTS: Program = {
@@ -50,12 +49,10 @@ const DEFAULTS: Program = {
   requireReview: false,
   milestones: [],
   maxCoinsPerMonth: 0,
-  minPurchaseInr: 0,
 };
 
 const ACTIONS: { k: QualifyAction; l: string; d: string }[] = [
   { k: "first_contest", l: "First contest entry", d: "Recommended. Paid when the friend joins their first contest." },
-  { k: "first_purchase", l: "First Diamond purchase", d: "Strongest anti-fraud: paid after the friend's first paid Diamond purchase." },
   { k: "verified", l: "Email + mobile verified", d: "Paid once the friend verifies BOTH email and mobile." },
   { k: "signup", l: "Signup (instant)", d: "Paid as soon as the friend signs up. Easiest to farm — not recommended." },
 ];
@@ -87,7 +84,7 @@ const REASONS: Record<string, string> = {
   referrer_lifetime_cap: "Inviter hit the lifetime cap (friend still paid)",
   referrer_daily_cap: "Inviter hit the daily cap (friend still paid)",
   referrer_unavailable: "Inviter blocked / inactive (friend still paid)",
-  referred_unavailable: "Friend blocked / deleted before payout (nobody paid)",
+  referred_unavailable: "Friend blocked / deleted before the reward (nobody paid)",
   admin_rejected: "Rejected by an admin",
 };
 
@@ -114,7 +111,6 @@ function validate(p: Program): string | null {
     ["Lifetime cap", p.maxRewardedPerReferrer, 0, 100_000],
     ["Daily cap", p.maxRewardedPerReferrerPerDay, 0, 10_000],
     ["Monthly budget", p.maxCoinsPerMonth, 0, 100_000_000],
-    ["Minimum first purchase", p.minPurchaseInr, 0, 1_000_000],
   ];
   for (const [name, n, lo, hi] of ints) {
     if (!Number.isInteger(n) || n < lo || n > hi) return `${name} must be a whole number from ${lo} to ${hi}.`;
@@ -544,7 +540,10 @@ export function ProgramSettings({ program }: { program?: Partial<Program> }) {
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    if (program && !dirty) setP({ ...DEFAULTS, ...program, milestones: [...(program.milestones || [])] });
+    if (!program || dirty) return;
+    // A retired qualify action from an old save falls back to the default.
+    const qualifyAction = ACTIONS.some((a) => a.k === program.qualifyAction) ? program.qualifyAction! : DEFAULTS.qualifyAction;
+    setP({ ...DEFAULTS, ...program, qualifyAction, milestones: [...(program.milestones || [])] });
   }, [program, dirty]);
 
   const set = (patch: Partial<Program>) => {
@@ -621,8 +620,6 @@ export function ProgramSettings({ program }: { program?: Partial<Program> }) {
         {numInput("maxRewardedPerReferrer", "Lifetime cap per inviter", "0 = unlimited. Beyond it the friend is still paid.")}
         {numInput("maxRewardedPerReferrerPerDay", "Daily cap per inviter", "0 = unlimited. Stops referral farming bursts.")}
         {numInput("maxCoinsPerMonth", "Monthly budget (inviter + friend coins)", "0 = no limit. Poora hone par naye referral review me rukte hain; agle mahine apne aap pay hote hain. Milestone bonus isme nahi.")}
-        {p.qualifyAction === "first_purchase" &&
-          numInput("minPurchaseInr", "Minimum first purchase (₹)", "0 = koi bhi purchase. Isse chhoti purchase qualify nahi karti; baad ki badi purchase kar sakti hai.")}
       </div>
 
       <Toggle

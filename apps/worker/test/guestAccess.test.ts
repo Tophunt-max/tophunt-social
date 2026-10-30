@@ -310,8 +310,6 @@ describe('protected reads and every mutation stay behind an account', () => {
       '/read/notifications',
       '/read/notifications/unread-count',
       '/read/transactions',
-      '/read/deposits',
-      '/read/withdrawals',
       '/read/me/status',
       '/read/me/verification',
       '/read/users/alice/bookmarks',
@@ -320,6 +318,10 @@ describe('protected reads and every mutation stay behind an account', () => {
       '/read/prizes',
     ]) {
       expect((await get(env, path)).status, path).toBe(401);
+    }
+    // The real-money reads are gone altogether.
+    for (const path of ['/read/deposits', '/read/withdrawals', '/read/coin-packages']) {
+      expect((await get(env, path)).status, path).toBe(404);
     }
   });
 

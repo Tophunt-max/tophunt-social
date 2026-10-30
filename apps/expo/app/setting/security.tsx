@@ -231,7 +231,7 @@ export default function SecurityScreen() {
           <Row
             icon="mail-outline"
             title="Email & phone"
-            description="Kept verified so you can always get back in, and so payouts reach you"
+            description="Kept verified so you can always get back in, and so prize deliveries reach you"
             onPress={() => router.push('/profile/manage/edit')}
             last
           />

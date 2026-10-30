@@ -81,7 +81,7 @@ export async function searchUsers(q: string) {
  * Follow / unfollow / cancel a request. Pass `intent` whenever the caller knows
  * what the button showed (see `intentFor` in src/lib/followState.ts): without
  * it the server toggles, and a screen that does not know about a pending
- * request would withdraw it instead of sending it.
+ * request would cancel it instead of sending it.
  */
 export const toggleFollowService = async (targetUserId: string, intent?: FollowIntent) => {
   try {

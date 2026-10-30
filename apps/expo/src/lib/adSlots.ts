@@ -111,7 +111,7 @@ export interface FrequencyState {
 export const newFrequencyState = (): FrequencyState => ({ shown: [], sessionAds: 0 });
 
 /** Screens where an interruptive ad must never appear. */
-export const PROTECTED_CONTEXTS = ['checkout', 'payment', 'auth', 'chat', 'withdraw', 'deposit', 'contest_entry'] as const;
+export const PROTECTED_CONTEXTS = ['checkout', 'auth', 'chat', 'contest_entry'] as const;
 
 export function canShowInterstitial(
   state: FrequencyState,

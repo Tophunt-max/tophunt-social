@@ -21,7 +21,7 @@
  *
  * What it never touches (the request goes straight to the network as if this file
  * did not exist): anything not GET, anything else cross-origin (the API, Firebase,
- * Razorpay, media video), `/__/*` (Firebase auth proxy), `/api`, `/read`, `/auth/*`
+ * media video), `/__/*` (Firebase auth proxy), `/api`, `/read`, `/auth/*`
  * API calls, requests carrying credentials headers, Range requests, and the two
  * service-worker scripts. Responses marked `no-store` or `private` are never kept.
  * Signed-in data is therefore never in Cache Storage; it lives where it did before

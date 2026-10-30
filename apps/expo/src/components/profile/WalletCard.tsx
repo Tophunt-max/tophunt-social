@@ -4,7 +4,7 @@ import { UserProfile } from '../../types/user';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
-import { useCoinRate } from '@/src/hooks/useCoinPackages';
+import { useCoinRate } from '@/src/hooks/useCoinRate';
 import { coinsInInr } from '@/src/lib/coinValue';
 import { useRouter } from 'expo-router';
 

@@ -8,8 +8,8 @@
  *
  * But when that list was introduced it omitted two folders the client was already
  * using, and the failure was total and silent from the server's point of view:
- * every contest entry upload and every manual deposit screenshot came back 400,
- * so no battle could be created or joined and no manual top-up could be filed.
+ * every contest entry upload came back 400, so no battle could be created or
+ * joined.
  *
  * This test exists because a server-side allow-list and a client-side constant
  * are two halves of one contract that nothing else checks. Adding a new upload
@@ -26,13 +26,12 @@ import { USER_UPLOAD_FOLDERS, sanitizeMediaFolder } from '../src/lib/r2';
  *   contests  — src/services/contests/uploadMedia.ts (photo + video entries)
  *   stories   — app/story/create/index.tsx
  *   avatars   — app/profile/manage/edit.tsx, app/auth/signup/congratulations
- *   deposits  — app/wallet/deposit.tsx
  *
  * `vs-cards` is NOT here any more: since migration 0055 the battle card is
  * rendered by the server (lib/vsPublication.ts), and a client-writable vs-cards
  * prefix would let a participant plant an image on the opponent's story.
  */
-const FOLDERS_THE_CLIENT_SENDS = ['contests', 'stories', 'avatars', 'deposits'] as const;
+const FOLDERS_THE_CLIENT_SENDS = ['contests', 'stories', 'avatars'] as const;
 
 describe('USER_UPLOAD_FOLDERS', () => {
   it.each(FOLDERS_THE_CLIENT_SENDS)('accepts %s, which the app uploads to', (folder) => {
@@ -46,6 +45,12 @@ describe('USER_UPLOAD_FOLDERS', () => {
     // The list is an allow-list, not decoration — it must actually exclude things.
     expect(USER_UPLOAD_FOLDERS as readonly string[]).not.toContain('contest-banners');
     expect(USER_UPLOAD_FOLDERS as readonly string[]).not.toContain('anything-else');
+  });
+
+  it('no longer accepts the retired real-money folders', () => {
+    // Manual deposit screenshots and the payment QR went with real money.
+    expect(USER_UPLOAD_FOLDERS as readonly string[]).not.toContain('deposits');
+    expect(USER_UPLOAD_FOLDERS as readonly string[]).not.toContain('payment-qr');
   });
 
   it('keeps server-rendered battle cards out of reach', () => {

@@ -486,8 +486,8 @@ describe('the composite image', () => {
       }, 'unsupported_format'],
       ['external url', async () => 'https://evil.example/bob.jpg', 'untrusted_media'],
       ['owned but wrong prefix', async (env) => {
-        await env.MEDIA.put('deposits/2026/10/x.jpg', fakePhoto('x'));
-        return `${BASE}/deposits/2026/10/x.jpg`;
+        await env.MEDIA.put('avatars/2026/10/x.jpg', fakePhoto('x'));
+        return `${BASE}/avatars/2026/10/x.jpg`;
       }, 'untrusted_media'],
       ['missing object', async () => `${BASE}/contests/2026/10/gone.jpg`, 'media_missing'],
     ];

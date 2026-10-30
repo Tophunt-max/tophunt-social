@@ -12,13 +12,8 @@
  * money tests assert this invariant in-process; this surfaces it in production,
  * continuously, to the admin.
  *
- * It also reports the other places real money silently goes wrong:
- *  - orders captured at the gateway but never credited here (`paid` with no
- *    `payments` row — the same signal the reconcile sweeper acts on),
- *  - orders stuck unconfirmed past the reconcile window,
- *  - refunds we could not fully claw back (`clawback_shortfall > 0`),
- *  - negative balances (a debit that should have been refused),
- *  - the pending deposit/withdrawal queues and how old the oldest item is.
+ * It also reports Diamond (locked_coins) drift, negative balances (a debit that
+ * should have been refused) and promo-budget holds stuck on a finished match.
  *
  * Read-only and defensive: every query is wrapped so one failure degrades that
  * one metric to `null`/`-1` rather than failing the whole console.
@@ -27,8 +22,6 @@ import type { Env } from "../types";
 
 /** Coins are whole numbers; a real-sum drift below this is float noise, not a bug. */
 const DRIFT_EPSILON = 0.5;
-/** Mirrors RECONCILE_MIN_AGE_MS in lib/coinOrders.ts: below this an order is just new. */
-const STUCK_ORDER_MIN_AGE_MS = 10 * 60 * 1000;
 
 export interface LedgerDriftSample {
   uid: string;
@@ -44,64 +37,23 @@ export interface MoneyHealth {
   ledgerDrift: { count: number; samples: LedgerDriftSample[] };
   /** Balances below zero — a debit that should have been refused. */
   negativeBalances: { count: number; samples: { uid: string; balance: number }[] };
-  /** Captured at Razorpay, coins never landed (paid order with no payments row). */
-  strandedPaidOrders: number;
   /**
-   * Manual deposits marked `approved` whose coins never landed (`credited_at IS
-   * NULL`, migration 0053).
-   *
-   * Structurally impossible since the approval became one gated batch — which is
-   * exactly why it is worth probing. If this is ever non-zero, the approval path
-   * has regressed to a non-atomic write and a user has paid real INR for nothing.
-   */
-  strandedApprovedDeposits: number;
-  /** Orders still `created` past the reconcile window — the sweeper should be clearing these. */
-  stuckCreatedOrders: number;
-  /**
-   * Escrowed withdrawals whose ledger does not match their status: a held row
-   * with no `withdrawal_hold`, or a rejected one with no `withdrawal_refund`. Balance and ledger can still agree while a
-   * rejection's refund never ran, so the drift check alone does not see this.
-   */
-  withdrawalLedgerGaps: { count: number; samples: { id: string; status: string; missing: string }[] };
-  /** Refunds where coins were already spent and could not be recovered. */
-  clawbackShortfalls: { count: number; coins: number };
-  /**
-   * Locked (play-only promo) coins out of step with their ledger, or above the
-   * balance they are part of (migration 0068). Same seriousness as ledger drift:
-   * a locked coin that silently became withdrawable is promo money cashed out.
+   * Diamonds (users.locked_coins) out of step with their ledger, or above the
+   * balance they are part of. Same seriousness as ledger drift: a Diamond that
+   * silently became DP coin is a free reward turned into shopping money.
    */
   lockedDrift: { count: number; overBalance: number; samples: { uid: string; locked: number; ledger: number; balance: number }[] };
-  /** Promo-budget holds left behind by a finished match or a processed deposit. */
+  /** Promo-budget holds left behind by a finished match. */
   staleReservations: number;
-  /** Operational queues — informational, not a health failure on their own. */
-  pendingDeposits: { count: number; oldestAgeMs: number | null };
-  pendingWithdrawals: { count: number; oldestAgeMs: number | null };
 }
-
-/** Escrowed (reserved) withdrawals missing the ledger row their status implies. */
-const WITHDRAWAL_GAPS = `
-  SELECT w.id AS id, w.status AS status,
-         CASE w.status WHEN 'rejected' THEN 'withdrawal_refund' ELSE 'withdrawal_hold' END AS missing
-    FROM withdrawals w
-   WHERE COALESCE(w.reserved, 0) = 1
-     -- 'paid' is not checked: payouts marked paid before the settle pair existed
-     -- have no withdrawal_settled row by design, and would flag forever.
-     AND w.status IN ('pending', 'approved', 'rejected')
-     AND NOT EXISTS (
-       SELECT 1 FROM coin_transactions t
-        WHERE t.id = (CASE w.status WHEN 'rejected' THEN 'withdrawal_refund:' ELSE 'withdrawal_hold:' END) || w.id
-     )`;
 
 /** COALESCE(SUM(amount)) of a user's ledger, as a correlated subquery. */
 const LEDGER_SUM = "COALESCE((SELECT SUM(amount) FROM coin_transactions t WHERE t.uid = u.uid), 0)";
 const LOCKED_SUM = "COALESCE((SELECT SUM(locked_delta) FROM coin_transactions t WHERE t.uid = u.uid), 0)";
 const STALE_RESERVATIONS = `
   SELECT COUNT(*) AS n FROM promo_reservations r
-   WHERE r.status = 'held' AND (
-     (r.ref_type = 'match' AND NOT EXISTS (SELECT 1 FROM contest_matches m
-         WHERE m.id = r.ref_id AND m.status IN ('waiting_for_opponent', 'active')))
-     OR (r.ref_type = 'deposit' AND NOT EXISTS (SELECT 1 FROM deposits d
-         WHERE d.id = r.ref_id AND d.status = 'pending')))`;
+   WHERE r.status = 'held' AND r.ref_type = 'match' AND NOT EXISTS (SELECT 1 FROM contest_matches m
+         WHERE m.id = r.ref_id AND m.status IN ('waiting_for_opponent', 'active'))`;
 
 async function firstNumber(env: Env, sql: string, ...binds: unknown[]): Promise<number> {
   try {
@@ -127,33 +79,8 @@ async function rows<T>(env: Env, sql: string, ...binds: unknown[]): Promise<T[]>
 
 export async function computeMoneyHealth(env: Env): Promise<MoneyHealth> {
   const ts = Date.now();
-
-  const [
-    driftCount,
-    driftSamples,
-    negCount,
-    negSamples,
-    stranded,
-    strandedDeposits,
-    stuckCreated,
-    clawbackCount,
-    clawbackCoins,
-    pendDepCount,
-    pendDepOldest,
-    pendWdCount,
-    pendWdOldest,
-    wdGapCount,
-    wdGapSamples,
-    lockedDriftCount,
-    lockedOver,
-    lockedSamples,
-    staleRes,
-  ] = await Promise.all([
-    firstNumber(
-      env,
-      `SELECT COUNT(*) AS n FROM users u WHERE ABS(u.dpcoin - ${LEDGER_SUM}) > ?`,
-      DRIFT_EPSILON,
-    ),
+  const [driftCount, driftSamples, negCount, negSamples, lockedDriftCount, lockedOver, lockedSamples, staleRes] = await Promise.all([
+    firstNumber(env, `SELECT COUNT(*) AS n FROM users u WHERE ABS(u.dpcoin - ${LEDGER_SUM}) > ?`, DRIFT_EPSILON),
     rows<LedgerDriftSample>(
       env,
       `SELECT u.uid AS uid, u.dpcoin AS balance, ${LEDGER_SUM} AS ledger,
@@ -165,33 +92,7 @@ export async function computeMoneyHealth(env: Env): Promise<MoneyHealth> {
       DRIFT_EPSILON,
     ),
     firstNumber(env, `SELECT COUNT(*) AS n FROM users WHERE dpcoin < 0`),
-    rows<{ uid: string; balance: number }>(
-      env,
-      `SELECT uid, dpcoin AS balance FROM users WHERE dpcoin < 0 ORDER BY dpcoin ASC LIMIT 20`,
-    ),
-    firstNumber(
-      env,
-      `SELECT COUNT(*) AS n FROM payment_orders o
-        WHERE o.status = 'paid' AND o.payment_id IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.id = o.payment_id)`,
-    ),
-    firstNumber(
-      env,
-      `SELECT COUNT(*) AS n FROM deposits WHERE status = 'approved' AND credited_at IS NULL`,
-    ),
-    firstNumber(
-      env,
-      `SELECT COUNT(*) AS n FROM payment_orders WHERE status = 'created' AND created_at < ?`,
-      ts - STUCK_ORDER_MIN_AGE_MS,
-    ),
-    firstNumber(env, `SELECT COUNT(*) AS n FROM payment_orders WHERE clawback_shortfall > 0`),
-    firstNumber(env, `SELECT COALESCE(SUM(clawback_shortfall), 0) AS n FROM payment_orders WHERE clawback_shortfall > 0`),
-    firstNumber(env, `SELECT COUNT(*) AS n FROM deposits WHERE status = 'pending'`),
-    firstNumber(env, `SELECT COALESCE(MIN(created_at), 0) AS n FROM deposits WHERE status = 'pending'`),
-    firstNumber(env, `SELECT COUNT(*) AS n FROM withdrawals WHERE status = 'pending'`),
-    firstNumber(env, `SELECT COALESCE(MIN(created_at), 0) AS n FROM withdrawals WHERE status = 'pending'`),
-    firstNumber(env, `SELECT COUNT(*) AS n FROM (${WITHDRAWAL_GAPS})`),
-    rows<{ id: string; status: string; missing: string }>(env, `SELECT id, status, missing FROM (${WITHDRAWAL_GAPS}) LIMIT 20`),
+    rows<{ uid: string; balance: number }>(env, `SELECT uid, dpcoin AS balance FROM users WHERE dpcoin < 0 ORDER BY dpcoin ASC LIMIT 20`),
     firstNumber(env, `SELECT COUNT(*) AS n FROM users u WHERE ABS(u.locked_coins - ${LOCKED_SUM}) > ?`, DRIFT_EPSILON),
     firstNumber(env, `SELECT COUNT(*) AS n FROM users WHERE locked_coins < 0 OR locked_coins > MAX(dpcoin, 0) + ?`, DRIFT_EPSILON),
     rows<{ uid: string; locked: number; ledger: number; balance: number }>(
@@ -206,37 +107,16 @@ export async function computeMoneyHealth(env: Env): Promise<MoneyHealth> {
     firstNumber(env, STALE_RESERVATIONS),
   ]);
 
-  const ageOf = (oldest: number): number | null => (oldest > 0 ? Math.max(0, ts - oldest) : null);
-
-  // "ok" covers only the invariant-violation signals; pending queues are normal
-  // operations. A -1 (query failure) is treated as not-ok so a broken probe is
-  // visible rather than silently green.
-  const bad = (n: number) => n !== 0; // includes -1
-  const ok =
-    !bad(driftCount) &&
-    !bad(negCount) &&
-    !bad(stranded) &&
-    !bad(strandedDeposits) &&
-    !bad(clawbackCount) &&
-    !bad(wdGapCount) &&
-    !bad(lockedDriftCount) &&
-    !bad(lockedOver) &&
-    !bad(staleRes);
-
+  // A -1 (query failure) is treated as not-ok so a broken probe is visible.
+  const bad = (n: number) => n !== 0;
+  const ok = !bad(driftCount) && !bad(negCount) && !bad(lockedDriftCount) && !bad(lockedOver) && !bad(staleRes);
   return {
     ok,
     ts,
     ledgerDrift: { count: driftCount, samples: driftSamples },
     negativeBalances: { count: negCount, samples: negSamples },
-    strandedPaidOrders: stranded,
-    strandedApprovedDeposits: strandedDeposits,
-    stuckCreatedOrders: stuckCreated,
-    clawbackShortfalls: { count: clawbackCount, coins: clawbackCoins },
-    withdrawalLedgerGaps: { count: wdGapCount, samples: wdGapSamples },
     lockedDrift: { count: lockedDriftCount, overBalance: lockedOver, samples: lockedSamples },
     staleReservations: staleRes,
-    pendingDeposits: { count: pendDepCount, oldestAgeMs: ageOf(pendDepOldest) },
-    pendingWithdrawals: { count: pendWdCount, oldestAgeMs: ageOf(pendWdOldest) },
   };
 }
 
@@ -258,13 +138,9 @@ export async function moneyHealthAlert(env: Env): Promise<MoneyHealth> {
   const failed = [
     h.ledgerDrift.count !== 0 && `ledger drift on ${h.ledgerDrift.count} account(s)`,
     h.negativeBalances.count !== 0 && `${h.negativeBalances.count} negative balance(s)`,
-    h.strandedPaidOrders !== 0 && `${h.strandedPaidOrders} paid order(s) not credited`,
-    h.strandedApprovedDeposits !== 0 && `${h.strandedApprovedDeposits} approved deposit(s) not credited`,
-    h.clawbackShortfalls.count !== 0 && `${h.clawbackShortfalls.count} clawback shortfall(s)`,
-    h.withdrawalLedgerGaps.count !== 0 && `${h.withdrawalLedgerGaps.count} withdrawal(s) missing a ledger row`,
     h.lockedDrift.count !== 0 && `locked-coin drift on ${h.lockedDrift.count} account(s)`,
     h.lockedDrift.overBalance !== 0 && `${h.lockedDrift.overBalance} account(s) with locked coins above the balance`,
-    h.staleReservations !== 0 && `${h.staleReservations} promo reservation(s) stuck on a finished match/deposit`,
+    h.staleReservations !== 0 && `${h.staleReservations} promo reservation(s) stuck on a finished match`,
   ].filter(Boolean);
   // -1 means a probe failed; say so rather than listing nothing.
   const message = failed.length ? failed.join("; ") + "." : "One or more money checks could not run.";

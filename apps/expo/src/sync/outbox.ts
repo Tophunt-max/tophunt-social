@@ -19,7 +19,7 @@ import { classifyFailure } from './failure';
  *   (`liked: true`, `intent: 'follow'`), never a toggle, and the server treats
  *   a repeat as a no-op (apps/worker/test/socialReplay.test.ts). So a request
  *   whose response was lost can be sent again safely.
- * - Votes, coins, payments, contest entry and withdrawals must NEVER be added.
+ * - Votes, coins, gifts, shop orders and contest entry must NEVER be added.
  *   Deadlines, eligibility and balances are decided by the server when the
  *   request arrives; replaying them later would act on a world the user never
  *   saw.

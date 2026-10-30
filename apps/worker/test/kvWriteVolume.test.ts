@@ -309,20 +309,20 @@ describe('KV_WRITES_DISABLED', () => {
     // Durable Object rather than KV — but asserted anyway, because the first
     // version of this flag DID break it. Skipping every counter without
     // `failClosed: true` looked safe, yet `failClosed` means "refuse if the
-    // counter is unreadable", NOT "this guard protects money" — and `deposit`,
-    // `ad` (mints withdrawable coins), `vidup` (Qencode spend), `create` (the only
+    // counter is unreadable", NOT "this guard protects money" — and `gift`,
+    // `ad` (mints coins), `vidup` (Qencode spend), `create` (the only
     // per-IP signup limit) and `exportdata` (PII) are all fail-OPEN by omission.
     // So no rate limit may be affected by this flag, whatever its options.
-    expect(await consumeRateLimit(env as any, 'deposit:alice', 2, 3600)).toBe(true);
-    expect(await consumeRateLimit(env as any, 'deposit:alice', 2, 3600)).toBe(true);
-    expect(await consumeRateLimit(env as any, 'deposit:alice', 2, 3600)).toBe(false);
+    expect(await consumeRateLimit(env as any, 'gift:alice', 2, 3600)).toBe(true);
+    expect(await consumeRateLimit(env as any, 'gift:alice', 2, 3600)).toBe(true);
+    expect(await consumeRateLimit(env as any, 'gift:alice', 2, 3600)).toBe(false);
 
     // A fail-open engagement throttle is equally unaffected.
     expect(await consumeRateLimit(env as any, 'like:alice', 1, 60)).toBe(true);
     expect(await consumeRateLimit(env as any, 'like:alice', 1, 60)).toBe(false);
 
     const opts = { failClosed: true };
-    expect(await consumeRateLimit(env as any, 'withdraw:alice', 1, 3600, opts)).toBe(true);
-    expect(await consumeRateLimit(env as any, 'withdraw:alice', 1, 3600, opts)).toBe(false);
+    expect(await consumeRateLimit(env as any, 'grant:alice', 1, 3600, opts)).toBe(true);
+    expect(await consumeRateLimit(env as any, 'grant:alice', 1, 3600, opts)).toBe(false);
   });
 });

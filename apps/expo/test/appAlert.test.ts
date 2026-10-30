@@ -4,7 +4,7 @@
  * `react-native-web`'s Alert is, verbatim, `class Alert { static alert() {} }` —
  * an empty function. Every one of this app's ~70 `Alert.alert` calls therefore did
  * nothing on web: no error messages, no success messages, and no confirmations.
- * A failed withdrawal was indistinguishable from a successful one.
+ * A failed action was indistinguishable from a successful one.
  *
  * These tests pin the mapping, because each way of getting it wrong is silent:
  *

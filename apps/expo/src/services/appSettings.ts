@@ -19,15 +19,8 @@ export interface AppConfig {
   announcement?: { enabled?: boolean; message?: string; link?: string };
   // Feature flags — a feature is ON unless explicitly set to false.
   features?: Record<string, boolean>;
-  // Withdrawal config
-  withdrawal?: {
-    enabled?: boolean;
-    payoutsFrozen?: boolean;
-    minAmount?: number;
-    maxAmount?: number;
-    maxPerDay?: number;
-    conversionRate?: number;
-  };
+  /** Reference ₹ value of one DP coin / one Diamond (src/lib/coinValue.ts). */
+  coinValues?: { dpCoinInr?: number; diamondInr?: number };
   /** Bumped on every admin save; the newer copy wins. */
   version?: number;
   splashImageUrl?: string;

@@ -7,7 +7,6 @@ import {
   deleteSecret,
   getIntegrations,
   getR2Credentials,
-  getRazorpayCredentials,
   integrationSecretStatus,
   invalidateIntegrationCache,
   putSecret,
@@ -69,7 +68,6 @@ export function registerIntegrationRoutes(
     const saved = await saveIntegrations(c.env, {
       sms: body.sms,
       email: body.email,
-      payments: body.payments,
       video: body.video,
       push: body.push,
     });
@@ -184,27 +182,6 @@ export function registerIntegrationRoutes(
         });
       }
 
-      case "razorpay": {
-        const creds = await getRazorpayCredentials(c.env);
-        if (!creds.keyId || !creds.keySecret) {
-          return c.json({ ok: false, message: "Razorpay key ID and key secret are both required." });
-        }
-        // Authenticated read-only call: proves the credential pair is valid
-        // without creating anything.
-        const res = await fetch("https://api.razorpay.com/v1/payments?count=1", {
-          headers: { Authorization: `Basic ${btoa(`${creds.keyId}:${creds.keySecret}`)}` },
-        });
-        const text = await res.text();
-        await writeAdminAudit(c.env, c.get("user"), "integrations.test", "razorpay", null, { ok: res.ok });
-        return c.json({
-          ok: res.ok,
-          message: res.ok
-            ? "Razorpay credentials are valid."
-            : `Razorpay rejected the credentials (${res.status}): ${text.slice(0, 200)}`,
-          webhookSecretConfigured: !!creds.webhookSecret,
-        });
-      }
-
       case "qencode": {
         const cfg = await qencodeConfig(c.env);
         if (!cfg) {
@@ -277,11 +254,10 @@ export function registerIntegrationRoutes(
 
 /** Readiness of each integration, for the deep health check. */
 export async function integrationHealth(env: Env): Promise<Record<string, boolean>> {
-  const [sms, email, razorpay, qencode] = await Promise.all([
+  const [sms, email, qencode] = await Promise.all([
     smsConfigured(env),
     emailConfigured(env),
-    getRazorpayCredentials(env).then((c) => !!c.keyId && !!c.keySecret),
     qencodeConfig(env).then((c) => !!c),
   ]);
-  return { sms, email, razorpay, qencodeVideo: qencode };
+  return { sms, email, qencodeVideo: qencode };
 }

@@ -33,7 +33,7 @@ export interface UserProfile {
 
   // Contest Platform Fields
   Dpcoin: number;
-  /** The Diamond part of `Dpcoin` (users.locked_coins): entry fees only, never withdrawable. Use balancesOf(). */
+  /** The Diamond part of `Dpcoin` (users.locked_coins): contest entry fees only. Use balancesOf(). */
   lockedCoins?: number;
   /** Unused legacy field; not a balance. Use balancesOf() from src/lib/balances.ts. */
   coins?: number;
