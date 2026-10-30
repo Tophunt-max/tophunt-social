@@ -29,13 +29,13 @@ export const DIGITAL_TYPE_LABEL: Record<string, string> = {
 export const VOTE_GRAD: [string, string] = ['#FF4D67', '#FF8A4D'];
 const STAGE_DARK: [string, string, string] = ['#1A1033', '#2D1B4E', '#14102A'];
 
-interface Viewer {
+export interface Viewer {
   avatarUri: string | null;
   name: string | null;
 }
 
 /** The item as it looks on a profile, for a preview box `w` × `h`. */
-function ItemStage({ item, w, h, viewer }: { item: StoreItemView; w: number; h: number; viewer: Viewer }) {
+export function ItemStage({ item, w, h, viewer }: { item: StoreItemView; w: number; h: number; viewer: Viewer }) {
   const who = viewer.name || 'You';
   if (item.type === 'theme') {
     const av = Math.min(w, h) * 0.34;

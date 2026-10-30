@@ -4,14 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BackButton } from '@/src/components/ui/BackButton';
-import { AppImage } from '@/src/components/ui/AppImage';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { Ionicons } from '@/src/lib/icons';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
-import { BRAND, BRAND_GRAD, GOLD, PAD, useExplorePalette } from '@/src/components/explore/theme';
-import { ScaleTouchable } from '@/src/components/explore/ScaleTouchable';
+import { BRAND, BRAND_GRAD, PAD, useExplorePalette } from '@/src/components/explore/theme';
 import { SectionError } from '@/src/components/explore/ExploreBits';
-import { DigitalItemCard, FeaturedDigitalCard, VOTE_GRAD } from '@/src/components/shop/DigitalItemCard';
+import { DealCard, DigitalTile, ProductTile, SpotlightCard } from '@/src/components/shop/ShopTiles';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useProfile } from '@/src/hooks/useProfileData';
 import { useDigitalPurchase } from '@/src/hooks/useDigitalPurchase';
@@ -22,17 +20,17 @@ import { useDesignWindow } from '@/src/lib/layout';
 
 type Palette = ReturnType<typeof useExplorePalette>;
 type Mode = 'digital' | 'physical';
-type Product = NonNullable<ReturnType<typeof useShopProducts>['data']>[number];
 
-const DIGITAL_TABS: { id: string | null; label: string; icon: string }[] = [
-  { id: null, label: 'All', icon: 'sparkles' },
-  { id: 'frame', label: 'Frames', icon: 'person-circle' },
-  { id: 'theme', label: 'Themes', icon: 'color-palette' },
-  { id: 'badge', label: 'Badges', icon: 'medal' },
-  { id: 'title', label: 'Titles', icon: 'ribbon' },
+const DIGITAL_TABS: { id: string | null; label: string }[] = [
+  { id: null, label: 'All' },
+  { id: 'frame', label: 'Frames' },
+  { id: 'theme', label: 'Themes' },
+  { id: 'badge', label: 'Badges' },
+  { id: 'title', label: 'Titles' },
 ];
 
 const RARITY_RANK: Record<string, number> = { legendary: 5, epic: 4, rare: 3, uncommon: 2, common: 1 };
+const RAIL_MAX = 5;
 
 /**
  * Shopping: spend 🪙 DP coin (won in contests) on digital items (frames,
@@ -40,8 +38,8 @@ const RARITY_RANK: Record<string, number> = { legendary: 5, epic: 4, rare: 3, un
  * comments) and on real products. Prices are set by TopHunt and re-checked by
  * the server when buying; delivery is included for products.
  *
- * Both catalogues live on this one screen behind a sticky two-button switch
- * (Digital | Physical). `/shop?tab=physical` opens straight on products.
+ * Both catalogues live on this one screen behind the Digital | Physical switch
+ * in the header card. `/shop?tab=physical` opens straight on products.
  */
 export default function ShopScreen() {
   const p = useExplorePalette();
@@ -63,29 +61,31 @@ export default function ShopScreen() {
   const { width } = useDesignWindow();
   const contentW = Math.min(width, 640);
   const cardW = (contentW - PAD * 2 - 12) / 2;
+  const railW = Math.min(contentW - PAD * 2 - 28, 360);
   const { onBuy, buying, dialog } = useDigitalPurchase({ onBought: () => void refetchMe(), onStale: () => void store.refetch() });
 
   const viewer = { avatarUri: (me as any)?.profileImageUrl ?? user?.photoURL ?? null, name: (me as any)?.fullName ?? user?.displayName ?? null };
   const affordable = (i: StoreItemView) => !live || bal.dpcoin >= i.priceCoins;
+  const canAfford = (coins: number) => !live || bal.dpcoin >= coins;
 
   const digital = useMemo(() => store.data ?? [], [store.data]);
   const digitalShown = useMemo(() => digital.filter((i) => !digitalTab || i.type === digitalTab), [digital, digitalTab]);
-  // Spotlight: the rarest item the viewer does not own yet (ties: the dearest).
-  const featured = useMemo(
+  // Spotlight rail: the rarest items the viewer does not own yet (ties: the dearest).
+  const spotlight = useMemo(
     () =>
       [...digital]
         .filter((i) => !i.owned)
-        .sort((a, b) => (RARITY_RANK[b.rarity] ?? 0) - (RARITY_RANK[a.rarity] ?? 0) || b.priceCoins - a.priceCoins)[0] ?? null,
+        .sort((a, b) => (RARITY_RANK[b.rarity] ?? 0) - (RARITY_RANK[a.rarity] ?? 0) || b.priceCoins - a.priceCoins)
+        .slice(0, RAIL_MAX),
     [digital],
   );
   const tabs = useMemo(() => DIGITAL_TABS.filter((t) => !t.id || digital.some((i) => i.type === t.id)), [digital]);
-  const countIn = (id: string | null) => (id ? digital.filter((i) => i.type === id).length : digital.length);
 
   const allProducts = useMemo(() => products.data ?? [], [products.data]);
   const categories = useMemo(() => [...new Set(allProducts.map((x) => x.category))], [allProducts]);
   const productList = useMemo(() => allProducts.filter((x) => !category || x.category === category), [allProducts, category]);
-  // Hero drop: the first featured product that is in stock.
-  const hotDrop = useMemo(() => allProducts.find((x) => x.featured && x.variants.some((v) => v.inStock)) ?? null, [allProducts]);
+  // Hot deals rail: featured products that are in stock.
+  const deals = useMemo(() => allProducts.filter((x) => x.featured && x.variants.some((v) => v.inStock)).slice(0, RAIL_MAX), [allProducts]);
 
   const refreshing = store.isRefetching || products.isRefetching;
   const onRefresh = () => {
@@ -93,323 +93,203 @@ export default function ShopScreen() {
     void products.refetch();
     void refetchMe();
   };
-
   const openProduct = (id: string) => router.push(`/shop/${encodeURIComponent(id)}` as any);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: p.bg }]} edges={['top']}>
-      {/* Top bar */}
-      <View style={styles.header}>
-        <BackButton size={24} color={p.text} style={{ marginRight: 4 }} />
-        <Text style={[styles.title, { color: p.text }]} accessibilityRole="header">Shop</Text>
-        <View style={{ flex: 1 }} />
-        <TouchableOpacity
-          onPress={() => router.push('/explore/battles' as any)}
-          style={[styles.balance, { backgroundColor: `${GOLD}1A`, borderColor: `${GOLD}66` }]}
-          accessibilityRole="button"
-          accessibilityLabel={`${live ? bal.dpcoin : 'Unknown'} DP coin. Win contests to earn more`}
-        >
-          <CoinIcon size={16} />
-          <Text style={[styles.balanceText, { color: p.text }]}>{live ? bal.dpcoin.toLocaleString() : '—'}</Text>
-          <LinearGradient colors={VOTE_GRAD} style={styles.balancePlus}>
-            <Ionicons name="add" size={12} color="#FFF" />
-          </LinearGradient>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.push('/shop/orders' as any)} style={[styles.iconBtn, { backgroundColor: p.chip }]} accessibilityLabel="My orders">
-          <Ionicons name="receipt-outline" size={19} color={p.text} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.push('/shop/cart' as any)} style={[styles.iconBtn, { backgroundColor: p.chip }]} accessibilityLabel={`Cart, ${cartCount} items`}>
-          <Ionicons name="cart-outline" size={20} color={p.text} />
-          {cartCount > 0 && (
-            <LinearGradient colors={VOTE_GRAD} style={[styles.dot, { borderColor: p.bg }]}>
-              <Text style={styles.dotText}>{cartCount}</Text>
-            </LinearGradient>
-          )}
-        </TouchableOpacity>
-      </View>
-
       <ScrollView
-        stickyHeaderIndices={[0]}
-        contentContainerStyle={{ paddingBottom: 48 }}
+        contentContainerStyle={{ paddingBottom: 48, width: contentW, alignSelf: 'center' }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={BRAND} />}
       >
-        {/* Sticky Digital | Physical switch */}
-        <View style={[styles.switchWrap, { backgroundColor: p.bg }]}>
-          <View style={[styles.switch, { width: contentW - PAD * 2, backgroundColor: p.chip, borderColor: p.border }]} accessibilityRole="tablist">
-            <ModeButton
-              p={p}
-              on={mode === 'digital'}
-              icon="sparkles"
-              label="Digital"
-              sub="Frames · Themes · Badges"
-              count={cfg.store.enabled ? digital.length : undefined}
-              grad={BRAND_GRAD}
-              onPress={() => setMode('digital')}
-            />
-            <ModeButton
-              p={p}
-              on={mode === 'physical'}
-              icon="gift"
-              label="Physical"
-              sub="Real prizes · Ghar delivery"
-              count={cfg.shop.enabled ? allProducts.length : undefined}
-              grad={VOTE_GRAD}
-              onPress={() => setMode('physical')}
-            />
-          </View>
-        </View>
+        {/* Header card: nav, balance, Digital | Physical switch */}
+        <LinearGradient colors={BRAND_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+          <View style={styles.heroBlobA} />
+          <View style={styles.heroBlobB} />
+          <View style={styles.heroBlobC} />
 
-        <View style={{ width: contentW, alignSelf: 'center' }}>
-          {mode === 'digital' ? (
-            <>
-              <TabIntro
-                p={p}
-                text="Sab ko dikhega: profile, posts, comments aur leaderboard par"
-                action={digital.length ? { label: 'My items', onPress: () => router.push('/rewards/inventory' as any) } : undefined}
-              />
-              {!cfg.store.enabled ? (
-                <ComingSoon p={p} icon="sparkles" text="Digital items jaldi aa rahe hain." />
-              ) : store.isLoading ? (
-                <ActivityIndicator color={BRAND} style={{ marginVertical: 40 }} />
-              ) : store.isError ? (
-                <SectionError palette={p} onRetry={() => store.refetch()} label="Digital items load nahi hue." />
-              ) : !digital.length ? (
-                <ComingSoon p={p} icon="sparkles" text="Abhi koi digital item sale par nahi hai." />
-              ) : (
-                <>
-                  {featured ? (
-                    <View style={{ paddingHorizontal: PAD, marginBottom: 16 }}>
-                      <FeaturedDigitalCard item={featured} p={p} viewer={viewer} width={contentW - PAD * 2} busy={buying === featured.itemId} affordable={affordable(featured)} onBuy={() => void onBuy(featured)} />
-                    </View>
-                  ) : null}
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-                    {tabs.map((t) => (
-                      <Chip key={t.id ?? 'all'} p={p} on={digitalTab === t.id} icon={t.icon} label={t.label} count={countIn(t.id)} onPress={() => setDigitalTab(t.id)} />
-                    ))}
-                  </ScrollView>
-                  <View style={styles.grid}>
-                    {digitalShown.map((item) => (
-                      <DigitalItemCard
-                        key={item.itemId}
-                        item={item}
-                        width={cardW}
-                        p={p}
-                        viewer={viewer}
-                        busy={buying === item.itemId}
-                        affordable={affordable(item)}
-                        onBuy={() => void onBuy(item)}
-                      />
-                    ))}
-                  </View>
-                </>
+          <View style={styles.nav}>
+            <BackButton size={22} color="#FFF" style={styles.glassBtn} />
+            <Text style={styles.navTitle} accessibilityRole="header">Shop</Text>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity onPress={() => router.push('/shop/orders' as any)} style={styles.glassBtn} accessibilityLabel="My orders">
+              <Ionicons name="receipt-outline" size={19} color="#FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/shop/cart' as any)} style={styles.glassBtn} accessibilityLabel={`Cart, ${cartCount} items`}>
+              <Ionicons name="cart-outline" size={20} color="#FFF" />
+              {cartCount > 0 && (
+                <View style={styles.cartDot}>
+                  <Text style={styles.cartDotText}>{cartCount}</Text>
+                </View>
               )}
-            </>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.balanceRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.balanceLabel}>Aapke DP coin</Text>
+              <View style={styles.balanceValueRow}>
+                <CoinIcon size={26} />
+                <Text style={styles.balanceValue} accessibilityLabel={`${live ? bal.dpcoin : 'unknown'} DP coin`}>
+                  {live ? bal.dpcoin.toLocaleString() : '—'}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity onPress={() => router.push('/explore/battles' as any)} style={styles.earnBtn} accessibilityRole="button" accessibilityLabel="Win contests to earn DP coin">
+              <Ionicons name="trophy" size={14} color={BRAND} />
+              <Text style={styles.earnText}>Kamao</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.switch} accessibilityRole="tablist">
+            <SwitchButton on={mode === 'digital'} icon="sparkles" label="Digital" count={cfg.store.enabled ? digital.length : undefined} onPress={() => setMode('digital')} />
+            <SwitchButton on={mode === 'physical'} icon="gift" label="Physical" count={cfg.shop.enabled ? allProducts.length : undefined} onPress={() => setMode('physical')} />
+          </View>
+        </LinearGradient>
+
+        {mode === 'digital' ? (
+          !cfg.store.enabled ? (
+            <ComingSoon p={p} icon="sparkles" text="Digital items jaldi aa rahe hain." />
+          ) : store.isLoading ? (
+            <ActivityIndicator color={BRAND} style={{ marginVertical: 40 }} />
+          ) : store.isError ? (
+            <View style={{ marginTop: 20 }}><SectionError palette={p} onRetry={() => store.refetch()} label="Digital items load nahi hue." /></View>
+          ) : !digital.length ? (
+            <ComingSoon p={p} icon="sparkles" text="Abhi koi digital item sale par nahi hai." />
           ) : (
             <>
-              <TabIntro
-                p={p}
-                text="Ghar par delivery, price mein shipping included"
-                action={{ label: 'My orders', onPress: () => router.push('/shop/orders' as any) }}
-              />
-              {!cfg.shop.enabled ? (
-                <ComingSoon p={p} icon="bag-handle" text="Shop abhi band hai. Jaldi aa raha hai!" />
-              ) : products.isLoading ? (
-                <ActivityIndicator color={BRAND} style={{ marginVertical: 40 }} />
-              ) : products.isError ? (
-                <SectionError palette={p} onRetry={() => products.refetch()} label="Products load nahi hue." />
-              ) : !allProducts.length ? (
-                <ComingSoon p={p} icon="gift" text="Products jaldi aa rahe hain. Tab tak digital items try karo!" />
-              ) : (
+              {spotlight.length ? (
                 <>
-                  {hotDrop ? (
-                    <View style={{ paddingHorizontal: PAD, marginBottom: 16 }}>
-                      <HotDropCard p={p} item={hotDrop} width={contentW - PAD * 2} canAfford={!live || bal.dpcoin >= hotDrop.priceCoins} onPress={() => openProduct(hotDrop.id)} />
-                    </View>
-                  ) : null}
-                  {categories.length > 1 ? (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-                      {[null, ...categories].map((c) => (
-                        <Chip
-                          key={c ?? 'all'}
-                          p={p}
-                          on={category === c}
-                          label={c ?? 'All'}
-                          count={c ? allProducts.filter((x) => x.category === c).length : allProducts.length}
-                          capitalize
-                          onPress={() => setCategory(c)}
-                        />
-                      ))}
-                    </ScrollView>
-                  ) : null}
-                  <View style={styles.grid}>
-                    {productList.map((item) => (
-                      <ProductCard key={item.id} p={p} item={item} width={cardW} canAfford={!live || bal.dpcoin >= item.priceCoins} onPress={() => openProduct(item.id)} />
+                  <RailHead p={p} title="Spotlight" sub="Sabse rare items, jo aapke paas nahi hain" />
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} snapToInterval={railW + 12} decelerationRate="fast" contentContainerStyle={styles.rail}>
+                    {spotlight.map((item) => (
+                      <SpotlightCard key={item.itemId} item={item} width={railW} p={p} viewer={viewer} busy={buying === item.itemId} affordable={affordable(item)} onBuy={() => void onBuy(item)} />
                     ))}
-                  </View>
+                  </ScrollView>
                 </>
-              )}
+              ) : null}
+              <RailHead
+                p={p}
+                title="Sab items"
+                sub="Profile, posts, comments aur leaderboard par sab ko dikhega"
+                action={{ label: 'My items', onPress: () => router.push('/rewards/inventory' as any) }}
+              />
+              <UnderlineTabs p={p} items={tabs.map((t) => ({ key: t.id ?? 'all', label: t.label, on: digitalTab === t.id, onPress: () => setDigitalTab(t.id) }))} />
+              <View style={styles.grid}>
+                {digitalShown.map((item) => (
+                  <DigitalTile
+                    key={item.itemId}
+                    item={item}
+                    width={cardW}
+                    p={p}
+                    viewer={viewer}
+                    busy={buying === item.itemId}
+                    affordable={affordable(item)}
+                    onBuy={() => void onBuy(item)}
+                  />
+                ))}
+              </View>
             </>
-          )}
-        </View>
+          )
+        ) : !cfg.shop.enabled ? (
+          <ComingSoon p={p} icon="bag-handle" text="Shop abhi band hai. Jaldi aa raha hai!" />
+        ) : products.isLoading ? (
+          <ActivityIndicator color={BRAND} style={{ marginVertical: 40 }} />
+        ) : products.isError ? (
+          <View style={{ marginTop: 20 }}><SectionError palette={p} onRetry={() => products.refetch()} label="Products load nahi hue." /></View>
+        ) : !allProducts.length ? (
+          <ComingSoon p={p} icon="gift" text="Products jaldi aa rahe hain. Tab tak digital items try karo!" />
+        ) : (
+          <>
+            {deals.length ? (
+              <>
+                <RailHead p={p} title="Hot deals" sub="Abhi sabse zyada demand mein" />
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} snapToInterval={railW + 12} decelerationRate="fast" contentContainerStyle={styles.rail}>
+                  {deals.map((item) => (
+                    <DealCard key={item.id} item={item} width={railW} p={p} canAfford={canAfford(item.priceCoins)} onPress={() => openProduct(item.id)} />
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
+            <RailHead
+              p={p}
+              title="Sab products"
+              sub="Ghar par delivery, price mein shipping included"
+              action={{ label: 'My orders', onPress: () => router.push('/shop/orders' as any) }}
+            />
+            {categories.length > 1 ? (
+              <UnderlineTabs
+                p={p}
+                capitalize
+                items={[null, ...categories].map((c) => ({ key: c ?? 'all', label: c ?? 'All', on: category === c, onPress: () => setCategory(c) }))}
+              />
+            ) : null}
+            <View style={styles.grid}>
+              {productList.map((item) => (
+                <ProductTile key={item.id} item={item} width={cardW} p={p} canAfford={canAfford(item.priceCoins)} onPress={() => openProduct(item.id)} />
+              ))}
+            </View>
+          </>
+        )}
       </ScrollView>
       {dialog}
     </SafeAreaView>
   );
 }
 
-/** One half of the Digital | Physical switch. */
-function ModeButton({ p, on, icon, label, sub, count, grad, onPress }: {
-  p: Palette; on: boolean; icon: string; label: string; sub: string; count?: number; grad: [string, string]; onPress: () => void;
-}) {
-  const inner = (
-    <>
-      <View style={[styles.modeIcon, { backgroundColor: on ? 'rgba(255,255,255,0.22)' : p.card }]}>
-        <Ionicons name={icon} size={18} color={on ? '#FFF' : p.sub} />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-          <Text style={[styles.modeLabel, { color: on ? '#FFF' : p.text }]} numberOfLines={1}>{label}</Text>
-          {count !== undefined ? (
-            <View style={[styles.modeCount, { backgroundColor: on ? 'rgba(255,255,255,0.25)' : p.border }]}>
-              <Text style={[styles.modeCountText, { color: on ? '#FFF' : p.sub }]}>{count}</Text>
-            </View>
-          ) : null}
-        </View>
-        <Text style={[styles.modeSub, { color: on ? 'rgba(255,255,255,0.85)' : p.sub }]} numberOfLines={1}>{sub}</Text>
-      </View>
-    </>
-  );
+/** One half of the white-pill switch on the header card. */
+function SwitchButton({ on, icon, label, count, onPress }: { on: boolean; icon: string; label: string; count?: number; onPress: () => void }) {
   return (
     <TouchableOpacity
-      style={{ flex: 1 }}
       onPress={onPress}
+      style={[styles.switchBtn, on && styles.switchBtnOn]}
       activeOpacity={0.85}
       accessibilityRole="tab"
       accessibilityState={{ selected: on }}
       accessibilityLabel={`${label}${count !== undefined ? `, ${count} items` : ''}`}
     >
-      {on ? (
-        <LinearGradient colors={grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.mode, styles.modeOn, { shadowColor: grad[0] }]}>{inner}</LinearGradient>
-      ) : (
-        <View style={styles.mode}>{inner}</View>
-      )}
+      <Ionicons name={icon} size={16} color={on ? BRAND : '#FFF'} />
+      <Text style={[styles.switchText, { color: on ? '#1A1033' : '#FFF' }]}>{label}</Text>
+      {count !== undefined ? (
+        <View style={[styles.switchCount, { backgroundColor: on ? `${BRAND}1F` : 'rgba(255,255,255,0.22)' }]}>
+          <Text style={[styles.switchCountText, { color: on ? BRAND : '#FFF' }]}>{count}</Text>
+        </View>
+      ) : null}
     </TouchableOpacity>
   );
 }
 
-/** One-line tab description with an optional link on the right. */
-function TabIntro({ p, text, action }: { p: Palette; text: string; action?: { label: string; onPress: () => void } }) {
+function RailHead({ p, title, sub, action }: { p: Palette; title: string; sub: string; action?: { label: string; onPress: () => void } }) {
   return (
-    <View style={styles.intro}>
-      <Text style={[styles.introText, { color: p.sub }]} numberOfLines={2}>{text}</Text>
+    <View style={styles.railHead}>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.railTitle, { color: p.text }]} accessibilityRole="header">{title}</Text>
+        <Text style={[styles.railSub, { color: p.sub }]} numberOfLines={1}>{sub}</Text>
+      </View>
       {action ? (
-        <TouchableOpacity onPress={action.onPress} style={[styles.introBtn, { backgroundColor: `${BRAND}14` }]} accessibilityRole="button" hitSlop={6}>
-          <Text style={[styles.introBtnText, { color: BRAND }]}>{action.label}</Text>
-          <ArrowIcon variant="chevron" direction="right" size={10} color={BRAND} />
+        <TouchableOpacity onPress={action.onPress} style={styles.railAction} accessibilityRole="button" hitSlop={8}>
+          <Text style={[styles.railActionText, { color: BRAND }]}>{action.label}</Text>
+          <ArrowIcon variant="chevron" direction="right" size={11} color={BRAND} />
         </TouchableOpacity>
       ) : null}
     </View>
   );
 }
 
-/** Wide banner for the featured in-stock product. */
-function HotDropCard({ p, item, width, canAfford, onPress }: { p: Palette; item: Product; width: number; canAfford: boolean; onPress: () => void }) {
-  const imgW = Math.round(width * 0.42);
+/** Text tabs with a gradient underline on the selected one. */
+function UnderlineTabs({ p, items, capitalize }: { p: Palette; items: { key: string; label: string; on: boolean; onPress: () => void }[]; capitalize?: boolean }) {
   return (
-    <ScaleTouchable onPress={onPress} style={[styles.dropBorder, { width }]} accessibilityRole="button" accessibilityLabel={`Hot drop: ${item.title}, ${item.priceCoins} DP coin`}>
-      <LinearGradient colors={[GOLD, '#FF4D67', '#8B5CF6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.dropGrad}>
-        <LinearGradient colors={['#1A1033', '#2D1B4E', '#14102A']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.drop}>
-          <View style={[styles.dropImg, { width: imgW, height: imgW }]}>
-            {item.images[0] ? (
-              <AppImage source={{ uri: item.images[0] }} displayWidth={imgW} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
-            ) : (
-              <LinearGradient colors={BRAND_GRAD} style={[StyleSheet.absoluteFill, styles.center]}>
-                <Ionicons name="gift" size={36} color="rgba(255,255,255,0.9)" />
-              </LinearGradient>
-            )}
-          </View>
-          <View style={{ flex: 1, gap: 6 }}>
-            <View style={[styles.pill, { backgroundColor: 'rgba(240,65,62,0.92)', alignSelf: 'flex-start' }]}>
-              <Ionicons name="flame" size={10} color="#FFF" />
-              <Text style={styles.pillText}>HOT DROP</Text>
-            </View>
-            <Text style={styles.dropTitle} numberOfLines={2}>{item.title}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <CoinIcon size={16} color={GOLD} />
-              <Text style={styles.dropPrice}>{item.priceCoins.toLocaleString()}</Text>
-            </View>
-            <LinearGradient colors={canAfford ? VOTE_GRAD : ['#5B5F6B', '#4A4E58']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.dropCta}>
-              <Ionicons name={canAfford ? 'flash' : 'lock-closed'} size={13} color="#FFF" />
-              <Text style={styles.dropCtaText}>{canAfford ? 'Abhi lo' : 'Dekho'}</Text>
-            </LinearGradient>
-          </View>
-        </LinearGradient>
-      </LinearGradient>
-    </ScaleTouchable>
-  );
-}
-
-/** Two-column product tile: photo with price pill, title, delivery note. */
-function ProductCard({ p, item, width, canAfford, onPress }: { p: Palette; item: Product; width: number; canAfford: boolean; onPress: () => void }) {
-  const inStock = item.variants.some((v) => v.inStock);
-  return (
-    <ScaleTouchable
-      style={[styles.card, { width, backgroundColor: p.card, borderColor: item.featured ? `${GOLD}AA` : p.border }]}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${item.title}, ${item.priceCoins} DP coin${inStock ? '' : ', out of stock'}`}
-    >
-      <View style={[styles.img, { width }]}>
-        {item.images[0] ? (
-          <AppImage source={{ uri: item.images[0] }} displayWidth={width} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
-        ) : (
-          <LinearGradient colors={BRAND_GRAD} style={[StyleSheet.absoluteFill, styles.center]}>
-            <Ionicons name="gift" size={30} color="rgba(255,255,255,0.9)" />
-          </LinearGradient>
-        )}
-        <LinearGradient colors={['rgba(0,0,0,0.3)', 'transparent', 'rgba(0,0,0,0.7)']} style={StyleSheet.absoluteFill} pointerEvents="none" />
-        {item.featured ? (
-          <View style={[styles.pill, styles.pillTL, { backgroundColor: 'rgba(240,65,62,0.92)' }]}>
-            <Ionicons name="flame" size={10} color="#FFF" />
-            <Text style={styles.pillText}>HOT</Text>
-          </View>
-        ) : null}
-        <View style={styles.pricePill}>
-          <CoinIcon size={13} color={GOLD} />
-          <Text style={styles.pricePillText}>{item.priceCoins.toLocaleString()}</Text>
-        </View>
-        {!inStock ? (
-          <View style={[StyleSheet.absoluteFill, styles.soldOut]}>
-            <Text style={styles.soldOutText}>SOLD OUT</Text>
-          </View>
-        ) : null}
-      </View>
-      <View style={{ paddingHorizontal: 10, paddingTop: 9, paddingBottom: 10, gap: 6 }}>
-        <Text style={[styles.name, { color: p.text }]} numberOfLines={2}>{item.title}</Text>
-        <View style={styles.productMeta}>
-          <Ionicons name="car" size={12} color={p.sub} />
-          <Text style={[styles.metaText, { color: p.sub }]}>Delivery included</Text>
-          <View style={{ flex: 1 }} />
-          {inStock && !canAfford ? <Ionicons name="lock-closed" size={12} color={p.sub} /> : null}
-        </View>
-      </View>
-    </ScaleTouchable>
-  );
-}
-
-function Chip({ p, on, icon, label, count, capitalize, onPress }: { p: Palette; on: boolean; icon?: string; label: string; count?: number; capitalize?: boolean; onPress: () => void }) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected: on }}
-      activeOpacity={0.85}
-      style={[styles.chip, { backgroundColor: on ? p.text : 'transparent', borderColor: on ? p.text : p.border }]}
-    >
-      {icon ? <Ionicons name={icon} size={13} color={on ? p.bg : p.sub} /> : null}
-      <Text style={[styles.chipText, { color: on ? p.bg : p.text }, capitalize && { textTransform: 'capitalize' }]}>{label}</Text>
-      {count !== undefined ? <Text style={[styles.chipCount, { color: on ? p.bg : p.sub }]}>{count}</Text> : null}
-    </TouchableOpacity>
+    <View style={[styles.utabsWrap, { borderColor: p.border }]}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.utabs}>
+        {items.map((t) => (
+          <TouchableOpacity key={t.key} onPress={t.onPress} style={styles.utab} accessibilityRole="tab" accessibilityState={{ selected: t.on }}>
+            <Text style={[styles.utabText, { color: t.on ? p.text : p.sub, fontFamily: t.on ? 'Urbanist-Black' : 'Urbanist-SemiBold' }, capitalize && { textTransform: 'capitalize' }]}>
+              {t.label}
+            </Text>
+            {t.on ? <LinearGradient colors={BRAND_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.utabLine} /> : <View style={styles.utabLineOff} />}
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -417,7 +297,7 @@ function ComingSoon({ p, icon, text }: { p: Palette; icon: string; text: string 
   return (
     <View style={[styles.soon, { backgroundColor: p.card, borderColor: p.border }]}>
       <LinearGradient colors={BRAND_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.soonIcon}>
-        <Ionicons name={icon} size={20} color="#FFF" />
+        <Ionicons name={icon} size={24} color="#FFF" />
       </LinearGradient>
       <Text style={[styles.soonText, { color: p.sub }]}>{text}</Text>
     </View>
@@ -426,69 +306,45 @@ function ComingSoon({ p, icon, text }: { p: Palette; icon: string; text: string 
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  center: { alignItems: 'center', justifyContent: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', height: 56, paddingHorizontal: 16, gap: 8 },
-  title: { fontSize: 24, fontFamily: 'Urbanist-Black', fontStyle: 'italic' },
-  balance: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 34, borderRadius: 17, borderWidth: 1, paddingLeft: 9, paddingRight: 4 },
-  balanceText: { fontFamily: 'Urbanist-Black', fontSize: 14 },
-  balancePlus: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  iconBtn: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  dot: { position: 'absolute', top: -4, right: -4, borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2 },
-  dotText: { color: '#fff', fontSize: 10, fontFamily: 'Urbanist-Black' },
 
-  switchWrap: { paddingTop: 6, paddingBottom: 10, alignItems: 'center' },
-  switch: { flexDirection: 'row', gap: 6, padding: 5, borderRadius: 22, borderWidth: 1 },
-  mode: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 9, borderRadius: 17 },
-  modeOn: { shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 4 },
-  modeIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  modeLabel: { fontFamily: 'Urbanist-Black', fontSize: 15, flexShrink: 1 },
-  modeCount: { minWidth: 20, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
-  modeCountText: { fontFamily: 'Urbanist-Black', fontSize: 10 },
-  modeSub: { fontFamily: 'Urbanist-SemiBold', fontSize: 10.5, marginTop: 1 },
+  hero: { marginHorizontal: 12, marginTop: 6, borderRadius: 30, padding: 14, paddingBottom: 14, overflow: 'hidden' },
+  heroBlobA: { position: 'absolute', width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.10)', top: -110, right: -60 },
+  heroBlobB: { position: 'absolute', width: 140, height: 140, borderRadius: 70, backgroundColor: 'rgba(255,255,255,0.07)', bottom: -50, left: -40 },
+  heroBlobC: { position: 'absolute', width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)', top: 70, right: 110 },
+  nav: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  glassBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  navTitle: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 20, marginLeft: 4 },
+  cartDot: { position: 'absolute', top: -3, right: -3, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  cartDotText: { color: BRAND, fontFamily: 'Urbanist-Black', fontSize: 10 },
+  balanceRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 18, paddingHorizontal: 4 },
+  balanceLabel: { color: 'rgba(255,255,255,0.85)', fontFamily: 'Urbanist-SemiBold', fontSize: 13 },
+  balanceValueRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
+  balanceValue: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 36, lineHeight: 42 },
+  earnBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFF', borderRadius: 100, paddingHorizontal: 14, height: 36, marginBottom: 4 },
+  earnText: { color: BRAND, fontFamily: 'Urbanist-Black', fontSize: 13 },
+  switch: { flexDirection: 'row', gap: 4, marginTop: 16, padding: 4, borderRadius: 100, backgroundColor: 'rgba(0,0,0,0.18)' },
+  switchBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 42, borderRadius: 100 },
+  switchBtnOn: { backgroundColor: '#FFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 3 },
+  switchText: { fontFamily: 'Urbanist-Black', fontSize: 14.5 },
+  switchCount: { minWidth: 20, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
+  switchCountText: { fontFamily: 'Urbanist-Black', fontSize: 10 },
 
-  intro: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: PAD, marginTop: 4, marginBottom: 14 },
-  introText: { flex: 1, fontFamily: 'Urbanist-Medium', fontSize: 12 },
-  introBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 100 },
-  introBtnText: { fontFamily: 'Urbanist-Bold', fontSize: 12 },
+  railHead: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: PAD, marginTop: 24, marginBottom: 12, gap: 10 },
+  railTitle: { fontFamily: 'Urbanist-Black', fontSize: 20 },
+  railSub: { fontFamily: 'Urbanist-Medium', fontSize: 12, marginTop: 1 },
+  railAction: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingBottom: 2 },
+  railActionText: { fontFamily: 'Urbanist-Bold', fontSize: 13 },
+  rail: { gap: 12, paddingHorizontal: PAD },
 
-  chips: { gap: 8, paddingHorizontal: PAD, paddingBottom: 14 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 13, height: 34, borderRadius: 17, borderWidth: 1 },
-  chipText: { fontFamily: 'Urbanist-Bold', fontSize: 13 },
-  chipCount: { fontFamily: 'Urbanist-Black', fontSize: 11, opacity: 0.8 },
+  utabsWrap: { borderBottomWidth: 1, marginHorizontal: PAD, marginBottom: 14 },
+  utabs: { gap: 20 },
+  utab: { paddingTop: 4, alignItems: 'center' },
+  utabText: { fontSize: 14, paddingBottom: 8 },
+  utabLine: { height: 3, borderRadius: 2, alignSelf: 'stretch', marginBottom: -1 },
+  utabLineOff: { height: 3, marginBottom: -1 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: PAD },
 
-  dropBorder: { borderRadius: 24 },
-  dropGrad: { borderRadius: 24, padding: 1.5 },
-  drop: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 22.5, padding: 12 },
-  dropImg: { borderRadius: 18, overflow: 'hidden' },
-  dropTitle: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 17 },
-  dropPrice: { color: GOLD, fontFamily: 'Urbanist-Black', fontSize: 18 },
-  dropCta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, height: 36, borderRadius: 12, marginTop: 2 },
-  dropCtaText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 13 },
-
-  card: {
-    borderRadius: 20,
-    borderWidth: 1.5,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 2,
-  },
-  img: { aspectRatio: 1, overflow: 'hidden' },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 100 },
-  pillTL: { position: 'absolute', top: 8, left: 8 },
-  pillText: { color: '#FFF', fontSize: 10, fontFamily: 'Urbanist-Black', letterSpacing: 0.5 },
-  pricePill: { position: 'absolute', left: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.6)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100 },
-  pricePillText: { color: GOLD, fontFamily: 'Urbanist-Black', fontSize: 13 },
-  soldOut: { backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
-  soldOutText: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 14, letterSpacing: 1.5, borderWidth: 2, borderColor: '#FFF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, transform: [{ rotate: '-8deg' }] },
-  name: { fontFamily: 'Urbanist-Bold', fontSize: 14 },
-  productMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  metaText: { fontFamily: 'Urbanist-SemiBold', fontSize: 11 },
-
-  soon: { marginHorizontal: PAD, borderRadius: 18, borderWidth: 1, borderStyle: 'dashed', padding: 18, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  soonIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  soonText: { flex: 1, fontFamily: 'Urbanist-SemiBold', fontSize: 13.5 },
+  soon: { marginHorizontal: PAD, marginTop: 24, borderRadius: 24, borderWidth: 1, borderStyle: 'dashed', paddingVertical: 28, paddingHorizontal: 20, alignItems: 'center', gap: 12 },
+  soonIcon: { width: 56, height: 56, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  soonText: { fontFamily: 'Urbanist-SemiBold', fontSize: 14, textAlign: 'center' },
 });
