@@ -46,7 +46,7 @@ export interface ShopOrder {
 }
 
 /** Shop refusals the app explains (worker lib/shopRisk.ts). */
-export const SHOP_LIMIT_REASONS = ['phone_not_verified', 'account_too_new', 'order_limit', 'coin_limit', 'address_limit'] as const;
+export const SHOP_LIMIT_REASONS = ['phone_not_verified', 'account_too_new', 'order_limit', 'coin_limit', 'address_limit', 'shop_budget_exhausted'] as const;
 
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   placed: 'Order placed',

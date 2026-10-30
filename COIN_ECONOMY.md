@@ -17,15 +17,28 @@ Settings, Referrals, Deposits, Rewards) link there, so each setting has one edit
 - Admin wallet: choose DP coin or Diamond. Subtracting Diamonds takes only Diamonds.
 - Icon: `apps/expo/src/components/ui/DiamondIcon.tsx`, `apps/admin-panel/src/components/ui/DiamondIcon.tsx`, `diamond.svg` (expo `assets/svgs`, admin `public`).
 
-## Closed loop (current model)
+## Three coins (current model)
 
-Real-money deposits and withdrawals are retired (`lib/cashRetirement.ts`). Diamonds are earned for free and pay
-contest entries; DP coin is won and spent on gifts, digital items and the physical shop, **DP coin only**
-(`gift_send`, `store_purchase`, `shop_order`; refunds `store_refund`, `shop_refund`). XP can be turned into Diamonds
-(`xp_conversion`). The one-off fresh start of 2026-10-30 wrote one `economy_reset` row per user. Every one of these is a ledger row in the same
-batch as the balance change, so the invariants below still hold. ₹ per coin: Coin Economy → Coin value
-(`coinPricing.dpCoinInr`, `coinPricing.diamondInr`). The tables below describe the earlier model where noted.
-Details: `MONETIZATION.md`.
+```
+⚡ XP ──convert──▶ 💎 Diamond ──contest entry──▶ win ──▶ 🪙 DP coin ──▶ Shopping
+```
+
+| Coin | Comes from | Used for | Admin (Coin Economy tab) |
+|---|---|---|---|
+| ⚡ XP | Playing (votes, contests, wins, daily activity) | Levels, and **converting to Diamonds** (`xp - xp_converted`; XP never goes down) | ⚡ XP: rate (XP per Diamond), daily cap |
+| 💎 Diamond (`users.locked_coins`) | Free only: check-in, tasks, referral, verification, verified ads, level/season, Hall of Fame, XP conversion. Never bought (deposits retired) | **Contest entry fees only** | 💎 Diamond: every earning setting, contest P&L |
+| 🪙 DP coin (`dpcoin - locked_coins`) | Only by winning contests | **All shopping**: digital items, gifts, physical products. Never withdrawn (withdrawals retired) | 🪙 DP coin: won vs spent, shop/digital/gift switches, **monthly shop budget (₹)**, fraud rules |
+
+- Free rewards are always Diamonds; the server refuses `rewardLocking: false`. There is no Diamond → DP coin conversion.
+- ₹ per coin: Coin Economy → Coin value (`coinPricing.dpCoinInr` prices products; `diamondInr` is for reports).
+- **Spend limit:** `monetization.shop.monthlyBudgetInr` caps the ₹ value of physical shop orders per calendar month
+  (UTC), checked again inside the checkout transaction. Cancelled/returned orders free their share. 0 = no limit.
+  Digital items and gifts are not counted (they cost nothing to deliver).
+- Report: `GET /admin/monetization/coins` (XP / Diamond / DP coin supply, earned, spent, shop budget meter).
+- Ledger types: `xp_conversion` (Diamond in), `contest_entry_fee` (Diamond out), `contest_win_reward` (DP coin in),
+  `gift_send`, `store_purchase`, `shop_order` (DP coin out), `store_refund`, `shop_refund`, and the one-off
+  `economy_reset` of 2026-10-30. Every one is written in the same batch as the balance change, so the invariants below hold.
+- The tables further down describe the earlier model (purchases, withdrawals) and are kept for the history they explain.
 
 ## Concepts
 

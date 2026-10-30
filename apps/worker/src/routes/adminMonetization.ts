@@ -26,7 +26,7 @@ import {
   type CampaignStatus,
 } from "../lib/sponsored";
 import { purgeShared } from "../lib/edgeCache";
-import { ADMIN_TRANSITIONS, ORDER_STATUSES, loadOrder, transitionOrder, unitCoins, validateProductInput, type OrderStatus } from "../lib/shop";
+import { ADMIN_TRANSITIONS, ORDER_STATUSES, loadOrder, monthStart, shopMonthSpendPaise, transitionOrder, unitCoins, validateProductInput, type OrderStatus } from "../lib/shop";
 import { coinValuesFromConfig } from "../lib/coinPricing";
 import { RISK_FLAG_LABELS } from "../lib/shopRisk";
 import { createNotification } from "../lib/notify";
@@ -534,6 +534,80 @@ export function registerMonetizationRoutes(
       if (row) row.orders = Number(r.n);
     }
     return c.json([...byDay.values()]);
+  });
+
+  /**
+   * The three coins in one report (Coin Economy → Overview / XP / Diamond / DP coin):
+   *   ⚡ XP       earned by playing; converts to Diamonds (never lowered)
+   *   💎 Diamond  earned free (rewards + XP); pays contest entry fees only
+   *   🪙 DP coin  won in contests; spent on gifts, digital items, physical shop
+   * Superadmin ("house") accounts are excluded from supply, as in Coin Economy.
+   */
+  adminRoute.get("/monetization/coins", async (c) => {
+    const days = Math.min(Math.max(Number(c.req.query("days")) || 30, 1), 365);
+    const since = Date.now() - days * DAY_MS;
+    const db = c.env.DB;
+    const notHouse = `COALESCE(role, '') <> 'superadmin'`;
+    const [supply, xpConv, byType, shopMonth] = await Promise.all([
+      db.prepare(
+        `SELECT COALESCE(SUM(xp), 0) AS xp, COALESCE(SUM(COALESCE(xp_converted, 0)), 0) AS xp_converted,
+                COALESCE(SUM(locked_coins), 0) AS diamonds, COALESCE(SUM(dpcoin - locked_coins), 0) AS dp,
+                COUNT(*) AS users, SUM(CASE WHEN locked_coins > 0 THEN 1 ELSE 0 END) AS diamond_holders,
+                SUM(CASE WHEN dpcoin - locked_coins > 0 THEN 1 ELSE 0 END) AS dp_holders
+           FROM users WHERE ${notHouse}`,
+      ).first<any>(),
+      db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(xp_spent), 0) AS xp, COALESCE(SUM(diamonds), 0) AS d, COUNT(DISTINCT uid) AS users FROM xp_conversions WHERE created_at >= ?`).bind(since).first<any>(),
+      db.prepare(
+        `SELECT type, COUNT(*) AS n, COALESCE(SUM(locked_delta), 0) AS diamonds, COALESCE(SUM(amount - locked_delta), 0) AS dp
+           FROM coin_transactions WHERE created_at >= ? AND uid NOT IN (SELECT uid FROM users WHERE role = 'superadmin')
+          GROUP BY type`,
+      ).bind(since).all<any>(),
+      shopMonthSpendPaise(c.env),
+    ]);
+    const t = new Map((byType.results ?? []).map((r) => [r.type, { n: Number(r.n), diamonds: Number(r.diamonds), dp: Number(r.dp) }]));
+    const get = (k: string) => t.get(k) ?? { n: 0, diamonds: 0, dp: 0 };
+    const EARN = ["daily_reward", "daily_task", "referral_bonus", "verification_bonus", "signup_bonus", "ad_reward", "gamification_reward", "monthly_hall_of_fame_reward", "xp_conversion", "admin_adjustment"];
+    const SPEND = ["gift_send", "store_purchase", "shop_order"];
+    const REFUND = ["store_refund", "shop_refund"];
+    const cfg = parseMonetizationConfig(await getAppConfig(c.env));
+    const values = coinValuesFromConfig(await getAppConfig(c.env));
+    const diamondEarned = EARN.map((k) => ({ type: k, count: get(k).n, diamonds: Math.max(0, get(k).diamonds) })).filter((r) => r.count > 0);
+    const dpSpent = SPEND.map((k) => ({ type: k, count: get(k).n, dpCoin: -get(k).dp })).filter((r) => r.count > 0);
+    const dpRefunded = REFUND.reduce((sum, k) => sum + get(k).dp, 0);
+    return c.json({
+      days,
+      values,
+      xp: {
+        total: Number(supply?.xp ?? 0),
+        converted: Number(supply?.xp_converted ?? 0),
+        convertible: Math.max(0, Number(supply?.xp ?? 0) - Number(supply?.xp_converted ?? 0)),
+        conversion: cfg.earning.xpConversion,
+        period: { conversions: Number(xpConv?.n ?? 0), xpSpent: Number(xpConv?.xp ?? 0), diamonds: Number(xpConv?.d ?? 0), users: Number(xpConv?.users ?? 0) },
+      },
+      diamond: {
+        supply: Number(supply?.diamonds ?? 0),
+        holders: Number(supply?.diamond_holders ?? 0),
+        valueInr: Math.round(Number(supply?.diamonds ?? 0) * values.diamondInr * 100) / 100,
+        earned: diamondEarned,
+        earnedTotal: diamondEarned.reduce((s2, r) => s2 + r.diamonds, 0),
+        contestEntries: { count: get("contest_entry_fee").n, diamonds: -get("contest_entry_fee").diamonds },
+        contestRefunds: get("contest_refund").diamonds + get("contest_entry_refund").diamonds,
+      },
+      dpCoin: {
+        supply: Number(supply?.dp ?? 0),
+        holders: Number(supply?.dp_holders ?? 0),
+        valueInr: Math.round(Number(supply?.dp ?? 0) * values.dpCoinInr * 100) / 100,
+        won: { count: get("contest_win_reward").n, dpCoin: get("contest_win_reward").dp },
+        spent: dpSpent,
+        spentTotal: dpSpent.reduce((s2, r) => s2 + r.dpCoin, 0),
+        refunded: dpRefunded,
+      },
+      shopBudget: {
+        monthlyBudgetInr: cfg.shop.monthlyBudgetInr,
+        spentThisMonthInr: shopMonth / 100,
+        monthStart: monthStart(),
+      },
+    });
   });
 
   /** One user's shopping, gifts, digital items and XP conversions (Users → Shopping tab). */

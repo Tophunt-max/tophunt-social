@@ -47,7 +47,12 @@ export interface MonetizationConfig {
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number; creatorShareBps: number };
   store: { enabled: boolean };
   /** Physical shop (lib/shop.ts) and its fraud rules (lib/shopRisk.ts). */
-  shop: { enabled: boolean; fraud: ShopFraudConfig };
+  /**
+   * `monthlyBudgetInr`: the platform's spend limit. Physical products are the
+   * only thing DP coin buys that costs real money, so the ₹ value of shop orders
+   * per calendar month (UTC) is capped here. 0 = no limit.
+   */
+  shop: { enabled: boolean; monthlyBudgetInr: number; fraud: ShopFraudConfig };
   /** Ways to earn Diamonds that live here (others: Coin Economy → Earn). */
   earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
 }
@@ -90,6 +95,7 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
   store: { enabled: false },
   shop: {
     enabled: false,
+    monthlyBudgetInr: 0,
     fraud: {
       requireVerifiedPhone: true,
       minAccountAgeDays: 3,
@@ -123,6 +129,7 @@ const BOUNDS = {
   maxCoinsPer30Days: [1, 100_000_000],
   maxAccountsPerAddress: [1, 20],
   reviewAboveCoins: [0, 100_000_000],
+  monthlyBudgetInr: [0, 100_000_000],
 } as const;
 
 const AD_UNIT_RE = /^ca-app-pub-\d{16}\/\d{10}$/;
@@ -205,6 +212,7 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
     store: { enabled: bool(m.store?.enabled, false) },
     shop: {
       enabled: bool(m.shop?.enabled, false),
+      monthlyBudgetInr: int(m.shop?.monthlyBudgetInr, 0, BOUNDS.monthlyBudgetInr),
       fraud: (() => {
         const f = m.shop?.fraud || {};
         const fd = d.shop.fraud;
@@ -386,8 +394,9 @@ export function validateMonetizationPatch(patch: any): void {
 
   const sh = patch.shop;
   if (obj(sh, "shop")) {
-    only(sh, ["enabled", "fraud"], "shop");
+    only(sh, ["enabled", "monthlyBudgetInr", "fraud"], "shop");
     isBool(sh.enabled, "shop.enabled");
+    isInt(sh.monthlyBudgetInr, "shop.monthlyBudgetInr", BOUNDS.monthlyBudgetInr);
     if (obj(sh.fraud, "shop.fraud")) {
       const f = sh.fraud;
       only(f, ["requireVerifiedPhone", "minAccountAgeDays", "maxOrdersPer30Days", "maxCoinsPer30Days", "maxAccountsPerAddress", "reviewFirstOrder", "reviewAboveCoins"], "shop.fraud");

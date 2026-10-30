@@ -34,20 +34,21 @@ import { CoinAlertsCard, FreeRewardsBudgetCard } from "@/components/coin/AlertCa
 import { AdsRewardCard, DailyLoginCard, DailyTasksCard, HallOfFameCard, RewardStatsCard, VerificationRewardCard } from "@/components/coin/EarnCards";
 import { ProgramSettings } from "@/pages/Referrals";
 import Transactions from "@/pages/Transactions";
-import { CoinValuesCard, ShoppingSummaryCard, XpConversionCard } from "@/components/coin/ClosedLoopCards";
+import { CoinValuesCard, ShoppingSummaryCard } from "@/components/coin/ClosedLoopCards";
+import { CoinsLoop, DiamondTab, DpCoinTab, XpTab } from "@/components/coin/ThreeCoins";
 import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
 
 /**
  * Coin Economy — the one place for everything coins: where every coin came from,
  * where it went, and every setting that creates, sells or pays out coins.
  *
- *   Overview   supply (DP coin vs Diamond), ₹ shop value, flows by source, the
- *              platform's own side, reconciliation checks, pending queues
- *   Earn       every free-coin source (verification, referral, daily login,
- *              daily tasks, rewarded ads, Hall of Fame) + the play-only switch
+ *   Overview   the three coins at a glance, supply, flows, reconciliation, queues
+ *   ⚡ XP       XP earned / converted, XP → Diamond rate and daily cap
+ *   💎 Diamond  every earning source and its settings (all pay Diamonds), and
+ *              contests: Diamond entry fees → DP coin prizes (per-contest P&L)
+ *   🪙 DP coin  won vs spent, where it can be spent (shop, digital items, gifts),
+ *              the monthly shop budget (the spend limit) and shop fraud rules
  *   Coin value ₹ per DP coin / Diamond (prices shop products)
- *   Contests   per-contest P&L: entry fees, prizes, refunds, subsidy, fees kept
- *   Shopping   DP coin held, shop orders, earning vs shopping trend
  *   Budgets    one promo budget per offer, approval password
  *   Ledger     every coin transaction, and one user's full statement
  *   Health     money-integrity checks
@@ -57,18 +58,19 @@ import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
  *
  * Worker: lib/coinEconomy.ts, lib/promoBudget.ts, lib/approvalPassword.ts.
  */
-// Closed loop: Earning (free) → Diamond → contests → DP coin → Shopping.
-// "Buy" and "Cash out" were the real-money tabs; they are retired.
+// Three coins: ⚡ XP → (convert) → 💎 Diamond → (contest entry, win) → 🪙 DP coin → Shopping.
 const TABS = [
   { key: "overview", label: "Overview" },
-  { key: "earn", label: "Earning" },
+  { key: "xp", label: "⚡ XP" },
+  { key: "diamond", label: "💎 Diamond" },
+  { key: "dpcoin", label: "🪙 DP coin" },
   { key: "values", label: "Coin value (₹)" },
-  { key: "contests", label: "Contests" },
-  { key: "shopping", label: "Shopping" },
   { key: "budgets", label: "Budgets" },
   { key: "ledger", label: "Ledger" },
   { key: "health", label: "Health" },
 ];
+/** Old tab links keep working. */
+const TAB_ALIASES: Record<string, string> = { earn: "diamond", contests: "diamond", shopping: "dpcoin" };
 
 const KIND_LABEL: Record<PromoBudgetKind, string> = {
   package_bonus: "Package bonus",
@@ -102,28 +104,34 @@ const field =
 
 export default function CoinEconomy() {
   const [tab, setTab] = useState(() => {
-    const t = new URLSearchParams(window.location.search).get("tab");
-    return TABS.some((x) => x.key === t) ? (t as string) : "overview";
+    const raw = new URLSearchParams(window.location.search).get("tab") ?? "";
+    const t = TAB_ALIASES[raw] ?? raw;
+    return TABS.some((x) => x.key === t) ? t : "overview";
   });
   return (
     <div>
       <PageHeader
         title="Coin Economy"
-        subtitle="Earning se 💎 Diamond → contest → 🪙 DP coin → Shopping. Asli ₹ na aata hai na jaata hai; ₹ sirf coin ki value hai."
+        subtitle="⚡ XP → 💎 Diamond (contest entry) → jeet → 🪙 DP coin (saari Shopping: digital items, gifts, physical products). Asli ₹ na aata hai na jaata hai; ₹ sirf coin ki value hai."
       />
       <div className="overflow-x-auto">
         <SegTabs tab={tab} setTab={setTab} tabs={TABS} />
       </div>
       {tab === "overview" && (
         <div className="space-y-6">
+          <CoinsLoop />
           <PendingQueues />
           <Overview />
         </div>
       )}
-      {tab === "earn" && <EarnTab />}
+      {tab === "xp" && <XpTab />}
+      {tab === "diamond" && (
+        <DiamondTab contests={<ContestsPnl />}>
+          <EarnTab />
+        </DiamondTab>
+      )}
+      {tab === "dpcoin" && <DpCoinTab />}
       {tab === "values" && <ValuesTab />}
-      {tab === "contests" && <ContestsPnl />}
-      {tab === "shopping" && <ShoppingTab />}
       {tab === "budgets" && <Budgets />}
       {tab === "ledger" && (
         <div className="space-y-8">
@@ -223,7 +231,6 @@ function EarnTab() {
         <DailyLoginCard rewards={rewards.data} />
         <DailyTasksCard rewards={rewards.data} />
         <RewardStatsCard />
-        <XpConversionCard />
         <AdsRewardCard data={data} />
         <HallOfFameCard rewards={rewards.data} />
       </div>
@@ -246,17 +253,6 @@ function ValuesTab() {
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
       <CoinValuesCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
       <ShoppingSummaryCard />
-    </div>
-  );
-}
-
-// ─── Shopping (replaces Cash out) ────────────────────────────────────────────
-
-function ShoppingTab() {
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-      <ShoppingSummaryCard />
-      <ClosedLoopTrend days={30} title="Earning vs Shopping (30 din)" />
     </div>
   );
 }

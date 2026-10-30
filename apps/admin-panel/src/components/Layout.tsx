@@ -81,7 +81,7 @@ const nav = [
   { href: "/prize-claims", label: "Prize Claims", icon: Package, section: "contests", badgeKey: "pendingPrizeClaims" },
   { href: "/leaderboard", label: "Leaderboard", icon: Crown, section: "contests" },
   // Closed loop: Earning (Diamond) → contests → DP coin → Shopping.
-  { href: "/coin-economy?tab=earn", label: "Earning", icon: Sparkles, section: "finance" },
+  { href: "/coin-economy?tab=diamond", label: "Earning (💎 Diamond)", icon: Sparkles, section: "finance" },
   { href: "/shopping", label: "Shopping", icon: ShoppingBag, section: "finance", badgeKey: "pendingShopOrders" },
   // Coin hub: coin values, earning, ledger, budgets and reports in one place.
   { href: "/coin-economy", label: "Coin Economy", icon: Scale, section: "finance" },

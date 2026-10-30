@@ -418,6 +418,41 @@ describe('shop fraud protection', () => {
     expect(r.body[2]).toMatchObject({ diamondsEarned: 7, dpCoinSpent: 200, orders: 1 });
   });
 
+  it('monthly shop budget (₹) caps physical orders platform-wide; cancelled orders free it again', async () => {
+    const env = await setup({ ...STRICT, reviewFirstOrder: false, reviewAboveCoins: 0 });
+    await config(env, { monetization: { shop: { enabled: true, monthlyBudgetInr: 300, fraud: { ...STRICT, reviewFirstOrder: false, reviewAboveCoins: 0 } } }, coinPricing: { dpCoinInr: 1 } });
+    await seedUser(env, 'alice', 5000, 0, verified('9876543210'));
+    await seedUser(env, 'bob', 5000, 0, verified('9876500000'));
+    const a = await buy(env, 'alice', 2, 1); // ₹200
+    expect(a.status).toBe(200);
+    const b = await buy(env, 'bob', 2, 2); // would be ₹400 > ₹300
+    expect(b.body.error.reason).toBe('shop_budget_exhausted');
+    expect((await user(env, 'bob'))!.dpcoin).toBe(5000);
+    expect((await buy(env, 'bob', 1, 3)).status).toBe(200); // ₹300 exactly
+    await call(env, 'alice', 'cancelShopOrder', { orderId: a.body.order.id });
+    expect((await buy(env, 'bob', 2, 4)).status).toBe(200); // ₹100 + ₹200 after the cancel
+  });
+
+  it('three-coin report: XP, Diamond, DP coin and the shop budget meter', async () => {
+    const env = await setup({ ...STRICT, reviewFirstOrder: false, reviewAboveCoins: 0 });
+    await config(env, {
+      monetization: { shop: { enabled: true, monthlyBudgetInr: 1000, fraud: { ...STRICT, reviewFirstOrder: false, reviewAboveCoins: 0 } }, earning: { xpConversion: { enabled: true, xpPerDiamond: 100, maxDiamondsPerDay: 5 } } },
+      coinPricing: { dpCoinInr: 1, diamondInr: 0.5 },
+    });
+    await seedUser(env, 'alice', 5000, 0, verified('9876543210', { xp: 1000 }));
+    await call(env, 'alice', 'convertXp', { diamonds: 2, requestId: rid('x1') });
+    await buy(env, 'alice', 3, 1);
+    const r = await admin(env, 'GET', '/monetization/coins?days=7');
+    expect(r.status).toBe(200);
+    expect(r.body.xp).toMatchObject({ total: 1000, converted: 200, convertible: 800 });
+    expect(r.body.xp.period).toMatchObject({ conversions: 1, xpSpent: 200, diamonds: 2 });
+    expect(r.body.diamond).toMatchObject({ supply: 2, valueInr: 1 });
+    expect(r.body.diamond.earned).toContainEqual({ type: 'xp_conversion', count: 1, diamonds: 2 });
+    expect(r.body.dpCoin.supply).toBe(4700);
+    expect(r.body.dpCoin.spent).toContainEqual({ type: 'shop_order', count: 1, dpCoin: 300 });
+    expect(r.body.shopBudget).toMatchObject({ monthlyBudgetInr: 1000, spentThisMonthInr: 300 });
+  });
+
   it('a customer can still cancel an order that is under review', async () => {
     const env = await setup();
     await seedUser(env, 'alice', 5000, 0, verified('9876543210'));

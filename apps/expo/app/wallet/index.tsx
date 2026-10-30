@@ -34,6 +34,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useDesignWindow } from '@/src/lib/layout';
 import { StreakMilestoneBanner } from '@/src/components/gamification/MotionBits';
 import { WalletShortcuts } from '@/src/components/gifts/WalletShortcuts';
+import { XpStrip } from '@/src/components/gifts/XpStrip';
 import { ledgerLabel } from '@/src/lib/ledgerLabels';
 
 
@@ -494,6 +495,7 @@ export default function WalletScreen() {
                     </LinearGradient>
                 </Animated.View>
 
+                <XpStrip isDark={isDark} />
                 <WalletShortcuts isDark={isDark} />
 
                 {/* Daily Bonus Section (hidden while an admin has it switched off) */}

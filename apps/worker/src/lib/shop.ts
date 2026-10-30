@@ -70,6 +70,20 @@ export interface ProductView {
   variants: { id: string; label: string; inStock: boolean; stock: number }[];
 }
 
+/** Start of the current calendar month (UTC), ms. */
+export function monthStart(ts = Date.now()): number {
+  const d = new Date(ts);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+}
+
+/** ₹ value (paise) of this month's live shop orders: the spend limit's meter. */
+export async function shopMonthSpendPaise(env: Env, ts = Date.now()): Promise<number> {
+  const r = await env.DB.prepare(
+    `SELECT COALESCE(SUM(total_inr_paise), 0) AS p FROM shop_orders WHERE created_at >= ? AND status NOT IN ('cancelled', 'returned')`,
+  ).bind(monthStart(ts)).first<{ p: number }>();
+  return Number(r?.p ?? 0);
+}
+
 /** DP coin price for one unit: (₹ price + ₹ delivery) at the current rate. */
 export function unitCoins(priceInrPaise: number, shippingInrPaise: number, dpCoinInr: number): number {
   return Math.max(1, dpCoinsForPaise(priceInrPaise + shippingInrPaise, dpCoinInr));
@@ -234,6 +248,16 @@ export async function placeOrder(
   const fps = await addressFingerprints(address);
   const risk = await assessOrder(env, uid, totalCoins, fps, fraud, ts);
   const limits = limitGate(uid, totalCoins, fps, fraud, ts);
+  // Platform spend limit: ₹ value of this month's shop orders (lib/monetizationConfig.ts).
+  const budgetPaise = parseMonetizationConfig(appCfg).shop.monthlyBudgetInr * 100;
+  const month = monthStart(ts);
+  if (budgetPaise > 0 && (await shopMonthSpendPaise(env, ts)) + totalPaise > budgetPaise) {
+    throw httpsError("resource-exhausted", "Is mahine ka shop budget poora ho gaya. Agle mahine phir try karo.", "shop_budget_exhausted");
+  }
+  const budgetGate = budgetPaise > 0
+    ? `(SELECT COALESCE(SUM(total_inr_paise), 0) FROM shop_orders WHERE created_at >= ? AND status NOT IN ('cancelled', 'returned')) + ? <= ?`
+    : "1 = 1";
+  const budgetArgs = budgetPaise > 0 ? [month, totalPaise, budgetPaise] : [];
 
   const ledgerId = `shop_order:${id}`;
   // Every line still in stock at the same ₹ price; order not yet written.
@@ -245,10 +269,10 @@ export async function placeOrder(
   const lineArgs = priced.flatMap((l) => [l.variantId, l.qty, Number(l.r.price_inr_paise), Number(l.r.shipping_inr_paise)]);
   // The hard limits are re-checked here, inside the transaction, so two
   // racing orders can't both slip under a cap.
-  const gate = `NOT EXISTS (SELECT 1 FROM shop_orders WHERE id = ?) AND ${lineGate} AND ${limits.sql}`;
+  const gate = `NOT EXISTS (SELECT 1 FROM shop_orders WHERE id = ?) AND ${lineGate} AND ${limits.sql} AND ${budgetGate}`;
   const charged = `EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?) AND NOT EXISTS (SELECT 1 FROM shop_orders WHERE id = ?)`;
   const stmts: D1PreparedStatement[] = [
-    ...spendStatements(env, { uid, coins: totalCoins, ledgerId, type: "shop_order", description: `Shop order (${priced.length} item${priced.length > 1 ? "s" : ""})`, ts, gate, gateArgs: [id, ...lineArgs, ...limits.args] }),
+    ...spendStatements(env, { uid, coins: totalCoins, ledgerId, type: "shop_order", description: `Shop order (${priced.length} item${priced.length > 1 ? "s" : ""})`, ts, gate, gateArgs: [id, ...lineArgs, ...limits.args, ...budgetArgs] }),
     ...priced.map((l) =>
       env.DB.prepare(`UPDATE shop_variants SET stock = stock - ?, updated_at = ? WHERE id = ? AND stock >= ? AND ${charged}`)
         .bind(l.qty, ts, l.variantId, l.qty, ledgerId, id),
@@ -284,6 +308,9 @@ export async function placeOrder(
     }
     // A concurrent order may have used up a limit between the check and the batch.
     await explainRefusal(env, uid, totalCoins, fps, fraud, ts);
+    if (budgetPaise > 0 && (await shopMonthSpendPaise(env, ts)) + totalPaise > budgetPaise) {
+      throw httpsError("resource-exhausted", "Is mahine ka shop budget poora ho gaya. Agle mahine phir try karo.", "shop_budget_exhausted");
+    }
     throw httpsError("failed-precondition", "Stock or price changed while ordering. Please review your cart.", "price_changed");
   }
   return (await loadOrder(env, id, uid))!;
