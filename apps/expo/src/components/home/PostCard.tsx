@@ -810,8 +810,8 @@ export const PostCard = memo(({ item, isDark, onMatchEnded, onNotInterested, liv
           * What this battle actually pays, from the match's own prize snapshot.
           *
           * This used to render `item.entryFee * 1.8`. `entryFee` on a match is the
-          * pot for BOTH players, so that advertised 180% of the money that existed
-          * against a server payout hard-capped at the pot; it had no rounding, so a
+          * pot for BOTH players, so that advertised 180% of the coins that existed
+          * against a server prize hard-capped at the pot; it had no rounding, so a
           * 7-coin pot displayed "12.6" coins; and it showed a coin figure even for
           * battles whose prize is a physical product. Explore showed a different
           * number again for the same battle. `matchPrize` is now the single answer
@@ -832,7 +832,7 @@ export const PostCard = memo(({ item, isDark, onMatchEnded, onNotInterested, liv
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
             style={styles.prizeBadge}
           >
-            {/* Prize in DP coins (withdrawable), the coin symbol used app-wide. */}
+            {/* Prize in DP coins, the coin symbol used app-wide. */}
             <CoinIcon size={12} color="#E6A200" />
             <Text style={styles.prizeText} accessibilityLabel={`Prize ${prize.coins} DP coin`}>{prize.coins}</Text>
           </LinearGradient>

@@ -155,19 +155,18 @@ describe('reachability: the deletion path is never withheld', () => {
     const { env } = makeEnv();
     await seedUser(env, 'alice', { dpcoin: 50 });
     await drizzleOf(env)
-      .insert(schema.withdrawals)
+      .insert(schema.contestMatches)
       .values({
-        id: 'w1',
-        userId: 'alice',
-        amount: 50,
-        status: 'pending',
+        id: 'm1',
+        status: 'active',
+        userA: { uid: 'alice', username: 'alice' },
+        userB: { uid: 'bob', username: 'bob' },
         createdAt: Date.now(),
-        updatedAt: Date.now(),
       } as any);
 
     const eligibility = await checkDeletionEligibility(env as any, 'alice');
     expect(eligibility.deletable).toBe(true);
-    expect(eligibility.deferrals.map((d) => d.code)).toContain('pending_payout');
+    expect(eligibility.deferrals.map((d) => d.code)).toContain('active_contest');
     // Old clients read `blockers`; it must stay populated with the same list.
     expect(eligibility.blockers).toEqual(eligibility.deferrals);
   });
@@ -200,38 +199,12 @@ describe('reachability: the deletion path is never withheld', () => {
 
 describe('eligibility deferrals', () => {
   /**
-   * These two queries compare against literal status strings
-   * ('pending'/'approved', 'waiting_for_opponent'/'active'). Nothing else in the
+   * The contest query compares against literal status strings
+   * ('waiting_for_opponent'/'active'). Nothing else in the
    * codebase forces those literals to stay in sync, so a rename elsewhere would
    * silently stop the deferral firing — and a user could then delete their way out
    * of a live match, abandoning an opponent who paid to enter it.
    */
-  it('defers on a pending payout', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice');
-    await drizzleOf(env)
-      .insert(schema.withdrawals)
-      .values({ id: 'w1', userId: 'alice', amount: 10, status: 'pending', createdAt: Date.now(), updatedAt: Date.now() } as any);
-
-    const e = await checkDeletionEligibility(env as any, 'alice');
-    expect(e.deferrals.map((d) => d.code)).toEqual(['pending_payout']);
-  });
-
-  it('ignores a payout that has reached a terminal state', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice');
-    const db = drizzleOf(env);
-    await db
-      .insert(schema.withdrawals)
-      .values({ id: 'w1', userId: 'alice', amount: 10, status: 'paid', createdAt: Date.now(), updatedAt: Date.now() } as any);
-    await db
-      .insert(schema.withdrawals)
-      .values({ id: 'w2', userId: 'alice', amount: 10, status: 'rejected', createdAt: Date.now(), updatedAt: Date.now() } as any);
-
-    const e = await checkDeletionEligibility(env as any, 'alice');
-    expect(e.deferrals).toEqual([]);
-  });
-
   /**
    * Participants live in the userA/userB JSON snapshots, so this is a
    * `json_extract` match. If the column names or the '$.uid' path ever drift, the
@@ -268,6 +241,14 @@ describe('eligibility deferrals', () => {
 
     const e = await checkDeletionEligibility(env as any, 'alice');
     expect(e.deferrals).toEqual([]);
+  });
+
+  it('has no payout deferral any more (there are no withdrawals)', async () => {
+    const { env } = makeEnv();
+    await seedUser(env, 'alice', { dpcoin: 10 });
+    const e = await checkDeletionEligibility(env as any, 'alice');
+    expect(e.deferrals).toEqual([]);
+    expect(e.deferrals.map((d) => d.code)).not.toContain('pending_payout');
   });
 
   it('treats a positive balance as a warning, not a deferral', async () => {
@@ -1058,10 +1039,6 @@ describe('deletion completeness across the whole schema', () => {
     // Financial records: retained for the period Indian tax and accounting law
     // requires, keyed by a uid that no longer resolves to a person.
     coin_transactions: 'financial record',
-    payments: 'financial record',
-    payment_orders: 'financial record',
-    deposits: 'financial record',
-    withdrawals: 'financial record',
     promo_reservations: 'financial record (promo budget hold)',
     platform_ledger: 'financial record (platform side of promo coins and fees)',
     // Coin spends (migration 0072): the other half of the coin ledger rows, and

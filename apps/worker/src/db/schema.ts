@@ -70,7 +70,7 @@ export const users = sqliteTable(
 
     // currency + gamification
     dpcoin: real("dpcoin").default(0), // primary currency (was Dpcoin)
-    /** Play-only promo coins inside `dpcoin` (migration 0068): spendable on entry fees, never withdrawable. */
+    /** Play-only promo coins inside `dpcoin` (migration 0068): spendable on entry fees only. */
     lockedCoins: real("locked_coins").notNull().default(0),
     xp: integer("xp").default(0),
     level: integer("level").default(1),
@@ -514,82 +514,7 @@ export const coinTransactions = sqliteTable(
   }),
 );
 
-// ---------------------------------------------------------------------------
-// payments  (idempotency for top-ups)
-// ---------------------------------------------------------------------------
-export const payments = sqliteTable(
-  "payments",
-  {
-    id: text("id").primaryKey(), // paymentId
-    userId: text("user_id").notNull(),
-    /**
-     * LEGACY: this column holds COINS, not money, despite the name. Kept for
-     * backwards compatibility with existing rows and readers; new code should
-     * use `coins` (same value, honest name) and `amountPaise` (actual money).
-     */
-    amount: real("amount").notNull(),
-    /** Coins credited by this payment. */
-    coins: real("coins"),
-    /**
-     * What the user actually PAID, in integer paise. This is the only column
-     * revenue reporting reads — summing `amount` reported coin counts as rupees.
-     */
-    amountPaise: integer("amount_paise"),
-    source: text("source"), // razorpay | manual_deposit
-    status: text("status").default("success"), // success | refunded | disputed
-    createdAt: integer("created_at").notNull(),
-  },
-  (t) => ({
-    statusCreatedIdx: index("idx_payments_status_created").on(t.status, t.createdAt),
-  }),
-);
 
-// ---------------------------------------------------------------------------
-// payment_orders  (persistent record of Razorpay orders for reconciliation)
-//
-// Created when the client calls `createOrder`; credited exactly once by EITHER
-// the client callback (`topup`) OR the server-to-server webhook — whichever
-// arrives first. The `status` CAS (created -> paid) is the idempotency guard so
-// a paid-but-not-credited order can be reconciled without double-crediting.
-// ---------------------------------------------------------------------------
-export const paymentOrders = sqliteTable(
-  "payment_orders",
-  {
-    orderId: text("order_id").primaryKey(), // Razorpay order id
-    userId: text("user_id").notNull(),
-    packageId: text("package_id"),
-    coins: real("coins").notNull(), // server-authoritative coins to credit (bonus INCLUDED)
-    bonusCoins: real("bonus_coins").default(0), // how much of `coins` was bonus — display/reporting only
-    /** Set when the bonus is platform-funded (promo budget) and credited as locked coins. */
-    budgetId: text("budget_id"),
-    amountPaise: integer("amount_paise").notNull(), // expected amount (paise)
-    currency: text("currency").notNull().default("INR"),
-    // created | paid | refunded | disputed | expired | failed
-    //
-    // Only `created` and `expired` may transition to `paid` — see
-    // CREDITABLE_ORDER_STATUSES in lib/coinOrders.ts. A refunded or disputed
-    // order must never be re-credited by a late duplicate webhook.
-    status: text("status").notNull().default("created"),
-    paymentId: text("payment_id"),
-    source: text("source"), // callback | webhook | reconciliation
-    creditedAt: integer("credited_at"),
-    // Clawback trail, written by the refund/dispute webhook.
-    refundedAt: integer("refunded_at"),
-    refundedAmountPaise: integer("refunded_amount_paise"),
-    clawedBackCoins: real("clawed_back_coins"),
-    /** Coins we could NOT recover (user had already spent them). Needs review. */
-    clawbackShortfall: real("clawback_shortfall"),
-    // Reconciliation bookkeeping so the sweeper never hammers the gateway.
-    reconcileAttempts: integer("reconcile_attempts").notNull().default(0),
-    reconciledAt: integer("reconciled_at"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (t) => ({
-    userIdx: index("idx_payment_orders_user").on(t.userId),
-    statusIdx: index("idx_payment_orders_status").on(t.status, t.createdAt),
-  }),
-);
 
 // ---------------------------------------------------------------------------
 // posts + engagement
@@ -1212,49 +1137,6 @@ export const blogImportLog = sqliteTable(
   }),
 );
 
-// ---------------------------------------------------------------------------
-// withdrawals  (cash payout requests against Dpcoin balance)
-// ---------------------------------------------------------------------------
-export const withdrawals = sqliteTable(
-  "withdrawals",
-  {
-    id: text("id").primaryKey(),
-    userId: text("user_id").notNull(),
-    amount: real("amount").notNull(), // Dpcoins requested
-    /** Risk review computed at request time (migration 0068): low | medium | high, and the reasons (JSON array). */
-    riskLevel: text("risk_level"),
-    riskFlags: text("risk_flags", { mode: "json" }),
-    cashAmount: real("cash_amount").default(0), // NET ₹ actually paid (after the platform fee)
-    /** coins × payout rate at request time (migration 0062). */
-    grossAmount: real("gross_amount"),
-    /** Platform fee deducted from the payout, ₹ (lib/withdrawalFee.ts). */
-    feeAmount: real("fee_amount").notNull().default(0),
-    /** JSON of the fee rule used, locked at request time. */
-    feeDetail: text("fee_detail"),
-    method: text("method").default("upi"), // upi | bank | paytm ...
-    accountDetails: text("account_details"), // UPI id / bank details
-    status: text("status").notNull().default("pending"), // pending | approved | rejected | paid
-    adminNote: text("admin_note"),
-    processedBy: text("processed_by"), // admin uid who actioned it
-    /**
-     * Bank reference (UTR / RRN / NEFT ref) for the actual transfer. Required to
-     * mark a payout paid: without it, "we marked it paid" and "the bank sent it"
-     * were unrelated facts and no outgoing rupee could be reconciled against a
-     * statement. Unique across withdrawals.
-     */
-    payoutRef: text("payout_ref"),
-    paidAt: integer("paid_at"),
-    // true = coins were already deducted (escrowed) at request time. Legacy rows
-    // (created before this model) are 0 and are deducted on admin approval.
-    reserved: integer("reserved", { mode: "boolean" }).notNull().default(false),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (t) => ({
-    statusIdx: index("idx_withdrawals_status").on(t.status, t.createdAt),
-    userIdx: index("idx_withdrawals_user").on(t.userId),
-  }),
-);
 
 // ---------------------------------------------------------------------------
 // referrals  (referral bonus ledger; one row per referred user)
@@ -1302,44 +1184,6 @@ export const dailyTaskClaims = sqliteTable(
   (t) => ({ pk: primaryKey({ columns: [t.uid, t.taskId, t.day] }) }),
 );
 
-// ---------------------------------------------------------------------------
-// deposits  (manual QR/UPI top-up requests, admin-approved)
-// ---------------------------------------------------------------------------
-export const deposits = sqliteTable(
-  "deposits",
-  {
-    id: text("id").primaryKey(),
-    userId: text("user_id").notNull(),
-    amount: real("amount").notNull(), // coins to credit on approval (bonus INCLUDED)
-    payAmount: real("pay_amount").default(0), // INR paid
-    packageId: text("package_id"), // coin_packages.id this deposit was priced from
-    bonusCoins: real("bonus_coins").default(0), // how much of `amount` was bonus — display/reporting only
-    /** Set when the bonus is platform-funded (promo budget) and credited as locked coins. */
-    budgetId: text("budget_id"),
-    method: text("method").default("qr"), // qr | upi | bank
-    utr: text("utr"), // user-entered bank transaction reference
-    screenshotUrl: text("screenshot_url"),
-    status: text("status").notNull().default("pending"), // pending | approved | rejected
-    adminNote: text("admin_note"),
-    processedBy: text("processed_by"),
-    /**
-     * When the coins actually landed (migration 0053).
-     *
-     * Written in the SAME batch as the wallet credit, so `status = 'approved' AND
-     * credited_at IS NULL` is the fingerprint of a deposit that was claimed but
-     * never paid. The approval is now atomic, which makes that state impossible —
-     * this column is what lets `computeMoneyHealth` keep proving it.
-     */
-    creditedAt: integer("credited_at"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (t) => ({
-    statusIdx: index("idx_deposits_status").on(t.status, t.createdAt),
-    userIdx: index("idx_deposits_user").on(t.userId),
-    creditedIdx: index("idx_deposits_credited").on(t.status, t.creditedAt),
-  }),
-);
 
 // ---------------------------------------------------------------------------
 // admin_audit_log  (accountability: who did what admin action, when)
@@ -1629,26 +1473,6 @@ export const idempotencyKeys = sqliteTable(
   }),
 );
 
-// ---------------------------------------------------------------------------
-// coin_packages  (admin-managed top-up store items)
-// ---------------------------------------------------------------------------
-export const coinPackages = sqliteTable(
-  "coin_packages",
-  {
-    id: text("id").primaryKey(),
-    name: text("name"),
-    coins: real("coins").notNull().default(0),
-    bonusCoins: real("bonus_coins").notNull().default(0),
-    priceInr: real("price_inr").notNull().default(0),
-    active: integer("active", { mode: "boolean" }).notNull().default(true),
-    sortOrder: integer("sort_order").notNull().default(0),
-    /** Promo budget (kind package_bonus) that pays this package's bonus coins (migration 0068). */
-    budgetId: text("budget_id"),
-    createdAt: integer("created_at").notNull(),
-    updatedAt: integer("updated_at").notNull(),
-  },
-  (t) => ({ activeIdx: index("idx_coin_packages_active").on(t.active, t.sortOrder) }),
-);
 
 // ---------------------------------------------------------------------------
 // scheduled_notifications  (scheduled / segmented broadcasts, sent by cron)
@@ -1906,7 +1730,7 @@ export const promoBudgets = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
-    kind: text("kind").notNull(), // package_bonus | contest_prize
+    kind: text("kind").notNull(), // contest_prize | product_prize | free_rewards
     totalCoins: real("total_coins").notNull(),
     spentCoins: real("spent_coins").notNull().default(0),
     status: text("status").notNull().default("active"), // active | paused | closed
@@ -1929,7 +1753,7 @@ export const promoReservations = sqliteTable(
     uid: text("uid"),
     coins: real("coins").notNull(),
     status: text("status").notNull().default("held"), // held | used | released
-    refType: text("ref_type").notNull(), // order | deposit | match
+    refType: text("ref_type").notNull(), // match | free
     refId: text("ref_id").notNull(),
     expiresAt: integer("expires_at"),
     createdAt: integer("created_at").notNull(),

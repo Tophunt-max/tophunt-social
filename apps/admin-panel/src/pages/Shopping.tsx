@@ -14,7 +14,7 @@ const TABS = [
 type Tab = (typeof TABS)[number]["id"];
 
 /**
- * Shopping replaces withdrawals: users spend 🪙 DP coin (won in contests) on
+ * Shopping: users spend 🪙 DP coin (won in contests) on
  * physical products and digital items. No ₹ changes hands.
  */
 export default function Shopping() {

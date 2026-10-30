@@ -1,10 +1,10 @@
 import { useState } from "react";
 
 /**
- * Approval-password prompt for promo actions (budgets, budget-funded packages
- * and contest prizes). Shown when the Worker answers `approval_required` or
- * `approval_invalid`; resolves with the typed password (the request is then
- * re-sent with it) or null when cancelled. The panel never stores it.
+ * Approval-password prompt for promo actions (budgets and contest prizes).
+ * Shown when the Worker answers `approval_required` or `approval_invalid`;
+ * resolves with the typed password (the request is then re-sent with it) or
+ * null when cancelled. The panel never stores it.
  */
 export function ApprovalDialog({
   invalid,

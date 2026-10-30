@@ -39,8 +39,8 @@ import { getPendingInvite, offerLine } from "@/src/services/referrals";
 /**
  * Minimum age.
  *
- * Real-money contests and withdrawals put this app squarely in the category that
- * needs an actual age gate rather than a date picker with a presence check.
+ * Contests with prizes put this app in the category that needs an actual age
+ * gate rather than a date picker with a presence check.
  */
 const MINIMUM_AGE = 18;
 
@@ -59,7 +59,7 @@ const fillProfileSchema = z.object({
   phone: z.string().optional(),
   occupation: z.string().min(1, "Required"),
   gender: z.string().min(1, "Required"),
-  // Age gate. This app pays real money out, so a date of birth that is merely
+  // Age gate. Contests award prizes, so a date of birth that is merely
   // PRESENT is not enough — under-18 accounts must not be created at all.
   dateOfBirth: z
     .any()

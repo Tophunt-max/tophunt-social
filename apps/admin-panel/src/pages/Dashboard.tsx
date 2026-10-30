@@ -13,7 +13,6 @@ import {
   UserPlus,
   Activity,
   Vote,
-  Coins,
   ArrowRight,
   Wallet,
   Database,
@@ -26,9 +25,6 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  BarChart,
-  Bar,
-  Legend,
 } from "recharts";
 import { api, type Capacity } from "@/lib/api";
 import { StatCard } from "@/components/ui/StatCard";
@@ -46,7 +42,6 @@ export default function Dashboard() {
   const analytics = useQuery({ queryKey: ["analytics"], queryFn: api.analytics, refetchInterval: FAST });
   const devices = useQuery({ queryKey: ["device-stats"], queryFn: api.deviceStats, refetchInterval: SLOW });
   const growth = useQuery({ queryKey: ["user-growth"], queryFn: api.userGrowth, refetchInterval: SLOW });
-  const revenue = useQuery({ queryKey: ["revenue"], queryFn: api.revenue, refetchInterval: SLOW });
   const tickets = useQuery({ queryKey: ["recent-tickets"], queryFn: api.recentTickets, refetchInterval: SLOW });
   const capacity = useQuery({ queryKey: ["capacity"], queryFn: api.capacity, refetchInterval: SLOW });
 
@@ -79,12 +74,9 @@ export default function Dashboard() {
       )}
 
       {/* Primary KPIs (clickable → drill into the relevant page). */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <LinkCard href="/users">
           <StatCard icon={UsersIcon} label="Total Users" value={fmtNumber(o?.users)} gradient="gradient-purple" change={pct(an?.newUsers7d, an?.newUsersPrev7d)} />
-        </LinkCard>
-        <LinkCard href="/transactions">
-          <StatCard icon={Coins} label="💎 Diamond bike (all-time)" value={fmtNumber(o?.revenue)} gradient="gradient-green" change={pct(an?.revenue7d, an?.revenuePrev7d)} />
         </LinkCard>
         <LinkCard href="/matches">
           <StatCard icon={Swords} label="Active Battles" value={fmtNumber(o?.activeMatches)} gradient="gradient-blue" />
@@ -95,10 +87,9 @@ export default function Dashboard() {
       </div>
 
       {/* Today's activity (from analytics) — deltas compare today vs yesterday. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <StatCard icon={UserPlus} label="New Users (today)" value={fmtNumber(an?.newUsersToday)} gradient="gradient-purple" change={pct(an?.newUsersToday, an?.newUsersYesterday)} />
         <StatCard icon={Activity} label="Active Users (24h)" value={fmtNumber(an?.dau)} gradient="gradient-blue" change={pct(an?.dau, an?.dauYesterday)} />
-        <StatCard icon={Coins} label="💎 Diamond bike (aaj)" value={fmtNumber(an?.revenueToday)} gradient="gradient-green" change={pct(an?.revenueToday, an?.revenueYesterday)} />
         <StatCard icon={Vote} label="Votes (today)" value={fmtNumber(an?.votesToday)} gradient="gradient-orange" change={pct(an?.votesToday, an?.votesYesterday)} />
       </div>
 
@@ -134,8 +125,8 @@ export default function Dashboard() {
         <ClosedLoopTrend days={14} />
       </div>
 
-      {/* Bottom row: platform split, top spenders, recent tickets. */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Bottom row: platform split, recent tickets. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Device split */}
         <div className="bg-card border border-border rounded-2xl p-5">
           <h3 className="font-bold text-foreground mb-4">Platform Split</h3>
@@ -144,52 +135,6 @@ export default function Dashboard() {
             <DeviceRow icon={Monitor} label="Web" value={devices.data?.web ?? 0} color="gradient-blue" />
             <DeviceRow icon={HelpCircle} label="Other" value={devices.data?.other ?? 0} color="gradient-orange" />
           </div>
-          <div className="mt-5 pt-4 border-t border-border">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Users ke paas (DP coin + Diamond)</span>
-              <span className="font-bold text-foreground">{fmtNumber(revenue.data?.coinsInCirculation)}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm mt-2">
-              <span className="text-muted-foreground">Successful payments</span>
-              <span className="font-bold text-foreground">{fmtNumber(revenue.data?.paymentCount)}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm mt-2">
-              <span className="text-muted-foreground">Net revenue (₹)</span>
-              <span className="font-bold text-foreground">₹{fmtNumber(revenue.data?.netRevenueInr)}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Top spenders */}
-        <div className="bg-card border border-border rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold text-foreground">Top Spenders</h3>
-            <Link href="/transactions" className="text-xs text-primary font-medium flex items-center gap-1 hover:underline">
-              All <ArrowRight size={12} />
-            </Link>
-          </div>
-          {revenue.data?.topSpenders && revenue.data.topSpenders.length > 0 ? (
-            <div className="space-y-1">
-              {revenue.data.topSpenders.slice(0, 6).map((s, i) => (
-                <Link
-                  key={s.userId}
-                  href="/users"
-                  className="flex items-center gap-3 p-2 rounded-xl hover:bg-secondary/40 transition-colors"
-                >
-                  <span className="w-6 h-6 rounded-lg bg-secondary text-xs font-bold flex items-center justify-center text-muted-foreground">
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground truncate">{s.fullName || s.username || "Unknown"}</p>
-                    {s.username && <p className="text-xs text-muted-foreground truncate">@{s.username}</p>}
-                  </div>
-                  <span className="text-sm font-bold text-green-600 flex-shrink-0">₹{fmtNumber(s.totalInr ?? s.total)}<span className="block text-[11px] font-normal text-muted-foreground text-right">💎 {fmtNumber(s.totalCoins)}</span></span>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground py-6 text-center">No purchases yet</p>
-          )}
         </div>
 
         {/* Recent tickets */}

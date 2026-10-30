@@ -216,8 +216,16 @@ describe('notification categories', () => {
 
   it('files level-ups under social deliberately, not wallet', () => {
     // A level-up awards a badge, never coins. Putting it in `wallet` would mean a
-    // user muting XP spam also muted payout confirmations.
+    // user muting XP spam also muted coin and order updates.
     expect(categoryForType('level_up')).toBe('social');
+  });
+
+  it('files coin and order updates under wallet; the real-money types are gone', () => {
+    expect(categoryForType('shop_order')).toBe('wallet');
+    expect(categoryForType('daily_reward')).toBe('wallet');
+    for (const t of ['purchase', 'deposit', 'manual_deposit', 'withdrawal', 'withdrawal_approved', 'withdrawal_paid', 'withdrawal_rejected']) {
+      expect(categoryForType(t), t).toBe('social'); // unmapped now: the unknown-type default
+    }
   });
 
   it('still falls back to social for genuinely unknown types', () => {
@@ -233,7 +241,7 @@ describe('shouldSendPush honours every control', () => {
   it('blocks only the muted category', () => {
     const prefs = { ...DEFAULT_PREFS, contest: false };
     expect(shouldSendPush(prefs, 'match_active')).toBe(false);
-    expect(shouldSendPush(prefs, 'withdrawal')).toBe(true);
+    expect(shouldSendPush(prefs, 'shop_order')).toBe(true);
   });
 
   it('blocks during quiet hours', () => {

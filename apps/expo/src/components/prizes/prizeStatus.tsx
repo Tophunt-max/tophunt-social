@@ -81,7 +81,7 @@ export function prizeStatusMeta(status: PrizeClaimStatus | string): PrizeStatusM
   return META[status as PrizeClaimStatus] ?? META.submitted;
 }
 
-/** Tinted status pill, matching the withdrawal-history pills in the wallet. */
+/** Tinted status pill, matching the status pills used across the app. */
 export function PrizeStatusPill({ status }: { status: PrizeClaimStatus | string }) {
   const meta = prizeStatusMeta(status);
   return (

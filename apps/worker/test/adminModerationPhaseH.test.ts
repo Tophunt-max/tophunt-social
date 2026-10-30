@@ -172,7 +172,11 @@ describe('moderator boundaries', () => {
     expect(Object.keys(ov.body).some((k) => /^revenue/i.test(k))).toBe(false);
     const an = await admin(env, MOD, 'GET', '/analytics');
     expect(Object.keys(an.body).some((k) => /^revenue/i.test(k))).toBe(false);
-    expect(Object.keys((await admin(env, 'secret', 'GET', '/analytics')).body)).toContain('revenue7dInr');
+    // There is no revenue any more (nothing is sold): not even a full admin gets a revenue field.
+    const full = await admin(env, 'secret', 'GET', '/analytics');
+    expect(full.status).toBe(200);
+    expect(Object.keys(full.body).some((k) => /revenue/i.test(k))).toBe(false);
+    expect(Object.keys((await admin(env, 'secret', 'GET', '/overview')).body).some((k) => /revenue/i.test(k))).toBe(false);
   });
 });
 

@@ -23,7 +23,7 @@ import {
  * System Health — one screen that answers "is anything broken right now?".
  *
  * Pulls three authenticated aggregations from the worker (app/backend health,
- * money-flow integrity, and — via the health payload — cron status), plus the
+ * coin-ledger integrity, and — via the health payload — cron status), plus the
  * existing error-log and ops-alert feeds, and auto-refreshes. The intent is that
  * an operator opens this page and, without knowing the internals, sees exactly
  * where a problem is: a dependency, a missing secret, a stalled cron, a spike in
@@ -31,17 +31,6 @@ import {
  */
 
 const REFRESH_MS = 20_000;
-
-function fmtAge(ms: number | null): string {
-  if (ms == null) return "—";
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ${m % 60}m`;
-  return `${Math.floor(h / 24)}d ${h % 24}h`;
-}
 
 const CHECK_ICON: Record<string, any> = {
   d1: Database,
@@ -123,7 +112,7 @@ export default function SystemHealth() {
     <div>
       <PageHeader
         title="System Health"
-        subtitle="Backend, integrations, cron, API errors and money-flow integrity — one place"
+        subtitle="Backend, integrations, cron, API errors and coin ledger integrity — one place"
         action={
           <button
             onClick={refresh}
@@ -159,7 +148,7 @@ export default function SystemHealth() {
         </div>
         <div className="flex gap-2">
           {appOk !== undefined && <Pill ok={!!appOk} label={appOk ? "Backend OK" : "Backend"} />}
-          {moneyOk !== undefined && <Pill ok={!!moneyOk} label={moneyOk ? "Money OK" : "Money"} />}
+          {moneyOk !== undefined && <Pill ok={!!moneyOk} label={moneyOk ? "Coins OK" : "Coins"} />}
         </div>
       </div>
 
@@ -188,9 +177,9 @@ export default function SystemHealth() {
           : Array.from({ length: 7 }).map((_, i) => <div key={i} className="rounded-2xl border border-border bg-card p-4 h-[92px] animate-pulse" />)}
       </div>
 
-      {/* ---------------- Money-flow integrity ---------------- */}
+      {/* ---------------- Coin ledger integrity ---------------- */}
       <h3 className="text-sm font-bold text-foreground mb-3 flex items-center gap-2">
-        <Wallet size={15} /> Money-flow integrity
+        <Wallet size={15} /> Coin ledger integrity
       </h3>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
         <Metric
@@ -207,27 +196,6 @@ export default function SystemHealth() {
           bad={!!m && m.negativeBalances.count !== 0}
         />
         <Metric
-          icon={AlertTriangle}
-          label="Paid, not credited"
-          value={m ? fmtNumber(m.strandedPaidOrders) : "—"}
-          sub="captured at gateway"
-          bad={!!m && m.strandedPaidOrders !== 0}
-        />
-        <Metric
-          icon={AlertTriangle}
-          label="Clawback shortfall"
-          value={m ? fmtNumber(m.clawbackShortfalls.count) : "—"}
-          sub={m && m.clawbackShortfalls.count ? `${fmtNumber(m.clawbackShortfalls.coins)} (DP coin + Diamond) unrecovered` : "refund-farming"}
-          bad={!!m && m.clawbackShortfalls.count !== 0}
-        />
-        <Metric
-          icon={AlertTriangle}
-          label="Withdrawal ledger gaps"
-          value={m?.withdrawalLedgerGaps ? fmtNumber(m.withdrawalLedgerGaps.count) : "—"}
-          sub="held or rejected with no ledger row"
-          bad={!!m?.withdrawalLedgerGaps && m.withdrawalLedgerGaps.count !== 0}
-        />
-        <Metric
           icon={Scale}
           label="Diamond drift"
           value={m ? fmtNumber((m.lockedDrift?.count ?? 0) + (m.lockedDrift?.overBalance ?? 0)) : "—"}
@@ -240,27 +208,6 @@ export default function SystemHealth() {
           value={m ? fmtNumber(m.staleReservations ?? 0) : "—"}
           sub="budget held for a finished match"
           bad={!!m && (m.staleReservations ?? 0) !== 0}
-        />
-        <Metric
-          icon={Clock}
-          label="Stuck orders"
-          value={m ? fmtNumber(m.stuckCreatedOrders) : "—"}
-          sub="created > 10m ago"
-          warn={!!m && m.stuckCreatedOrders !== 0}
-        />
-        <Metric
-          icon={Wallet}
-          label="Pending deposits"
-          value={m ? fmtNumber(m.pendingDeposits.count) : "—"}
-          sub={m ? `oldest ${fmtAge(m.pendingDeposits.oldestAgeMs)}` : undefined}
-          warn={!!m && m.pendingDeposits.count > 0}
-        />
-        <Metric
-          icon={Wallet}
-          label="Pending withdrawals"
-          value={m ? fmtNumber(m.pendingWithdrawals.count) : "—"}
-          sub={m ? `oldest ${fmtAge(m.pendingWithdrawals.oldestAgeMs)}` : undefined}
-          warn={!!m && m.pendingWithdrawals.count > 0}
         />
       </div>
 

@@ -214,7 +214,7 @@ describe('status codes for urls that do not exist', () => {
     expect((await get(`${ORIGIN}/nope/nope`)).status).toBe(404);
     // Private screens are noindex, but they exist — a signed-in user is looking at
     // one, so answering 404 would be a lie in the other direction.
-    for (const path of ['/wallet/withdraw', '/auth/login', '/messages/chat/abc', '/setting']) {
+    for (const path of ['/wallet/gifts', '/auth/login', '/messages/chat/abc', '/setting']) {
       const res = await get(`${ORIGIN}${path}`);
       expect(res.status, path).toBe(200);
       expect(robotsOf(await head(res)), path).toBe('noindex, nofollow');

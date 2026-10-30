@@ -122,10 +122,6 @@ function ProtectedApp() {
           <Route path="/prize-claims" component={PrizeClaims} />
           <Route path="/leaderboard" component={Leaderboard} />
           <Route path="/transactions" component={Transactions} />
-          {/* Retired real-money pages: old links land on their replacements. */}
-          <Route path="/withdrawals" component={() => <Redirect to="/shopping" />} />
-          <Route path="/deposits" component={() => <Redirect to="/coin-economy?tab=diamond" />} />
-          <Route path="/coin-packages" component={() => <Redirect to="/coin-economy?tab=values" />} />
           <Route path="/coin-economy" component={CoinEconomy} />
           <Route path="/monetization" component={Monetization} />
           <Route path="/shopping" component={Shopping} />

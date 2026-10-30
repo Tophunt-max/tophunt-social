@@ -1,6 +1,4 @@
-import { QrCode, CreditCard, Landmark, Wallet } from "lucide-react";
-
-/** Segmented status-filter tabs used by the finance pages. */
+/** Segmented status-filter tabs used by the admin pages. */
 export function SegTabs({
   tab,
   setTab,
@@ -43,28 +41,7 @@ export function UserCell({ name, sub }: { name: string; sub?: string }) {
   );
 }
 
-/** Payment-method pill with a contextual icon. */
-export function MethodBadge({ method }: { method: string }) {
-  const m = (method || "").toLowerCase();
-  const icon =
-    m.includes("upi") || m.includes("qr") ? (
-      <QrCode size={11} />
-    ) : m.includes("razor") || m.includes("auto") || m.includes("card") ? (
-      <CreditCard size={11} />
-    ) : m.includes("bank") ? (
-      <Landmark size={11} />
-    ) : (
-      <Wallet size={11} />
-    );
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
-      {icon}
-      {method || "—"}
-    </span>
-  );
-}
-
-/** Compact colored action button (approve / reject / paid). */
+/** Compact colored action button (approve / reject). */
 export function ActionBtn({
   children,
   title,

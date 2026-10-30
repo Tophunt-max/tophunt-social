@@ -54,21 +54,24 @@ interface Props {
   title: string;
   /** Shown when the admin has not published this document yet. */
   emptyMessage?: string;
+  /** Text shipped with the app: rendered as is, nothing is fetched. */
+  bundledContent?: string;
 }
 
-export function LegalDocument({ docKey, title, emptyMessage }: Props) {
+export function LegalDocument({ docKey, title, emptyMessage, bundledContent }: Props) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const textColor = isDark ? '#fff' : '#212121';
   const backgroundColor = isDark ? Colors.dark.background : Colors.light.background;
   const secondaryTextColor = isDark ? '#A0A0A0' : '#666';
 
-  const [content, setContent] = useState('');
+  const [content, setContent] = useState(bundledContent ?? '');
   const [supportEmail, setSupportEmail] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!bundledContent);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (bundledContent) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
@@ -99,7 +102,7 @@ export function LegalDocument({ docKey, title, emptyMessage }: Props) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [docKey]);
+  }, [docKey, bundledContent]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]}>

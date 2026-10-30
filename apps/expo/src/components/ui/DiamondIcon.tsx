@@ -5,9 +5,8 @@ import Svg, { Path } from 'react-native-svg';
 /**
  * DiamondIcon — the app-wide symbol for Diamonds, the play-only balance.
  *
- *   Diamond  (this icon)  contest entry fees; from coin packages and free
- *                         rewards; never withdrawable
- *   DP coin  (CoinIcon)   contest prizes; the only balance that is withdrawn
+ *   Diamond  (this icon)  contest entry fees; earned free (XP, rewards)
+ *   DP coin  (CoinIcon)   contest prizes; spent in the Shop and on gifts
  *
  * Use it everywhere a Diamond amount is shown so the two balances can be told
  * apart at a glance. A cut gem on a 24×24 canvas: the outline is filled with

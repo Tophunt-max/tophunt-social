@@ -63,6 +63,6 @@ const BANNER_SCREENS = new Set(['home', 'explore', 'profile', 'wallet', 'notific
 export function bannerVisibleOn(segments: readonly string[]): boolean {
   const [top, second] = segments;
   if (!top || !BANNER_SCREENS.has(top)) return false;
-  // Tab roots only: `/wallet` yes, `/wallet/withdraw` no.
+  // Tab roots only: `/wallet` yes, `/wallet/gifts` no.
   return !second || second === 'index';
 }

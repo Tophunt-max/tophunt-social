@@ -225,7 +225,7 @@ describe('scoring honesty', () => {
   it('lets a critical finding fail its category outright', async () => {
     // Private screens indexable — the single worst technical outcome here.
     stubSite({
-      '/wallet/withdraw': { body: goodHtml({ canonical: 'https://tophunt.in/wallet/withdraw', robots: 'index, follow' }) },
+      '/wallet': { body: goodHtml({ canonical: 'https://tophunt.in/wallet', robots: 'index, follow' }) },
     });
     await seedPost();
     const audit = await runSeoAudit(env);
@@ -238,7 +238,7 @@ describe('scoring honesty', () => {
 
   it('sorts issues by severity so the dashboard leads with what matters', async () => {
     stubSite({
-      '/wallet/withdraw': { body: goodHtml({ canonical: 'https://tophunt.in/wallet/withdraw', robots: 'index, follow' }) },
+      '/wallet': { body: goodHtml({ canonical: 'https://tophunt.in/wallet', robots: 'index, follow' }) },
     });
     await seedPost({ slug: 'thin', content: '<p>tiny</p>' });
     const audit = await runSeoAudit(env);

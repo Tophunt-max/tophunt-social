@@ -54,8 +54,7 @@ const taskIcon = (type: string) =>
 /** One slot of the check-in track, as the Worker's `getDailyReward` returns it. */
 type DailySlot = { day: number; amount: number; status: 'claimed' | 'ready' | 'upcoming' };
 
-/** Free rewards may be play-only (locked): spendable on contests, never withdrawable. */
-// A reward credited as Diamonds (play-only) or as DP coins (withdrawable).
+// A reward credited as Diamonds (play-only, contest entry) or as DP coins (shopping).
 const rewardUnit = (res: any) => (Number(res?.lockedCoins || 0) > 0 ? 'Diamond' : 'DP coin');
 const playOnly = (res: any) =>
   Number(res?.lockedCoins || 0) > 0 ? '\nDiamond se contest khelo. Jeet kar DP coin milenge, jinse Shopping kar sakte ho.' : '';
@@ -69,10 +68,6 @@ export default function WalletScreen() {
   const { data: profile, refetch: refetchProfile, isLoading: profileLoading } = useProfile(user?.uid || '');
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  // Top-up always starts at the store, whatever the gateway mode. This used to
-  // jump straight to /wallet/deposit for manual/both, which skipped the package
-  // list — the user never got to see what they were buying. The store is now
-  // mode-aware itself and hands a chosen package off to the QR screen.
 
   // Theme Colors
   const backgroundColor = isDark ? Colors.dark.background : '#F8F9FA';
@@ -197,7 +192,7 @@ export default function WalletScreen() {
    * Start a rewarded ad.
    *
    * This used to be a five-second `setInterval` that then called
-   * `claimAdReward` — i.e. a client-side timer minting withdrawable currency with
+   * `claimAdReward` — i.e. a client-side timer minting currency with
    * no ad involved and nothing to verify. There is no ad SDK in this app, so the
    * only honest options were to remove the feature or gate it; it is gated.
    *
@@ -446,8 +441,8 @@ export default function WalletScreen() {
                         <View style={styles.cardCircle1} />
                         <View style={styles.cardCircle2} />
 
-                        {/* Two balances: DP coins (prizes, withdrawable, ₹ value) and
-                            Diamonds (packages + free rewards, entry fees only). */}
+                        {/* Two balances: DP coins (prizes, for shopping, ₹ value) and
+                            Diamonds (free rewards, entry fees only). */}
                         {(() => {
                             const bal = balancesOf(profile);
                             const value = coinsInInr(bal.dpcoin, coinRate(appConfig));
@@ -473,10 +468,9 @@ export default function WalletScreen() {
                             );
                         })()}
                         
-                        {/* Real-money top-ups and withdrawals are retired: Diamonds are
-                            earned, DP coin is spent in the shop. */}
+                        {/* Diamonds are earned, DP coin is spent in the shop. */}
                         <TouchableOpacity
-                            style={styles.topUpButton}
+                            style={styles.earnButton}
                             onPress={() => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                                 router.push('/earn' as any);
@@ -485,10 +479,10 @@ export default function WalletScreen() {
                             accessibilityRole="button"
                         >
                             <Ionicons name="sparkles" size={18} color="#FF4D67" />
-                            <Text style={styles.topUpText}>Diamond kamao</Text>
+                            <Text style={styles.earnText}>Diamond kamao</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={styles.withdrawButton}
+                            style={styles.shopButton}
                             onPress={() => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                                 router.push('/shop' as any);
@@ -497,7 +491,7 @@ export default function WalletScreen() {
                             accessibilityRole="button"
                         >
                             <Ionicons name="bag-handle-outline" size={18} color="#FFF" />
-                            <Text style={styles.withdrawText}>Shop</Text>
+                            <Text style={styles.shopText}>Shop</Text>
                         </TouchableOpacity>
                     </LinearGradient>
                 </Animated.View>
@@ -635,10 +629,10 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 25 },
   balanceValue: { color: 'white', fontSize: 42, fontFamily: 'Urbanist-Bold', letterSpacing: -1 },
   
-  topUpButton: { backgroundColor: 'white', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: 'black', shadowOpacity: 0.1, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
-  topUpText: { color: '#FF4D67', fontFamily: 'Urbanist-Bold', fontSize: 16, marginLeft: 6 },
-  withdrawButton: { marginTop: 10, paddingVertical: 12, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.6)' },
-  withdrawText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 15, marginLeft: 6 },
+  earnButton: { backgroundColor: 'white', paddingHorizontal: 20, paddingVertical: 14, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: 'black', shadowOpacity: 0.1, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
+  earnText: { color: '#FF4D67', fontFamily: 'Urbanist-Bold', fontSize: 16, marginLeft: 6 },
+  shopButton: { marginTop: 10, paddingVertical: 12, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.6)' },
+  shopText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 15, marginLeft: 6 },
   
   // Section Headers
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 15 },

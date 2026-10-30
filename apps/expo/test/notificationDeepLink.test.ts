@@ -24,7 +24,7 @@ describe('notification deep links stay inside the app', () => {
     '/wallet\u0000',
   ])('rejects %s and falls back to the type route', (url) => {
     expect(safeInAppRoute(url)).toBeNull();
-    expect(getNotificationDestination('purchase', null, url)).toBe('/wallet');
+    expect(getNotificationDestination('ad_reward', null, url)).toBe('/wallet');
     expect(getNotificationDestination('admin', null, url)).toBeNull();
   });
 

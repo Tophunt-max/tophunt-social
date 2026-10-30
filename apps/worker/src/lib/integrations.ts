@@ -28,7 +28,7 @@ import { openSecret, sealSecret, secretStorageAvailable } from "./secretBox";
 // Secret registry
 // ---------------------------------------------------------------------------
 
-export type SecretGroup = "sms" | "email" | "payments" | "video" | "storage" | "auth" | "observability";
+export type SecretGroup = "sms" | "email" | "video" | "storage" | "auth" | "observability";
 
 export interface SecretDefinition {
   name: string;
@@ -68,8 +68,6 @@ export const SECRET_DEFINITIONS: SecretDefinition[] = [
   { name: "MAILEROO_API_KEY", label: "Maileroo Sending Key", group: "email", envKey: "MAILEROO_API_KEY", help: "Maileroo dashboard → your domain → Sending Keys. Sends via smtp.maileroo.com." },
 
   // ---- Payments -----------------------------------------------------------
-  { name: "RAZORPAY_KEY_SECRET", label: "Razorpay Key Secret", group: "payments", envKey: "RAZORPAY_KEY_SECRET", help: "Signature verification AND payment reconciliation use this." },
-  { name: "RAZORPAY_WEBHOOK_SECRET", label: "Razorpay Webhook Secret", group: "payments", envKey: "RAZORPAY_WEBHOOK_SECRET", help: "Without this the webhook returns 503 and paid orders are only credited by the reconciliation sweep." },
 
   // ---- Video (Qencode) ---------------------------------------------------
   {
@@ -152,10 +150,6 @@ export interface IntegrationsConfig {
     from: string;
     replyTo: string;
   };
-  payments: {
-    /** Public key id — safe to expose to the client. */
-    razorpayKeyId: string;
-  };
   video: {
     /**
      * Where new video goes. `qencode`: encoded to HLS by Qencode and stored in
@@ -184,7 +178,6 @@ export const DEFAULT_INTEGRATIONS: IntegrationsConfig = {
     customBody: "",
   },
   email: { provider: "none", from: "", replyTo: "" },
-  payments: { razorpayKeyId: "" },
   video: { provider: "r2" },
   push: { vapidPublicKey: "" },
 };
@@ -202,7 +195,6 @@ function str(value: unknown, fallback = ""): string {
 function mergeConfig(raw: any): IntegrationsConfig {
   const sms = raw?.sms ?? {};
   const email = raw?.email ?? {};
-  const payments = raw?.payments ?? {};
   const video = raw?.video ?? {};
   const push = raw?.push ?? {};
   const smsProvider = ["twilio", "msg91", "fast2sms", "hanuotp", "custom", "none"].includes(sms.provider)
@@ -230,7 +222,6 @@ function mergeConfig(raw: any): IntegrationsConfig {
       from: str(email.from),
       replyTo: str(email.replyTo),
     },
-    payments: { razorpayKeyId: str(payments.razorpayKeyId) },
     video: { provider: videoProvider },
     push: { vapidPublicKey: str(push.vapidPublicKey) },
   };
@@ -264,7 +255,6 @@ export async function saveIntegrations(
   const merged = mergeConfig({
     sms: { ...current.sms, ...(patch.sms ?? {}) },
     email: { ...current.email, ...(patch.email ?? {}) },
-    payments: { ...current.payments, ...(patch.payments ?? {}) },
     video: { ...current.video, ...(patch.video ?? {}) },
     push: { ...current.push, ...(patch.push ?? {}) },
   });
@@ -492,29 +482,6 @@ export function invalidateIntegrationCache(): void {
 // ---------------------------------------------------------------------------
 // Convenience accessors for specific providers
 // ---------------------------------------------------------------------------
-
-export interface RazorpayCredentials {
-  keyId: string | null;
-  keySecret: string | null;
-  webhookSecret: string | null;
-}
-
-/**
- * Razorpay credentials, panel-managed with environment fallback.
- *
- * The key ID is public (it is handed to the checkout SDK) so it lives in plain
- * config; the secret and webhook secret are encrypted. Everything stays
- * fail-closed: a missing secret means top-ups are refused, never free-minted.
- */
-export async function getRazorpayCredentials(env: Env): Promise<RazorpayCredentials> {
-  const [cfg, keySecret, webhookSecret] = await Promise.all([
-    getIntegrations(env),
-    resolveSecret(env, "RAZORPAY_KEY_SECRET"),
-    resolveSecret(env, "RAZORPAY_WEBHOOK_SECRET"),
-  ]);
-  const keyId = cfg.payments.razorpayKeyId || (env.RAZORPAY_KEY_ID || "").trim() || null;
-  return { keyId, keySecret, webhookSecret };
-}
 
 /** R2 S3-API credentials (video pipeline), panel-managed with env fallback. */
 export async function getR2Credentials(env: Env): Promise<{

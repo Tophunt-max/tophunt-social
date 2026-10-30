@@ -15,9 +15,8 @@ import { Button, Card, Notice, Num, Text, Toggle, field, inr } from "@/component
 /** ₹ per DP coin and ₹ per Diamond (appConfig.coinPricing.dpCoinInr / diamondInr). */
 export function CoinValuesCard({ data, pending, onSave }: { data: any; pending: boolean; onSave: (p: any) => void }) {
   const stored = data?.coinPricing ?? {};
-  const legacy = Number(data?.withdrawal?.conversionRate ?? 1) || 1;
-  const [dp, setDp] = useState(String(stored.dpCoinInr ?? legacy));
-  const [dia, setDia] = useState(String(stored.diamondInr ?? stored.buyRate ?? legacy));
+  const [dp, setDp] = useState(String(stored.dpCoinInr ?? 1));
+  const [dia, setDia] = useState(String(stored.diamondInr ?? 1));
   const dpN = Number(dp);
   const diaN = Number(dia);
   const valid = dpN > 0 && diaN > 0;

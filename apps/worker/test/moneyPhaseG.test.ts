@@ -2,10 +2,9 @@
  * Phase G money and contest-integrity fixes:
  *  - joining a waiting battle past its deadline;
  *  - admin declare-winner following the automatic tie / minimum-votes rules;
- *  - payouts refused while the account owes coins or has a disputed payment;
  *  - admin wallet adjustments need a reason and are idempotent;
  *  - the daily streak bonus is capped and always ledgered;
- *  - money health covers withdrawal ledger rows and alerts on a schedule.
+ *  - money health alerts on a schedule.
  */
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
@@ -38,7 +37,7 @@ vi.mock('../src/lib/voteCounter', async (orig) => ({
 
 import { makeEnv, makeApp, fakeCtx, drizzleOf, type TestEnv } from './helpers/harness';
 import * as schema from '../src/db/schema';
-import { computeMoneyHealth, moneyHealthAlert, MONEY_HEALTH_ALERT_TITLE } from '../src/lib/moneyHealth';
+import { moneyHealthAlert, MONEY_HEALTH_ALERT_TITLE } from '../src/lib/moneyHealth';
 
 const app = makeApp();
 beforeEach(() => {
@@ -152,50 +151,6 @@ describe('admin declare-winner', () => {
 });
 
 // ===========================================================================
-describe('payouts while the account owes coins', () => {
-  async function seedWithdrawal(env: TestEnv, extra: Record<string, any> = {}) {
-    const ts = Date.now();
-    await drizzleOf(env).insert(schema.withdrawals).values({
-      id: 'w1', userId: 'alice', amount: 100, cashAmount: 100, method: 'upi', accountDetails: 'a@upi',
-      status: 'pending', reserved: true, createdAt: ts, updatedAt: ts, ...extra,
-    } as any);
-  }
-
-  it('refuses approve and paid when the balance is negative, but allows reject', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', -40); // a refund clawed back coins already escrowed
-    await seedWithdrawal(env);
-    expect((await admin(env, 'PATCH', '/withdrawals/w1', { action: 'approve' })).status).toBe(412);
-    await drizzleOf(env).update(schema.withdrawals).set({ status: 'approved' }).where(eq(schema.withdrawals.id, 'w1'));
-    expect((await admin(env, 'PATCH', '/withdrawals/w1', { action: 'paid', payoutRef: 'UTR12345' })).status).toBe(412);
-    expect((await admin(env, 'PATCH', '/withdrawals/w1', { action: 'reject' })).status).toBe(200);
-  });
-
-  it('refuses approve while a payment is disputed', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedWithdrawal(env);
-    const ts = Date.now();
-    await drizzleOf(env).insert(schema.paymentOrders).values({
-      orderId: 'o1', userId: 'alice', packageId: 'p', coins: 100, bonusCoins: 0, amountPaise: 10000,
-      currency: 'INR', status: 'disputed', paymentId: 'pay1', createdAt: ts, updatedAt: ts,
-    } as any);
-    const r = await admin(env, 'PATCH', '/withdrawals/w1', { action: 'approve' });
-    expect(r.status).toBe(412);
-    expect(r.body.error.message).toMatch(/disputed payment/);
-  });
-
-  it('still approves a normal request, and audits it', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    await seedWithdrawal(env);
-    expect((await admin(env, 'PATCH', '/withdrawals/w1', { action: 'approve' })).status).toBe(200);
-    const audit = await env.DB.prepare("SELECT COUNT(*) n FROM admin_audit_log WHERE action = 'withdrawal.approve'").first<any>();
-    expect(audit.n).toBe(1);
-  });
-});
-
-// ===========================================================================
 describe('admin wallet adjustment', () => {
   it('requires a reason and a request id', async () => {
     const { env } = makeEnv();
@@ -248,19 +203,6 @@ describe('daily reward', () => {
 
 // ===========================================================================
 describe('money health', () => {
-  it('flags a rejected escrowed withdrawal whose refund never ran', async () => {
-    const { env } = makeEnv();
-    await seedUser(env, 'alice', 0);
-    const ts = Date.now();
-    await drizzleOf(env).insert(schema.withdrawals).values({
-      id: 'w9', userId: 'alice', amount: 50, cashAmount: 50, method: 'upi', accountDetails: 'a@upi',
-      status: 'rejected', reserved: true, createdAt: ts, updatedAt: ts,
-    } as any);
-    const h = await computeMoneyHealth(env as any);
-    expect(h.withdrawalLedgerGaps).toMatchObject({ count: 1, samples: [{ id: 'w9', missing: 'withdrawal_refund' }] });
-    expect(h.ok).toBe(false);
-  });
-
   it('the scheduled check writes one admin alert per day, not one per run', async () => {
     const { env } = makeEnv();
     await seedUser(env, 'alice', -5);

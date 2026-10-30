@@ -115,7 +115,7 @@ describe('announcement', () => {
   it('lives on the main tab screens only', () => {
     expect(bannerVisibleOn(['home'])).toBe(true);
     expect(bannerVisibleOn(['wallet'])).toBe(true);
-    expect(bannerVisibleOn(['wallet', 'withdraw'])).toBe(false);
+    expect(bannerVisibleOn(['wallet', 'gifts'])).toBe(false);
     expect(bannerVisibleOn(['auth', 'login'])).toBe(false);
     expect(bannerVisibleOn(['maintenance'])).toBe(false);
   });
@@ -128,7 +128,7 @@ describe('features', () => {
     expect(featureForRoute(['earn'])).toBe('earning');
     expect(featureForRoute(['shop', 'cart'])).toBe('shopping');
     expect(featureForRoute(['rewards', 'store'])).toBe('shopping');
-    expect(featureForRoute(['wallet', 'withdraw'])).toBeNull(); // retired screen, redirects to the shop
+    expect(featureForRoute(['wallet', 'gifts'])).toBeNull();
     expect(featureForRoute(['wallet'])).toBeNull();
     expect(featureForRoute(['home'])).toBeNull();
   });

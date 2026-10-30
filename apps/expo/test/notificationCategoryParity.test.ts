@@ -25,13 +25,26 @@ import {
   categoryForType as workerCategoryForType,
 } from '../../worker/src/lib/notificationPrefs';
 
+/**
+ * Types the app no longer handles (real-money purchases, deposits and
+ * withdrawals were removed). The worker may still list them until its own
+ * cleanup lands; they are ignored on the worker side and must not come back in
+ * the client.
+ */
+const RETIRED = new Set(['purchase', 'deposit', 'manual_deposit', 'withdrawal', 'withdrawal_hold', 'withdrawal_refund']);
+const workerTypes = () => Object.keys(WORKER_MAP).filter((type) => !RETIRED.has(type));
+
 describe('notification category map parity between client and worker', () => {
   it('covers exactly the same notification types', () => {
-    expect(Object.keys(CLIENT_MAP).sort()).toEqual(Object.keys(WORKER_MAP).sort());
+    expect(Object.keys(CLIENT_MAP).sort()).toEqual(workerTypes().sort());
+  });
+
+  it('never maps a retired type in the client', () => {
+    expect(Object.keys(CLIENT_MAP).filter((type) => RETIRED.has(type))).toEqual([]);
   });
 
   it('assigns every type to the same category', () => {
-    const drift = Object.keys(WORKER_MAP)
+    const drift = workerTypes()
       .filter((type) => CLIENT_MAP[type] !== WORKER_MAP[type])
       .map((type) => `${type}: worker=${WORKER_MAP[type]} client=${CLIENT_MAP[type]}`);
     expect(drift).toEqual([]);

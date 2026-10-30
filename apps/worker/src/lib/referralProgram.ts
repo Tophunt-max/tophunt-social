@@ -8,7 +8,7 @@
  *      joining). That creates a PENDING referral — nothing is paid yet.
  *   3. The invited user must do something real within `qualifyWindowDays`: the
  *      admin-chosen `qualifyAction` — signup, verified (email AND mobile), first
- *      contest entry, or first coin purchase. Then it QUALIFIES.
+ *      or first contest entry. Then it QUALIFIES.
  *   4. Qualified → REWARDED: the invited user gets `refereeReward`, the referrer
  *      `referrerReward` (two-sided), both idempotent ledger credits, both notified.
  *      With `requireReview` on, a qualified referral waits in REVIEW for an admin.
@@ -36,9 +36,9 @@ import { newId, now } from "./ids";
 import { getAppConfig } from "./settings";
 import { rewardLocked } from "./rewardLocking";
 
-export const QUALIFY_ACTIONS = ["signup", "verified", "first_contest", "first_purchase"] as const;
+export const QUALIFY_ACTIONS = ["signup", "verified", "first_contest"] as const;
 export type QualifyAction = (typeof QUALIFY_ACTIONS)[number];
-export type ReferralEvent = "signup" | "verified" | "contest" | "purchase";
+export type ReferralEvent = "signup" | "verified" | "contest";
 /** `reversed`: paid, then clawed back by an admin (reverseReferral). */
 export const REFERRAL_STATUSES = ["pending", "review", "rewarded", "rejected", "expired", "reversed"] as const;
 
@@ -78,8 +78,6 @@ export interface ReferralProgramConfig {
    * limit). Once reached, qualified referrals wait in review.
    */
   maxCoinsPerMonth: number;
-  /** first_purchase only: the purchase must be at least this many ₹ (0 = any). */
-  minPurchaseInr: number;
 }
 
 export const REFERRAL_DEFAULTS: ReferralProgramConfig = {
@@ -94,7 +92,6 @@ export const REFERRAL_DEFAULTS: ReferralProgramConfig = {
   requireReview: false,
   milestones: [],
   maxCoinsPerMonth: 0,
-  minPurchaseInr: 0,
 };
 
 const MAX_COINS = 100_000;
@@ -103,7 +100,6 @@ const EVENT_FOR_ACTION: Record<QualifyAction, ReferralEvent> = {
   signup: "signup",
   verified: "verified",
   first_contest: "contest",
-  first_purchase: "purchase",
 };
 
 const int = (v: unknown, min: number, max: number): number | null => {
@@ -135,7 +131,6 @@ export function parseReferralConfig(appConfig: any): ReferralProgramConfig {
     ["maxRewardedPerReferrer", 0, 100_000],
     ["maxRewardedPerReferrerPerDay", 0, 10_000],
     ["maxCoinsPerMonth", 0, 100_000_000],
-    ["minPurchaseInr", 0, 1_000_000],
   ];
   for (const [k, lo, hi] of bounds) {
     const n = int(src[k], lo, hi);
@@ -172,7 +167,8 @@ export function validateReferralPatch(p: any): void {
   whole("maxRewardedPerReferrer", 0, 100_000, "Lifetime referral cap");
   whole("maxRewardedPerReferrerPerDay", 0, 10_000, "Daily referral cap");
   whole("maxCoinsPerMonth", 0, 100_000_000, "Monthly referral budget (coins)");
-  whole("minPurchaseInr", 0, 1_000_000, "Minimum first purchase (₹)");
+  // Old setting from when Diamonds could be bought; nothing to buy any more.
+  delete p.minPurchaseInr;
   if (p.milestones !== undefined) {
     if (!Array.isArray(p.milestones) || p.milestones.length > 20) bad("Milestones: a list of at most 20 tiers.");
     const seen = new Set<number>();
@@ -202,7 +198,6 @@ export function publicReferralConfig(cfg: ReferralProgramConfig, appConfig?: any
     applyWindowDays: cfg.applyWindowDays,
     qualifyWindowDays: cfg.qualifyWindowDays,
     milestones: cfg.milestones,
-    minPurchaseInr: cfg.minPurchaseInr,
     rewardUnit: rewardLocked(appConfig, "referral") ? "Diamond" : "DP coin",
   };
 }
@@ -372,19 +367,15 @@ export async function applyReferralCode(
 // ---------------------------------------------------------------------------
 
 /**
- * Called by the qualifying actions (signup, verification, contest entry, coin
- * purchase). Cheap when nothing applies: one indexed lookup by `referred_uid`.
+ * Called by the qualifying actions (signup, verification, contest entry).
+ * Cheap when nothing applies: one indexed lookup by `referred_uid`.
  * Never throws — a referral problem must not fail the action that triggered it.
- *
- * `amountInr` is the purchase amount for the "purchase" event; with
- * `minPurchaseInr` set, a smaller purchase does not qualify (a later, larger
- * one still can).
  */
 export async function qualifyReferral(
   env: Env,
   uid: string,
   event: ReferralEvent,
-  opts: { nowMs?: number; amountInr?: number } = {},
+  opts: { nowMs?: number } = {},
 ): Promise<void> {
   try {
     const ts = opts.nowMs ?? now();
@@ -403,7 +394,6 @@ export async function qualifyReferral(
     }
     const cfgRow = await db.select({ data: schema.settings.data }).from(schema.settings).where(eq(schema.settings.id, "appConfig")).get();
     const cfg = parseReferralConfig(cfgRow?.data);
-    if (event === "purchase" && cfg.minPurchaseInr > 0 && !(Number(opts.amountInr) >= cfg.minPurchaseInr)) return;
     // A fraud signal recorded when the code was applied (applyReferralCode)
     // holds this referral for an admin even when the program pays automatically.
     const next: ReferralStatus = cfg.requireReview || row.holdReason ? "review" : "rewarded";
@@ -742,7 +732,7 @@ export interface ReversalSide {
 }
 
 /**
- * Claw back a paid referral (fake account found later, refunded purchase…).
+ * Claw back a paid referral (e.g. a fake account found later).
  *
  * The `rewarded → reversed` flip is a compare-and-swap, so only one admin
  * request runs the debits. Each side gives back what its credit added, from the

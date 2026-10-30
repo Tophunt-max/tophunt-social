@@ -30,9 +30,8 @@ describe('repriceCart', () => {
 });
 
 describe('coinRate', () => {
-  it('prefers the admin DP coin value and falls back to the legacy rate', () => {
-    expect(coinRate({ coinValues: { dpCoinInr: 2 }, withdrawal: { conversionRate: 0.1 } })).toBe(2);
-    expect(coinRate({ withdrawal: { conversionRate: 0.1 } })).toBe(0.1);
+  it('reads the admin DP coin value', () => {
+    expect(coinRate({ coinValues: { dpCoinInr: 2, diamondInr: 1 } })).toBe(2);
     expect(coinRate({})).toBeNull();
   });
 });

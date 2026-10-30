@@ -87,13 +87,7 @@ export const CATEGORY_BY_TYPE: Record<string, NotificationCategory> = {
    */
   "prize-claim": "contest",
 
-  // --- wallet (real money / balances) ---
-  purchase: "wallet",
-  deposit: "wallet",
-  manual_deposit: "wallet",
-  withdrawal: "wallet",
-  withdrawal_hold: "wallet",
-  withdrawal_refund: "wallet",
+  // --- wallet (Diamond / DP coin balances) ---
   admin_adjustment: "wallet",
   referral: "wallet",
   referral_bonus: "wallet",

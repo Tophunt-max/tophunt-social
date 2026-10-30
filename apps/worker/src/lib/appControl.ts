@@ -1,6 +1,6 @@
 /**
  * App Control (admin panel → App Control): maintenance, force update, the
- * announcement banner, feature flags and withdrawal rules — resolved, validated,
+ * announcement banner and feature flags — resolved, validated,
  * projected for the app, and enforced.
  *
  * One module, three readers:
@@ -19,14 +19,11 @@
  *   updateUrls { android, ios }, updateUrl (legacy), updateMessage,
  *   announcement { id, enabled, message, link, tone, audience, startAt, endAt },
  *   features { contests, chat, stories, earning, shopping, posts },
- *   withdrawal { enabled, payoutsFrozen, minAmount, maxAmount, maxPerDay, conversionRate,
- *               feePercent, feeFlat, feeMin, feeMax },
  *   _version (ms; bumped on every save).
  */
 import { coinValuesFromConfig, validateCoinPricingPatch } from "./coinPricing";
 import { validateRewardLockingPatch } from "./rewardLocking";
 import { validateCoinAlertPatch } from "./coinAlerts";
-import { feeRuleFromConfig, validateWithdrawalFeePatch } from "./withdrawalFee";
 import { parseReferralConfig, publicReferralConfig, validateReferralPatch } from "./referralProgram";
 import { publicExploreConfig, validateExplorePatch } from "./exploreConfig";
 import { publicMonetizationConfig, validateMonetizationPatch } from "./monetizationConfig";
@@ -186,10 +183,9 @@ export function announcementId(a: any): string {
  * Everything the app may know, for every caller (it is public and unauthenticated).
  * Explicit allow-list: a new setting is private unless it is added here.
  */
-export function publicAppConfig(cfg: any, nowMs: number = Date.now(), cashRetired = true) {
+export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
   cfg = cfg || {};
   const ads = cfg.ads || {};
-  const withdrawal = cfg.withdrawal || {};
   const authMethods = resolveAuthMethods(cfg);
   const maintenance = resolveMaintenance(cfg, nowMs);
   const update = resolveUpdatePolicy(cfg);
@@ -217,10 +213,10 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now(), cashRetire
       startAt: num(a.startAt),
       endAt: num(a.endAt),
     },
-    // Old app builds still read `topups` / `withdrawals`. With real money retired
-    // (lib/cashRetirement.ts) they are always reported off, so those builds hide
-    // Buy Diamonds / manual UPI deposit / Withdraw.
-    features: cashRetired ? { ...resolveFeatures(cfg), topups: false, withdrawals: false } : resolveFeatures(cfg),
+    // Compat for app builds released before real money was removed: they read
+    // `topups` / `withdrawals`, `withdrawal.enabled` and `paymentGateway.mode`
+    // and hide Buy / UPI deposit / Withdraw when these say off.
+    features: { ...resolveFeatures(cfg), topups: false, withdrawals: false },
     // Only partial rollouts are sent; the app applies them per account.
     featureRollout: Object.fromEntries(
       FEATURE_KEYS.filter((k) => rolloutPercent(cfg, k) < 100).map((k) => [k, rolloutPercent(cfg, k)]),
@@ -230,18 +226,8 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now(), cashRetire
     googleLogin: methodAllowed(authMethods, "google"),
     appleLogin: methodAllowed(authMethods, "apple"),
     facebookLogin: methodAllowed(authMethods, "facebook"),
-    withdrawal: {
-      enabled: !cashRetired && withdrawal.enabled !== false,
-      payoutsFrozen: cashRetired || withdrawal.payoutsFrozen === true,
-      minAmount: Number(withdrawal.minAmount ?? 0),
-      maxAmount: Number(withdrawal.maxAmount ?? 0),
-      maxPerDay: Number(withdrawal.maxPerDay ?? 0),
-      conversionRate: Number(withdrawal.conversionRate ?? 1),
-      // Platform fee, shown to the user before they confirm (lib/withdrawalFee.ts).
-      ...feeRuleFromConfig(cfg),
-    },
-    // "off": no checkout and no manual UPI/QR deposit (old builds read this).
-    paymentGateway: { mode: cashRetired ? "off" : cfg.paymentGateway?.mode || "auto" },
+    withdrawal: { enabled: false, payoutsFrozen: true },
+    paymentGateway: { mode: "off" },
     // What the signup and invite screens may show (rewards, qualifying action).
     referral: publicReferralConfig(parseReferralConfig(cfg), cfg),
     // Explore banners (live ones only) and section order (lib/exploreConfig.ts).
@@ -393,32 +379,10 @@ export function validateAppControlPatch(body: any, existing: any, nowMs: number 
     }
   }
 
-  if (body.withdrawal !== undefined) {
-    const w = body.withdrawal;
-    if (!w || typeof w !== "object") bad("withdrawal must be an object.");
-    for (const k of ["enabled", "payoutsFrozen"]) if (w[k] !== undefined && !isBool(w[k])) bad(`withdrawal.${k} must be true or false.`);
-    for (const k of ["minAmount", "maxAmount", "maxPerDay"]) {
-      if (w[k] === undefined) continue;
-      const n = Number(w[k]);
-      if (w[k] === "" || w[k] === null || !Number.isInteger(n) || n < 0 || n > 10_000_000) {
-        bad(`withdrawal.${k} must be a whole number of coins from 0 to 10000000 (0 = no limit).`);
-      }
-      w[k] = n;
-    }
-    if (w.conversionRate !== undefined) {
-      const r = Number(w.conversionRate);
-      if (!Number.isFinite(r) || r <= 0 || r > 1000) bad("Coin → ₹ rate must be more than 0.");
-      w.conversionRate = r;
-    }
-    const merged = { ...(existing?.withdrawal || {}), ...w };
-    if (Number(merged.maxAmount) > 0 && Number(merged.minAmount) > Number(merged.maxAmount)) {
-      bad("Minimum payout cannot be more than the maximum.");
-    }
-    // Platform fee on payouts (lib/withdrawalFee.ts).
-    validateWithdrawalFeePatch(w, existing);
-  }
-  // Coin package buy rate (lib/coinPricing.ts). Checked against the packages by
-  // the save handler, which has them.
+  // Real money is gone: the old payout settings are refused, not silently kept.
+  if (body.withdrawal !== undefined) bad("withdrawal settings no longer exist (no real-money payouts).");
+  if (body.paymentGateway !== undefined) bad("paymentGateway no longer exists (no real-money payments).");
+  // Coin values in ₹ (lib/coinPricing.ts).
   if (body.coinPricing !== undefined) validateCoinPricingPatch(body.coinPricing);
   // Which free rewards are play-only (lib/rewardLocking.ts).
   if (body.rewardLocking !== undefined) validateRewardLockingPatch(body.rewardLocking);
@@ -544,7 +508,6 @@ export const AUDITED_SECTIONS = [
   "announcement",
   "features",
   "featureRollout",
-  "withdrawal",
   // Ranking weights decide what every viewer is shown first.
   "feedWeights",
   // Ad frequency, ad units, gifts and store switches (lib/monetizationConfig.ts).

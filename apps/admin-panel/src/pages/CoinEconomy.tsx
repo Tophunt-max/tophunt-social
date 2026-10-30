@@ -41,7 +41,7 @@ import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
 
 /**
  * Coin Economy — the one place for everything coins: where every coin came from,
- * where it went, and every setting that creates, sells or pays out coins.
+ * where it went, and every setting that creates or spends coins.
  *
  *   Overview   the three coins at a glance, supply, flows, reconciliation, queues
  *   ⚡ XP       XP earned / converted, XP → Diamond rate and daily cap
@@ -52,7 +52,7 @@ import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
  *   Coin value ₹ per DP coin / Diamond (prices shop products)
  *   Budgets    one promo budget per offer, approval password
  *   Ledger     every coin transaction, and one user's full statement
- *   Health     money-integrity checks
+ *   Health     coin-ledger integrity checks
  *
  * Each settings card saves only its own keys, through the same Worker routes
  * (validation, audit log) the old pages used; those pages now link here.
@@ -74,23 +74,21 @@ const TABS = [
 const TAB_ALIASES: Record<string, string> = { earn: "diamond", contests: "diamond", shopping: "dpcoin" };
 
 const KIND_LABEL: Record<PromoBudgetKind, string> = {
-  package_bonus: "Package bonus",
   contest_prize: "Contest prize (DP coin)",
   product_prize: "Product prize (DP coin value)",
   free_rewards: "Free rewards (daily, ads, tasks)",
 };
 
-/** What a budget of each kind pays out. Only contest_prize mints withdrawable DP coins. */
+/** What a budget of each kind gives. Only contest_prize mints DP coins. */
 const KIND_UNIT: Record<PromoBudgetKind, string> = {
-  package_bonus: "💎 Diamond",
-  contest_prize: "🪙 DP coin (asli ₹)",
+  contest_prize: "🪙 DP coin",
   product_prize: "DP coin value (product)",
   free_rewards: "💎 Diamond",
 };
 
 const PLATFORM_LABEL: Record<string, string> = {
-  promo_bonus: "💎 Package bonus Diamond diye (budget se)",
-  prize_subsidy: "🪙 Contest prize me DP coin upar se diye (budget se, asli ₹)",
+  promo_bonus: "💎 Promo bonus Diamond diye (purane, budget se)",
+  prize_subsidy: "🪙 Contest prize me DP coin upar se diye (budget se)",
   product_prize: "Product prize ki DP coin value (budget se)",
   product_prize_reversal: "Cancel hue prize claim — budget me wapas",
   platform_fee: "💎 Entry ke Diamond jo prize nahi bane (platform fee)",
@@ -200,7 +198,6 @@ const EARN_TYPES: { type: string; label: string }[] = [
   { type: "daily_task", label: "Daily tasks" },
   { type: "ad_reward", label: "Rewarded ads" },
   { type: "monthly_hall_of_fame_reward", label: "Hall of Fame" },
-  { type: "promo_bonus", label: "Package promo bonus" },
   { type: "admin_adjustment", label: "Admin adjustment" },
 ];
 
@@ -223,7 +220,7 @@ function EarnTab() {
             { key: "l", header: "💎 Diamond", className: "text-right", render: (t) => fmtNumber(byType.get(t.type)?.diamondIn ?? 0) },
             { key: "c", header: "🪙 DP coin", className: "text-right", render: (t) => fmtNumber(byType.get(t.type)?.dpIn ?? 0) },
             { key: "n", header: "Entries", className: "text-right", render: (t) => fmtNumber(byType.get(t.type)?.count ?? 0) },
-            // Only DP coins are cashed out, so only they carry a ₹ cost.
+            // Only DP coins buy shop goods, so only they carry a ₹ value.
             { key: "r", header: "DP coin ≈ ₹", className: "text-right", render: (t) => inr((byType.get(t.type)?.dpIn ?? 0) * (month.data?.payoutRate ?? 0)) },
           ]}
         />
@@ -273,14 +270,13 @@ function HealthTab() {
     ? [
         { label: "Ledger drift (balance ≠ ledger)", n: m.ledgerDrift.count },
         { label: "Negative balances", n: m.negativeBalances.count },
-        { label: "Clawback shortfalls", n: m.clawbackShortfalls.count },
         { label: "Diamond drift", n: (m.lockedDrift?.count ?? 0) + (m.lockedDrift?.overBalance ?? 0) },
         { label: "Stuck promo reservations", n: m.staleReservations },
       ]
     : [];
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-      <Card title="Money integrity">
+      <Card title="Coin integrity">
         {money.error ? <ErrorBox error={money.error} /> : null}
         {rows.map((r) => (
           <Row
@@ -329,8 +325,8 @@ const startOfToday = () => {
 
 /**
  * Coin flows (by source) and the platform side follow the range (worker
- * coinEconomyOverview filters coin_transactions / platform_ledger); supply,
- * cash and checks are always all-time.
+ * coinEconomyOverview filters coin_transactions / platform_ledger); supply
+ * and checks are always all-time.
  */
 function Overview() {
   const [range, setRange] = useState("all");
@@ -378,7 +374,7 @@ function Overview() {
       </div>
       {range !== "all" && (
         <p className="text-xs text-muted-foreground">
-          Diamond / DP coin flows aur "Platform ka hisab" is time ke hain. Balance, liability, paisa (₹) aur checks hamesha shuru se abhi tak ke hain.
+          Diamond / DP coin flows aur "Platform ka hisab" is time ke hain. Balance, shop value (₹) aur checks hamesha shuru se abhi tak ke hain.
         </p>
       )}
       {isLoading ? (
@@ -409,7 +405,7 @@ function OverviewBody({ data }: { data: CoinEconomyData }) {
         </p>
       ) : null}
 
-      {data.conversion ? <ConversionCard c={data.conversion} payoutRate={data.payoutRate} /> : null}
+      {data.conversion ? <ConversionCard c={data.conversion} dpCoinInr={data.payoutRate} /> : null}
 
       {data.diamondFlow && data.dpFlow ? (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -498,21 +494,21 @@ function OverviewBody({ data }: { data: CoinEconomyData }) {
 }
 
 /**
- * The one path from Diamonds to withdrawable DP coins: entry fees paid in
- * Diamonds (net of refunds) against prizes paid in DP coins. A prize above the
- * Diamonds spent is platform subsidy (a contest_prize budget) and real ₹.
+ * The one path from Diamonds to DP coins: entry fees paid in Diamonds (net of
+ * refunds) against prizes paid in DP coins. A prize above the Diamonds spent is
+ * platform subsidy (a contest_prize budget).
  */
-function ConversionCard({ c, payoutRate }: { c: NonNullable<CoinEconomyData["conversion"]>; payoutRate: number }) {
+function ConversionCard({ c, dpCoinInr }: { c: NonNullable<CoinEconomyData["conversion"]>; dpCoinInr: number }) {
   return (
     <Card title="💎 → 🪙 Diamond se DP coin (contests)">
       <div className="grid gap-3 sm:grid-cols-4">
         <Mini label="Entry me gaye Diamond (refund ke baad)" value={fmtNumber(c.entryDiamonds)} />
-        <Mini label="Prize me bane DP coin" value={fmtNumber(c.prizeDp)} sub={payoutRate ? `≈ ${inr(c.prizeDp * payoutRate)}` : undefined} />
-        <Mini label="Platform ne upar se diya (DP coin)" value={fmtNumber(c.subsidyDp)} tone={c.subsidyDp > 0 ? "text-red-600" : undefined} sub={c.subsidyDp && payoutRate ? `≈ ${inr(c.subsidyDp * payoutRate)} asli ₹` : undefined} />
+        <Mini label="Prize me bane DP coin" value={fmtNumber(c.prizeDp)} sub={dpCoinInr ? `≈ ${inr(c.prizeDp * dpCoinInr)}` : undefined} />
+        <Mini label="Platform ne upar se diya (DP coin)" value={fmtNumber(c.subsidyDp)} tone={c.subsidyDp > 0 ? "text-red-600" : undefined} sub={c.subsidyDp && dpCoinInr ? `≈ ${inr(c.subsidyDp * dpCoinInr)}` : undefined} />
         <Mini label="Diamond jo prize nahi bane" value={fmtNumber(c.burnedDiamonds)} sub="platform fee, product prize, tie" />
       </div>
       <p className="mt-3 text-xs text-muted-foreground">
-        Har battle me dono players ke Diamond lagte hain aur jeetne wale ko DP coin milte hain. Isi raaste se Diamond withdraw hone wala paisa banta hai.
+        Har battle me dono players ke Diamond lagte hain aur jeetne wale ko DP coin milte hain. Isi raaste se Diamond, Shopping wale DP coin bante hain.
       </p>
     </Card>
   );
@@ -606,7 +602,7 @@ function Budgets() {
             header: "Linked",
             render: (b) => (
               <span className="text-xs text-muted-foreground">
-                {b.kind === "package_bonus" ? `${b.linkedPackages} package` : b.kind === "free_rewards" ? "daily, ads, tasks" : `${b.linkedContests} contest`} · {b.usedCount} use
+                {b.kind === "free_rewards" ? "daily, ads, tasks" : `${b.linkedContests} contest`} · {b.usedCount} use
                 {b.status === "active" && b.remainingCoins <= 0 ? <span className="block text-red-600">Khatam — Edit karke total badhao</span> : null}
               </span>
             ),
@@ -664,7 +660,7 @@ function BudgetDialog({ budget, onClose, onDone }: { budget?: PromoBudget; onClo
   const isEdit = !!budget;
   const [form, setForm] = useState({
     name: budget?.name ?? "",
-    kind: (budget?.kind ?? "package_bonus") as PromoBudgetKind,
+    kind: (budget?.kind ?? "contest_prize") as PromoBudgetKind,
     totalCoins: String(budget?.totalCoins ?? ""),
     startsAt: toLocal(budget?.startsAt ?? null),
     endsAt: toLocal(budget?.endsAt ?? null),
@@ -681,7 +677,7 @@ function BudgetDialog({ budget, onClose, onDone }: { budget?: PromoBudget; onClo
         totalCoins: Number(form.totalCoins),
         startsAt: fromLocal(form.startsAt),
         endsAt: fromLocal(form.endsAt),
-        perUserLimit: (form.kind === "package_bonus" || form.kind === "free_rewards") && form.perUserLimit ? Number(form.perUserLimit) : null,
+        perUserLimit: form.kind === "free_rewards" && form.perUserLimit ? Number(form.perUserLimit) : null,
         note: form.note.trim() || null,
         reason: form.reason.trim(),
       };
@@ -706,7 +702,7 @@ function BudgetDialog({ budget, onClose, onDone }: { budget?: PromoBudget; onClo
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Kis ke liye</label>
             <select className={field} value={form.kind} onChange={(e) => set("kind", e.target.value)}>
-              <option value="contest_prize">Contest prize jo pot se zyada ho (DP coin, asli ₹)</option>
+              <option value="contest_prize">Contest prize jo pot se zyada ho (DP coin)</option>
               <option value="product_prize">Product prize ki DP coin value (sirf admin ko dikhegi)</option>
               <option value="free_rewards">Free rewards ki limit (daily login, ads, tasks)</option>
             </select>
@@ -714,7 +710,7 @@ function BudgetDialog({ budget, onClose, onDone }: { budget?: PromoBudget; onClo
         )}
         {form.kind === "contest_prize" ? (
           <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Is budget se jeetne wale ko DP coin milte hain, jo withdraw hote hain. Yaani har coin asli ₹ ki liability hai.
+            Is budget se jeetne wale ko DP coin milte hain, jo Shopping me kharch hote hain. Har coin ki ₹ value hai (shop goods).
           </p>
         ) : null}
         <div className="grid grid-cols-2 gap-3">
@@ -723,7 +719,7 @@ function BudgetDialog({ budget, onClose, onDone }: { budget?: PromoBudget; onClo
             <input type="number" className={field} value={form.totalCoins} onChange={(e) => set("totalCoins", e.target.value)} />
             {isEdit && committed > 0 ? <p className="mt-1 text-xs text-muted-foreground">Kam se kam {fmtNumber(committed)}</p> : null}
           </div>
-          {form.kind === "package_bonus" || form.kind === "free_rewards" ? (
+          {form.kind === "free_rewards" ? (
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Per user max ({KIND_UNIT[form.kind]})</label>
               <input type="number" className={field} placeholder="Koi limit nahi" value={form.perUserLimit} onChange={(e) => set("perUserLimit", e.target.value)} />
@@ -787,17 +783,14 @@ function BudgetDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
           <div>
             <p className="text-sm font-semibold mb-1">Linked</p>
-            {data.packages.map((p) => (
-              <p key={p.id} className="text-sm">Package: {p.name ?? p.id} · 💎 {fmtNumber(p.coins)} + {fmtNumber(p.bonusCoins)} bonus Diamond {p.active ? "" : "(hidden)"}</p>
-            ))}
             {data.contests.map((c) => (
               <p key={c.id} className="text-sm">Contest: {c.title ?? c.id} · fee 💎 {fmtNumber(c.totalEntryFee)} · prize 🪙 {fmtNumber(c.rewardCoins)} ({c.status})</p>
             ))}
-            {!data.packages.length && !data.contests.length ? <p className="text-sm text-muted-foreground">Kuch linked nahi.</p> : null}
+            {!data.contests.length ? <p className="text-sm text-muted-foreground">Kuch linked nahi.</p> : null}
           </div>
           <div>
             <div className="flex items-center justify-between mb-1">
-              <p className="text-sm font-semibold">Payouts ({data.payouts.length})</p>
+              <p className="text-sm font-semibold">Diye gaye ({data.payouts.length})</p>
               <button
                 className="text-xs text-primary flex items-center gap-1"
                 onClick={() => exportCsv(`budget-${data.budget.id}.csv`, data.payouts, ["createdAt", "kind", "coins", "uid", "contestId", "matchId", "refId", "description"])}
@@ -875,7 +868,7 @@ function ApprovalPasswordCard({ configured, updatedAt }: { configured: boolean; 
             <p className="font-semibold text-foreground">Approval password</p>
             <p className="text-sm text-muted-foreground">
               {configured
-                ? `Set hai${updatedAt ? ` (last change ${fmtDateTime(updatedAt)})` : ""}. Har budget, budget wale package aur promo contest prize par maanga jayega.`
+                ? `Set hai${updatedAt ? ` (last change ${fmtDateTime(updatedAt)})` : ""}. Har budget aur promo contest prize par maanga jayega.`
                 : "Set nahi hai. Iske bina koi promo budget nahi ban sakta. Login password se alag rakho."}
             </p>
           </div>
@@ -980,7 +973,7 @@ function ApprovalReset({ onDone }: { onDone: () => void }) {
   );
 }
 
-// ─── Contests / Packages ─────────────────────────────────────────────────────
+// ─── Contests ────────────────────────────────────────────────────────────────
 
 function ContestsPnl() {
   const { data = [], isLoading, error } = useQuery({ queryKey: ["coin-economy-contests"], queryFn: api.coinEconomyContests });
@@ -1047,7 +1040,7 @@ function UserStatementView() {
         <>
           <div className="grid gap-4 sm:grid-cols-3">
             <StatCard icon={Coins} label={`${data.user.username ?? data.user.uid}: total (DP coin + Diamond)`} value={fmtNumber(data.user.balance)} gradient="gradient-purple" />
-            <StatCard icon={Wallet} label="DP coin (withdraw ho sakte)" value={fmtNumber(data.user.withdrawable)} gradient="gradient-green" />
+            <StatCard icon={Wallet} label="DP coin (shopping ke liye)" value={fmtNumber(data.user.withdrawable)} gradient="gradient-green" />
             <StatCard icon={DiamondIcon as any} label="Diamond" value={fmtNumber(data.user.locked)} gradient="gradient-cyan" />
           </div>
           <div className={`rounded-xl px-4 py-2 text-sm ${data.ledger.balanced ? "bg-green-50 text-green-800" : "bg-red-50 text-red-800"}`}>

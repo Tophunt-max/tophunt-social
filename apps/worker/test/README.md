@@ -2,7 +2,7 @@
 
 Money-critical unit/integration tests for the Cloudflare Worker API. They run
 the **real handlers** (`src/routes/api.ts`) so the actual SQL, conditional
-`UPDATE ... WHERE`, `meta.changes` guards, and payment logic are exercised.
+`UPDATE ... WHERE`, `meta.changes` guards, and coin ledger logic are exercised.
 
 ## Run
 
@@ -31,10 +31,9 @@ are applied to a fresh DB per test file.
 
 ## Coverage
 
-- **createOrder** — server-side pricing from `coin_packages`, inactive-package
-  rejection, fail-closed when the gateway is unconfigured.
-- **topup** — verified-payment credit (server-authoritative coin amount),
-  tampered-signature rejection, wrong-user rejection, no double-credit on replay.
+- **Retired cash actions** — `createOrder`, `topup`, `requestDeposit` and
+  `requestWithdrawal` are refused with reason `cash_flows_retired`
+  (`economy.test.ts`); nothing is bought or cashed out.
 - **claimDailyReward** — base + streak bonus, same-day double-claim rejection.
 - **startMatch / joinMatch** — entry-fee deduction, insufficient-balance
   rejection (no deduction), self-join block, second-joiner rejection.

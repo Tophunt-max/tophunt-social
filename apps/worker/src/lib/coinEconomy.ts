@@ -4,13 +4,13 @@
  *
  * Three books are read together:
  *
- *   users.dpcoin / locked_coins   what users hold now (withdrawable + play-only)
+ *   users.dpcoin / locked_coins   what users hold now (DP coin + Diamond)
  *   coin_transactions             every movement of a user's balance
  *   platform_ledger               the platform's own side: promo coins it paid
  *                                 (negative) and entry fees it kept (positive)
  *
  * and checked against each other (`checks`), so a drift shows up here before it
- * shows up in a payout.
+ * shows up in a shop order.
  *
  * House account: the superadmin's own coins (e.g. a test float credited as
  * `house_coins`) are platform money, not a user's. They are left out of supply,
@@ -27,8 +27,6 @@ import { getAppConfig } from "./settings";
 
 /** How each ledger type is grouped in the report. Unknown types land in "other". */
 export const LEDGER_CATEGORIES: Record<string, string> = {
-  purchase: "paid_in",
-  manual_deposit: "paid_in",
   promo_bonus: "promo",
   signup_bonus: "rewards",
   referral_bonus: "rewards",
@@ -45,10 +43,6 @@ export const LEDGER_CATEGORIES: Record<string, string> = {
   contest_win_reward: "contests",
   contest_refund: "contests",
   contest_entry_refund: "contests",
-  withdrawal_hold: "cash_out",
-  withdrawal_refund: "cash_out",
-  withdrawal_hold_release: "cash_out",
-  withdrawal: "cash_out",
   refund_clawback: "reversals",
   referral_clawback: "reversals",
   chargeback_clawback: "reversals",
@@ -68,12 +62,10 @@ export const LEDGER_CATEGORIES: Record<string, string> = {
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
-  paid_in: "Khareede gaye Diamond (₹ se)",
   promo: "Promo bonus Diamond (budget se)",
   rewards: "Free rewards (signup, referral, daily, ads, tasks, Hall of Fame)",
   admin: "Admin adjustments",
   contests: "Contests (entry Diamond, prize DP coin, refund)",
-  cash_out: "Withdrawals",
   reversals: "Refund clawback / account deletion",
   spend: "DP coin spent: gifts, digital store, shop orders (and refunds)",
   other: "Other",
@@ -166,7 +158,7 @@ export async function coinEconomyOverview(env: Env, range: Range = {}) {
   const txRange = rangeSql("created_at", range);
   const userTxRange = rangeSql("created_at", range, [NOT_HOUSE_UID()]);
 
-  const [supply, byType, platform, cash, ledgerAll, lockedLedger, lockedOver, lockedNeg, staleRes, overspent, budgets, house] =
+  const [supply, byType, platform, ledgerAll, lockedLedger, lockedOver, lockedNeg, staleRes, overspent, budgets, house] =
     await Promise.all([
       one<any>(env, `SELECT COALESCE(SUM(dpcoin),0) AS total, COALESCE(SUM(locked_coins),0) AS locked,
                             SUM(CASE WHEN dpcoin > 0 THEN 1 ELSE 0 END) AS holders FROM users WHERE ${NOT_HOUSE_USER}`),
@@ -181,21 +173,13 @@ export async function coinEconomyOverview(env: Env, range: Range = {}) {
                        FROM coin_transactions ${userTxRange.sql} GROUP BY type`, ...userTxRange.binds),
       all<any>(env, `SELECT kind, COALESCE(SUM(coins),0) AS coins, COUNT(*) AS n
                        FROM platform_ledger ${txRange.sql} GROUP BY kind`, ...txRange.binds),
-      one<any>(env, `SELECT
-          (SELECT COALESCE(SUM(amount_paise),0) FROM payments WHERE status IN ('success','partially_refunded')) AS paid_in_paise,
-          (SELECT COALESCE(SUM(refunded_amount_paise),0) FROM payment_orders WHERE refunded_amount_paise > 0) AS refunded_paise,
-          (SELECT COALESCE(SUM(cash_amount),0) FROM withdrawals WHERE status = 'paid') AS paid_out_inr,
-          (SELECT COALESCE(SUM(cash_amount),0) FROM withdrawals WHERE status IN ('pending','approved')) AS pending_out_inr`),
       one<any>(env, `SELECT COALESCE(SUM(amount),0) AS n FROM coin_transactions`),
       one<any>(env, `SELECT COALESCE(SUM(locked_delta),0) AS n FROM coin_transactions`),
       one<any>(env, `SELECT COUNT(*) AS n FROM users WHERE locked_coins > MAX(dpcoin, 0) + 0.5`),
       one<any>(env, `SELECT COUNT(*) AS n FROM users WHERE locked_coins < 0`),
       one<any>(env, `SELECT COUNT(*) AS n FROM promo_reservations r
-                      WHERE r.status = 'held' AND (
-                        (r.ref_type = 'match' AND NOT EXISTS (SELECT 1 FROM contest_matches m
-                            WHERE m.id = r.ref_id AND m.status IN ('waiting_for_opponent','active')))
-                        OR (r.ref_type = 'deposit' AND NOT EXISTS (SELECT 1 FROM deposits d
-                            WHERE d.id = r.ref_id AND d.status = 'pending')))`),
+                      WHERE r.status = 'held' AND r.ref_type = 'match' AND NOT EXISTS (SELECT 1 FROM contest_matches m
+                            WHERE m.id = r.ref_id AND m.status IN ('waiting_for_opponent','active'))`),
       one<any>(env, `SELECT COUNT(*) AS n FROM promo_budgets WHERE spent_coins > total_coins`),
       one<any>(env, `SELECT COALESCE(SUM(total_coins),0) AS total, COALESCE(SUM(spent_coins),0) AS spent,
                             SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active, COUNT(*) AS n
@@ -232,7 +216,7 @@ export async function coinEconomyOverview(env: Env, range: Range = {}) {
   // Diamonds and DP coins move separately: where each came from and went.
   const diamondFlow = flowOf(types, "diamondIn", "diamondOut");
   const dpFlow = flowOf(types, "dpIn", "dpOut");
-  // The one path that turns Diamonds into withdrawable DP coins: entry fees
+  // The one path that turns Diamonds into DP coins: entry fees
   // (Diamonds, net of refunds) against prizes won (DP coins, incl. subsidy).
   const typeRow = (t: string) => types.find((x) => x.type === t);
   const entryDiamonds = (typeRow("contest_entry_fee")?.diamondOut ?? 0)
@@ -274,7 +258,7 @@ export async function coinEconomyOverview(env: Env, range: Range = {}) {
       key: "stale_reservations",
       label: "Koi atka hua budget reservation nahi",
       ok: num(staleRes?.n) === 0,
-      detail: `${num(staleRes?.n)} reservation(s) held for a finished match / processed deposit`,
+      detail: `${num(staleRes?.n)} reservation(s) held for a finished match`,
     },
     {
       key: "budgets_within_limit",
@@ -297,12 +281,6 @@ export async function coinEconomyOverview(env: Env, range: Range = {}) {
       // DP coin users hold, at ₹ per DP coin: what the shop owes in goods if all of it is spent.
       liabilityInr: Math.round(withdrawable * payoutRate * 100) / 100,
       diamondValueInr: Math.round(locked * diamondInr * 100) / 100,
-    },
-    cash: {
-      paidInInr: num(cash?.paid_in_paise) / 100,
-      refundedInr: num(cash?.refunded_paise) / 100,
-      paidOutInr: num(cash?.paid_out_inr),
-      pendingOutInr: num(cash?.pending_out_inr),
     },
     /** Each balance's flow in the range, by source category. */
     diamondFlow,
@@ -388,48 +366,6 @@ export async function contestPnl(env: Env, limit = 200) {
   });
 }
 
-/** Per package: purchases, rupees in, paid coins and bonus coins handed out. */
-export async function packagePnl(env: Env) {
-  const [pkgs, orders, deposits] = await Promise.all([
-    all<any>(env, `SELECT id, name, coins, bonus_coins, active, budget_id FROM coin_packages ORDER BY sort_order`),
-    all<any>(env, `SELECT package_id AS id, COUNT(*) AS n, COALESCE(SUM(amount_paise),0) AS paise,
-                          COALESCE(SUM(coins - COALESCE(bonus_coins,0)),0) AS base,
-                          COALESCE(SUM(COALESCE(bonus_coins,0)),0) AS bonus,
-                          COALESCE(SUM(CASE WHEN budget_id IS NOT NULL THEN COALESCE(bonus_coins,0) ELSE 0 END),0) AS promo,
-                          COALESCE(SUM(COALESCE(refunded_amount_paise,0)),0) AS refunded
-                     FROM payment_orders
-                    WHERE status IN ('paid','partially_refunded','refunded','disputed')
-                    GROUP BY package_id`),
-    all<any>(env, `SELECT package_id AS id, COUNT(*) AS n, COALESCE(SUM(pay_amount),0) AS inr,
-                          COALESCE(SUM(amount - COALESCE(bonus_coins,0)),0) AS base,
-                          COALESCE(SUM(COALESCE(bonus_coins,0)),0) AS bonus,
-                          COALESCE(SUM(CASE WHEN budget_id IS NOT NULL THEN COALESCE(bonus_coins,0) ELSE 0 END),0) AS promo
-                     FROM deposits WHERE status = 'approved' GROUP BY package_id`),
-  ]);
-  const o = new Map(orders.map((r) => [r.id, r]));
-  const d = new Map(deposits.map((r) => [r.id, r]));
-  const ids = new Set<string>([...pkgs.map((p) => p.id), ...o.keys(), ...d.keys()].filter(Boolean));
-  const byId = new Map(pkgs.map((p) => [p.id, p]));
-  return [...ids].map((id) => {
-    const p = byId.get(id);
-    const ro = o.get(id);
-    const rd = d.get(id);
-    return {
-      id,
-      name: p?.name ?? (p ? null : "(deleted package)"),
-      active: p ? !!p.active : false,
-      coins: num(p?.coins),
-      bonusCoins: num(p?.bonus_coins),
-      budgetId: p?.budget_id ?? null,
-      purchases: num(ro?.n) + num(rd?.n),
-      inr: num(ro?.paise) / 100 + num(rd?.inr),
-      refundedInr: num(ro?.refunded) / 100,
-      baseCoins: num(ro?.base) + num(rd?.base),
-      bonusCoinsGiven: num(ro?.bonus) + num(rd?.bonus),
-      promoBonusGiven: num(ro?.promo) + num(rd?.promo),
-    };
-  });
-}
 
 /** One user's statement: balances now, and ledger rows newest first with the balance after each. */
 export async function userStatement(env: Env, uid: string, limit = 300) {

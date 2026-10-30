@@ -24,7 +24,6 @@ export type NotificationType =
   | "contest-refund"
   | "contest-tie"
   | "prize-claim"
-  | "purchase"
   | "admin"
   | "contest-ending"
   | "report_update"
@@ -112,7 +111,6 @@ export function getNotificationDestination(
     // Wallet-affecting events open the wallet.
     case "contest-refund":
     case "contest-tie":
-    case "purchase":
       return "/wallet";
 
     // Referral rewards / review / milestones open Refer & Earn.
@@ -192,8 +190,6 @@ export function getNotificationTag(type: NotificationType | undefined): Notifica
       return { label: "Refund", color: "#14B8A6", icon: "diamond" };
     case "contest-tie":
       return { label: "Tie", color: "#64748B", icon: "information-circle-outline" };
-    case "purchase":
-      return { label: "Purchase", color: "#10B981", icon: "wallet" };
     case "admin":
       return { label: "News", color: "#EC4899", icon: "megaphone" };
     case "report_update":
@@ -270,12 +266,6 @@ export const CATEGORY_BY_TYPE: Record<string, NotificationCategory> = {
   monthly_hall_of_fame_reward: "contest",
   "prize-claim": "contest",
   // wallet
-  purchase: "wallet",
-  deposit: "wallet",
-  manual_deposit: "wallet",
-  withdrawal: "wallet",
-  withdrawal_hold: "wallet",
-  withdrawal_refund: "wallet",
   admin_adjustment: "wallet",
   referral: "wallet",
   referral_bonus: "wallet",

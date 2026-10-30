@@ -33,7 +33,7 @@ import { isContestStoryType, purgeVsCompositesForUser } from "./matchStories";
  * of that turned out to be wrong in ways worth spelling out, because the shape
  * of the current code is a direct response to each.
  *
- * 1. IT REFUSED. A pending payout or an unfinished contest made the request throw
+ * 1. IT REFUSED. An unfinished contest made the request throw
  *    `failed-precondition`, and the client hid its own delete button while that
  *    was true. So the one flow the stores mandate could be unavailable for days
  *    with no recourse. A deletion request is now always ACCEPTED; a genuine
@@ -54,8 +54,7 @@ import { isContestStoryType, purgeVsCompositesForUser } from "./matchStories";
  * What is NOT deleted, and why. This list is load-bearing: it is mirrored in the
  * privacy policy (content/legal.ts) and asserted by test/accountDeletion.test.ts.
  *
- *  - `coin_transactions`, `payments`, `payment_orders`, `deposits`, `withdrawals`,
- *    `promo_reservations`, `platform_ledger`
+ *  - `coin_transactions`, `shop_orders`, `promo_reservations`, `platform_ledger`
  *    — financial records, retained for the period Indian tax and accounting law
  *    requires, keyed by a uid that no longer resolves to a person.
  *  - `votes`, `vote_xp_awards`, `contest_matches` — other people entered those
@@ -77,7 +76,7 @@ import { isContestStoryType, purgeVsCompositesForUser } from "./matchStories";
 
 export { PENDING_DELETION_STATUS, DELETED_STATUS } from "./accountStatus";
 
-/** How long a deferral (live contest, pending payout) pushes the purge out by. */
+/** How long a deferral (live contest, prize to deliver) pushes the purge out by. */
 const DEFERRAL_RECHECK_MS = 24 * 60 * 60 * 1000;
 /** Give up automated retries after this many failed purge attempts. */
 const MAX_PURGE_ATTEMPTS = 5;
@@ -91,7 +90,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * not refuse the request. The distinction is the whole point of this rewrite —
  * see note 1 in the file header.
  */
-export type DeferralCode = "pending_payout" | "active_contest" | "pending_prize";
+export type DeferralCode = "active_contest" | "pending_prize";
 
 export interface DeletionDeferral {
   code: DeferralCode;
@@ -132,7 +131,7 @@ export interface DeletionEligibility {
   warnings: DeletionWarning[];
   /** Coins that will be forfeited if the user proceeds: the total (DP coin + Diamond). */
   balance: number;
-  /** The Diamond part of `balance` (users.locked_coins): never withdrawable. */
+  /** The Diamond part of `balance` (users.locked_coins): contest entry only. */
   diamonds: number;
   gracePeriodDays: number;
   /** When the purge would run if the user requested deletion right now. */
@@ -224,25 +223,6 @@ async function findDeferrals(env: Env, uid: string): Promise<DeletionDeferral[]>
   const db = getDb(env);
   const deferrals: DeletionDeferral[] = [];
 
-  const pendingPayouts = await db
-    .select({ id: schema.withdrawals.id })
-    .from(schema.withdrawals)
-    .where(
-      and(
-        eq(schema.withdrawals.userId, uid),
-        inArray(schema.withdrawals.status, ["pending", "approved"]),
-      ),
-    )
-    .all();
-  if (pendingPayouts.length > 0) {
-    deferrals.push({
-      code: "pending_payout",
-      message:
-        "Your payout is still being processed. Your account will be deleted once it has been paid or rejected.",
-      detail: { withdrawals: pendingPayouts.length },
-    });
-  }
-
   // A match this user is in has an opponent who paid to enter it. Participants
   // live in the userA/userB JSON snapshots, so this is a JSON match rather than a
   // column comparison.
@@ -265,7 +245,7 @@ async function findDeferrals(env: Env, uid: string): Promise<DeletionDeferral[]>
 
   // A physical prize that has not reached the winner yet.
   //
-  // Exactly the same shape of obligation as a pending payout, and deferred for the
+  // An in-flight obligation like a live contest, and deferred for the
   // same reason: erasure scrubs the delivery address (phaseContent), and scrubbing
   // the address of a parcel that is packed or already with a courier makes it
   // undeliverable and untraceable. `unclaimed` is NOT included — nobody is waiting

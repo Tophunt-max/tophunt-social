@@ -15,7 +15,6 @@ import * as schema from '../src/db/schema';
 import { coinValuesFromConfig, dpCoinsForPaise } from '../src/lib/coinPricing';
 
 const app = makeApp();
-const RETIRED = { CASH_FLOWS_RETIRED: 'true' } as any;
 
 async function call(env: TestEnv, uid: string, action: string, data: any = {}) {
   const res = await app.request('/api', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${uid}` }, body: JSON.stringify({ action, ...data }) }, env, fakeCtx());
@@ -64,63 +63,53 @@ const address = { recipientName: 'Asha Rao', phone: '9876543210', addressLine1: 
 
 // ===========================================================================
 describe('cash flows retired', () => {
-  it('refuses new coin purchases, manual deposits and withdrawals server-side', async () => {
-    const { env } = makeEnv(RETIRED);
+  it('refuses the old purchase, top-up, deposit and withdrawal actions server-side', async () => {
+    const { env } = makeEnv();
     await seedUser(env, 'alice', 100, 10);
-    for (const action of ['createOrder', 'requestDeposit', 'requestWithdrawal']) {
-      const r = await call(env, 'alice', action, { packageId: 'p1', amount: 50, method: 'upi', accountDetails: 'a@upi', utr: '12345' });
+    for (const action of ['createOrder', 'topup', 'requestDeposit', 'requestWithdrawal']) {
+      const r = await call(env, 'alice', action, { packageId: 'p1', amount: 50, method: 'upi', accountDetails: 'a@upi', utr: '12345', orderId: 'order_1', paymentId: 'pay_1', signature: 'x' });
       expect(r.status).toBe(412);
       expect(r.body.error.reason).toBe('cash_flows_retired');
     }
-    expect((await user(env, 'alice'))!.dpcoin).toBe(100);
+    const u = await user(env, 'alice');
+    expect(u!.dpcoin).toBe(100);
+    expect((u as any).lockedCoins).toBe(10);
+    await assertLedger(env, 'alice');
   });
 
   it('tells old app builds that buying, UPI deposits and withdrawals are off, whatever the stored config says', async () => {
-    const { env } = makeEnv(RETIRED);
+    const { env } = makeEnv();
     await config(env, { features: { topups: true, withdrawals: true }, withdrawal: { enabled: true }, paymentGateway: { mode: 'manual', upiId: 'x@upi', qrImageUrl: 'https://media.test/qr.jpg' } });
     const res = await app.request('/read/app-config', {}, env, fakeCtx());
     const body: any = await res.json();
     expect(body.features).toMatchObject({ topups: false, withdrawals: false });
-    expect(body.withdrawal).toMatchObject({ enabled: false, payoutsFrozen: true });
+    expect(body.withdrawal).toEqual({ enabled: false, payoutsFrozen: true });
     expect(body.paymentGateway).toEqual({ mode: 'off' });
     expect(JSON.stringify(body)).not.toMatch(/x@upi|qr\.jpg/);
   });
 
-  it('admin can no longer approve an old manual deposit, only reject it', async () => {
-    const { env } = makeEnv(RETIRED);
-    await seedUser(env, 'alice');
-    const ts = Date.now();
-    await drizzleOf(env).insert(schema.deposits).values({ id: 'd1', userId: 'alice', amount: 100, payAmount: 10, utr: 'UTR12345', status: 'pending', createdAt: ts, updatedAt: ts } as any);
-    let r = await admin(env, 'PATCH', '/deposits/d1', { action: 'approve' });
-    expect(r.body.error.reason).toBe('cash_flows_retired');
-    expect((await user(env, 'alice'))!.dpcoin).toBe(0);
-    r = await admin(env, 'PATCH', '/deposits/d1', { action: 'reject', adminNote: 'retired' });
-    expect(r.status).toBe(200);
+  it('admin settings refuse withdrawal and payment gateway sections', async () => {
+    const { env } = makeEnv();
+    expect((await admin(env, 'POST', '/app-settings', { withdrawal: { enabled: true } })).status).toBe(400);
+    expect((await admin(env, 'POST', '/app-settings', { paymentGateway: { mode: 'manual' } })).status).toBe(400);
+    const stored = await admin(env, 'GET', '/app-settings');
+    expect(stored.body.withdrawal).toBeUndefined();
+    expect(stored.body.paymentGateway).toBeUndefined();
   });
 
-  it('defaults to retired when the deploy flag is missing', async () => {
-    const { env } = makeEnv({ CASH_FLOWS_RETIRED: undefined } as any);
-    await seedUser(env, 'alice', 100);
-    expect((await call(env, 'alice', 'requestWithdrawal', { amount: 50 })).body.error.reason).toBe('cash_flows_retired');
-  });
-
-  it('sells no coin packages', async () => {
-    const { env } = makeEnv(RETIRED);
-    const ts = Date.now();
-    await drizzleOf(env).insert(schema.coinPackages).values({ id: 'p1', name: 'x', coins: 10, bonusCoins: 0, priceInr: 10, active: true, sortOrder: 0, createdAt: ts, updatedAt: ts } as any);
-    const res = await app.request('/read/coin-packages', { method: 'GET' }, env, fakeCtx());
-    expect(await res.json()).toEqual([]);
-  });
-
-  it('admin can no longer approve a withdrawal, but can reject it (DP coin returned)', async () => {
-    const { env } = makeEnv(RETIRED);
-    await seedUser(env, 'alice', 0);
-    const ts = Date.now();
-    await env.DB.prepare(`INSERT INTO withdrawals (id, user_id, amount, method, account_details, status, reserved, created_at, updated_at) VALUES ('w1', 'alice', 40, 'upi', 'a@upi', 'pending', 1, ?, ?)`).bind(ts, ts).run();
-    const approve = await admin(env, 'PATCH', '/withdrawals/w1', { action: 'approve' });
-    expect(approve.status).toBe(412);
-    const reject = await admin(env, 'PATCH', '/withdrawals/w1', { action: 'reject', adminNote: 'retired' });
-    expect(reject.status).toBe(200);
+  it('the old admin and read cash routes are gone', async () => {
+    const { env } = makeEnv();
+    await seedUser(env, 'alice', 40);
+    for (const [method, path] of [
+      ['PATCH', '/deposits/d1'], ['PATCH', '/withdrawals/w1'], ['GET', '/deposits'], ['GET', '/withdrawals'],
+      ['GET', '/payments'], ['GET', '/revenue'], ['GET', '/finance-trends'], ['GET', '/coin-packages'],
+    ] as const) {
+      expect((await admin(env, method, path, method === 'PATCH' ? { action: 'approve' } : undefined)).status, `${method} ${path}`).toBe(404);
+    }
+    for (const path of ['/read/coin-packages', '/read/deposits', '/read/withdrawals']) {
+      const res = await app.request(path, { headers: { Authorization: 'Bearer alice' } }, env, fakeCtx());
+      expect(res.status, path).toBe(404);
+    }
     expect((await user(env, 'alice'))!.dpcoin).toBe(40);
   });
 });
@@ -134,12 +123,15 @@ describe('coin values in INR', () => {
     expect(dpCoinsForPaise(0, 1)).toBe(0);
   });
 
-  it('fall back to the legacy payout rate, prefer the new keys, and are public', async () => {
-    expect(coinValuesFromConfig({ withdrawal: { conversionRate: 0.25 } })).toEqual({ dpCoinInr: 0.25, diamondInr: 0.25 });
+  it('default to ₹1 (no legacy payout-rate fallback), Diamond defaults to the DP coin value, and are public', async () => {
+    expect(coinValuesFromConfig({})).toEqual({ dpCoinInr: 1, diamondInr: 1 });
+    expect(coinValuesFromConfig({ withdrawal: { conversionRate: 0.25 } })).toEqual({ dpCoinInr: 1, diamondInr: 1 });
+    expect(coinValuesFromConfig({ coinPricing: { dpCoinInr: 2 } })).toEqual({ dpCoinInr: 2, diamondInr: 2 });
     expect(coinValuesFromConfig({ coinPricing: { dpCoinInr: 2, diamondInr: 0.1 } })).toEqual({ dpCoinInr: 2, diamondInr: 0.1 });
-    const { env } = makeEnv(RETIRED);
+    const { env } = makeEnv();
     const bad = await admin(env, 'POST', '/app-settings', { coinPricing: { dpCoinInr: -1 } });
     expect(bad.status).toBe(400);
+    expect((await admin(env, 'POST', '/app-settings', { coinPricing: { bogus: 1 } })).status).toBe(400);
     expect((await admin(env, 'POST', '/app-settings', { coinPricing: { dpCoinInr: 2, diamondInr: 0.5 } })).status).toBe(200);
     const pub = await app.request('/read/app-config', { method: 'GET' }, env, fakeCtx());
     expect(((await pub.json()) as any).coinValues).toEqual({ dpCoinInr: 2, diamondInr: 0.5 });
@@ -149,7 +141,7 @@ describe('coin values in INR', () => {
 // ===========================================================================
 describe('physical shop', () => {
   async function setup(dp = 1000, diamonds = 0) {
-    const { env } = makeEnv(RETIRED);
+    const { env } = makeEnv();
     await config(env, { monetization: { shop: { enabled: true, fraud: RELAXED } }, coinPricing: { dpCoinInr: 1 } });
     await seedUser(env, 'alice', dp + diamonds, diamonds, verified('9876543210'));
     await seedUser(env, 'bob', 1000, 0, verified('9876500000'));
@@ -269,7 +261,7 @@ describe('physical shop', () => {
 // ===========================================================================
 describe('XP → Diamond conversion', () => {
   async function setup(xp = 1000) {
-    const { env } = makeEnv(RETIRED);
+    const { env } = makeEnv();
     await config(env, { monetization: { earning: { xpConversion: { enabled: true, xpPerDiamond: 100, maxDiamondsPerDay: 5 } } } });
     await seedUser(env, 'alice', 0, 0, { xp });
     return env;
@@ -304,7 +296,7 @@ describe('XP → Diamond conversion', () => {
   });
 
   it('is off by default', async () => {
-    const { env } = makeEnv(RETIRED);
+    const { env } = makeEnv();
     await seedUser(env, 'alice', 0, 0, { xp: 1000 });
     expect((await call(env, 'alice', 'convertXp', { diamonds: 1, requestId: rid(1) })).body.error.reason).toBe('xp_conversion_disabled');
   });
@@ -314,7 +306,7 @@ describe('XP → Diamond conversion', () => {
 describe('shop fraud protection', () => {
   const STRICT = { requireVerifiedPhone: true, minAccountAgeDays: 3, maxOrdersPer30Days: 2, maxCoinsPer30Days: 800, maxAccountsPerAddress: 2, reviewFirstOrder: true, reviewAboveCoins: 500 };
   async function setup(fraud: any = STRICT) {
-    const { env } = makeEnv(RETIRED);
+    const { env } = makeEnv();
     await config(env, { monetization: { shop: { enabled: true, fraud } }, coinPricing: { dpCoinInr: 1 } });
     await admin(env, 'PUT', '/monetization/shop/products/cap', { title: 'Cap', priceInr: 100, active: true, variants: [{ label: 'One size', stock: 100 }] });
     const { env: e } = { env };
@@ -343,7 +335,7 @@ describe('shop fraud protection', () => {
     expect((await buy(env, 'alice', 4, 2)).body.error.reason).toBe('coin_limit'); // 500 + 400 > 800
     expect((await buy(env, 'alice', 1, 3)).status).toBe(200); // 2nd order
     expect((await buy(env, 'alice', 1, 4)).body.error.reason).toBe('order_limit');
-    const { env: env2 } = makeEnv(RETIRED);
+    const { env: env2 } = makeEnv();
     await config(env2, { monetization: { shop: { enabled: true, fraud: { ...STRICT, reviewFirstOrder: false, reviewAboveCoins: 0, maxOrdersPer30Days: 1 } } }, coinPricing: { dpCoinInr: 1 } });
     await admin(env2, 'PUT', '/monetization/shop/products/cap', { title: 'Cap', priceInr: 100, active: true, variants: [{ label: 'One size', stock: 100 }] });
     await seedUser(env2, 'bob', 5000, 0, verified('9876500000'));
@@ -485,7 +477,7 @@ describe('shop fraud protection', () => {
   });
 
   it('settings are validated and thresholds are not public', async () => {
-    const { env } = makeEnv(RETIRED);
+    const { env } = makeEnv();
     expect((await admin(env, 'POST', '/app-settings', { monetization: { shop: { fraud: { maxAccountsPerAddress: 0 } } } })).status).toBe(400);
     expect((await admin(env, 'POST', '/app-settings', { monetization: { shop: { fraud: { bogus: 1 } } } })).status).toBe(400);
     expect((await admin(env, 'POST', '/app-settings', { monetization: { shop: { enabled: true, fraud: { maxOrdersPer30Days: 4 } } } })).status).toBe(200);

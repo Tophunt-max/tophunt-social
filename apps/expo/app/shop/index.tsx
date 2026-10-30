@@ -18,7 +18,7 @@ import { useDesignWindow } from '@/src/lib/layout';
 
 /**
  * Shopping: spend 🪙 DP coin (won in contests) on real products and digital items.
- * Replaces withdrawals. Prices are set by TopHunt; delivery is included.
+ * Prices are set by TopHunt; delivery is included.
  */
 export default function ShopScreen() {
   const p = useExplorePalette();

@@ -503,8 +503,6 @@ export interface TestEnv {
   OTP_KV: ReturnType<typeof fakeKV>;
   RATE_LIMITER: ReturnType<typeof fakeRateLimiter>;
   CHAT_ARCHIVE: ReturnType<typeof fakeChatArchive>;
-  RAZORPAY_KEY_ID: string;
-  RAZORPAY_KEY_SECRET: string;
   R2_PUBLIC_BASE_URL: string;
   ALLOWED_ORIGINS: string;
   FIREBASE_PROJECT_ID: string;
@@ -531,17 +529,12 @@ export function makeEnv(overrides: Partial<TestEnv> = {}): { env: TestEnv; db: S
     OTP_KV: fakeKV(),
     RATE_LIMITER: fakeRateLimiter(),
     CHAT_ARCHIVE: fakeChatArchive(sqlite),
-    RAZORPAY_KEY_ID: 'rzp_test_key',
-    RAZORPAY_KEY_SECRET: 'rzp_test_secret',
     R2_PUBLIC_BASE_URL: 'https://cdn.test',
     ALLOWED_ORIGINS: '*',
     FIREBASE_PROJECT_ID: 'test-project',
     // Shared server-to-server admin secret. Sending it as X-Admin-Secret is the
     // simplest way to exercise /admin routes at superadmin level.
     ADMIN_PROXY_SECRET: 'test-admin-secret',
-    // Legacy money tests exercise the (retired) cash paths; production defaults
-    // to retired. New tests opt in with { CASH_FLOWS_RETIRED: 'true' }.
-    CASH_FLOWS_RETIRED: 'false',
     ...overrides,
   };
   return { env, db: sqlite };

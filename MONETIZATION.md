@@ -8,25 +8,22 @@ Earning (free) → 💎 Diamond → contest entry → win → 🪙 DP coin → S
 
 | | Before | Now |
 |---|---|---|
-| Deposits (₹ → Diamond) | Razorpay / manual UPI | **Retired** server-side. Diamonds are only earned |
-| Withdrawals (DP coin → ₹) | Admin paid out by bank/UPI | **Retired** server-side. DP coin is only spent in Shopping |
-| 💎 Diamond | Bought or earned | Earned only: check-in, tasks, referral, verification, level/season, verified ads, **XP → Diamond** |
+| Deposits (₹ → Diamond) | Razorpay / manual UPI | **Removed.** Diamonds are only earned |
+| Withdrawals (DP coin → ₹) | Admin paid out by bank/UPI | **Removed.** DP coin is only spent in Shopping |
+| 💎 Diamond | Bought or earned | Earned only: check-in, tasks, referral, signup bonus (after verification), level/season, verified ads, **XP → Diamond** |
 | 🪙 DP coin | Withdrawable | Spent only: gifts, digital items, **physical shop** |
 | ₹ value of coins | Buy rate / payout rate | Admin sets **1 DP coin = ₹X** and **1 Diamond = ₹Y** (Coin Economy → Coin value). Used to price products and for reports |
 
-- `lib/cashRetirement.ts`: `createOrder`, `requestDeposit`, `requestWithdrawal` are refused unless the deploy var
-  `CASH_FLOWS_RETIRED` is the literal `"false"` (wrangler.toml sets `"true"`). Admins cannot approve new withdrawals; they can
-  still reject (DP coin returned) and mark an already-approved payout paid. Razorpay webhook, `topup` and the reconcile
-  cron still credit an order that was paid before the switch, so nobody loses money.
-- **Old screens and switches are gone, replaced by new ones.** Admin: the Withdrawals, Deposits and Coin Packages pages
-  were deleted (old links redirect to Shopping / Coin Economy). The Buy and Cash out tabs became Coin value and Shopping.
-  The "Deposits vs Withdrawals" charts became **Earning vs Shopping** (`GET /admin/monetization/daily`). App Control
-  switches `topups` / `withdrawals` were renamed to **`earning`** (check-in, tasks, ads, XP → Diamond, level rewards) and
-  **`shopping`** (shop orders, digital items, gifts). Stored values of the old keys are ignored and dropped on the next save.
-  App: the Razorpay checkout, withdrawal fee quote and the deposit/withdraw service calls were deleted, along with
-  `react-native-razorpay`. `/wallet/store`, `/wallet/deposit` and `/wallet/withdraw` redirect to Earn / Shop.
-  Free rewards can no longer be switched to DP coin (`rewardLocking` refuses `false`): they are always Diamonds.
-  The server still has the retired actions behind `lib/cashRetirement.ts` (refused), so an old app build gets a clear message.
+- **All real-money code is deleted** (2026-10-30, migration `0075_remove_real_money.sql`): the `payments`,
+  `payment_orders`, `withdrawals`, `deposits` and `coin_packages` tables; the Razorpay integration, webhook and
+  reconcile cron; coin packages and the buy rate; withdrawal settings, fee and risk; the deposit, withdrawal and
+  payment admin pages, reports and emails; the app screens; the `first_purchase` referral rule. The coin ledger
+  (`coin_transactions`) is kept: it is the audit trail of every balance.
+- `lib/cashRetirement.ts` only answers app builds released before this: the old actions `createOrder`, `topup`,
+  `requestDeposit` and `requestWithdrawal` get a clear refusal (`cash_flows_retired`), and the public app config
+  tells them `features.topups/withdrawals: false`, `withdrawal.enabled: false`, `paymentGateway.mode: "off"`.
+- App Control switches are **`earning`** (check-in, tasks, ads, XP → Diamond, level rewards) and **`shopping`**
+  (shop orders, digital items, gifts). Free rewards are always Diamonds (`rewardLocking` refuses `false`).
 - Diamond → DP coin conversion does not exist, by design. XP → Diamond does (`lib/xpConversion.ts`): convertible XP is
   `xp - xp_converted`, so XP, levels and leaderboards never go down. Daily cap, charged to the free-rewards budget.
 - **Fresh start (done once, 2026-10-30, by the operator, not an admin tool).** On `tophunt-social-db`: 9 users,
@@ -255,8 +252,7 @@ No new secrets or environment variables are required. AdMob ids are public and s
   rules for digital goods), receipt validation and entitlement expiry. Not started.
 - **Creator payouts and marketplace**: needs KYC, TDS/GST handling, a settlement ledger separate from coins,
   dispute handling. Gifts deliberately create no payable balance until then.
-- **Legacy cash flows**: deposits, withdrawals and prize claims are unchanged. Whether the new model keeps cash
-  withdrawals is a business and legal decision; nothing was disabled.
+- **Real money**: removed entirely (see the top of this file).
 
 Coin purchases for digital goods inside iOS/Android apps may be required to use Apple/Google in-app
 purchase. Razorpay top-ups are the existing flow; review store policy before shipping the store and gifts to

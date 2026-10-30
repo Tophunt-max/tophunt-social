@@ -4,8 +4,8 @@
  *    admin switch, fixed schedule and day-reset time;
  *  - daily tasks: enable / window, distinct-battle shares, contest entries;
  *  - referrals: caps and the monthly budget hold under concurrency, a banned
- *    friend is never paid, a missing device goes to review, minimum purchase,
- *    reversal (clawback), bulk decisions, linked accounts;
+ *    friend is never paid, a missing device goes to review, reversal
+ *    (clawback), bulk decisions, linked accounts;
  *  - admin reads and the streak fix.
  */
 import { vi, describe, it, expect } from 'vitest';
@@ -360,21 +360,14 @@ describe('referral fraud checks', () => {
     expect(await coins(env, 'ref')).toBe(0);
   });
 
-  it('first purchase: a purchase below the minimum does not qualify, a later one does', async () => {
-    const env = await referralSetup({ qualifyAction: 'first_purchase', minPurchaseInr: 100 });
-    await invite(env, 'f1');
-    await qualifyReferral(env as any, 'f1', 'purchase', { amountInr: 49 });
-    await qualifyReferral(env as any, 'f1', 'purchase');
-    expect((await referral(env, 'f1'))?.status).toBe('pending');
-    await qualifyReferral(env as any, 'f1', 'purchase', { amountInr: 100 });
-    expect((await referral(env, 'f1'))?.status).toBe('rewarded');
-  });
-
-  it('validates the new program fields', async () => {
+  it('validates the new program fields; the old minimum purchase is dropped', async () => {
     const env = await referralSetup();
     expect((await admin(env, 'POST', '/app-settings', { referralProgram: { maxCoinsPerMonth: -1 } })).status).toBe(400);
-    expect((await admin(env, 'POST', '/app-settings', { referralProgram: { minPurchaseInr: 1.5 } })).status).toBe(400);
+    // Nothing can be bought, so a client still sending minPurchaseInr is ignored, not refused.
     expect((await admin(env, 'POST', '/app-settings', { referralProgram: { maxCoinsPerMonth: 5000, minPurchaseInr: 99 } })).status).toBe(200);
+    const stored = (await admin(env, 'GET', '/app-settings')).body.referralProgram;
+    expect(stored.maxCoinsPerMonth).toBe(5000);
+    expect(stored.minPurchaseInr).toBeUndefined();
   });
 
   it('the app is told whether rewards are Diamond or DP coin', () => {

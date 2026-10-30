@@ -33,7 +33,7 @@ import { isReauthRequired } from '@/src/services/auth/reauth';
  * that matter most:
  *
  *  1. The delete button was rendered only when the server said `deletable`. A
- *     pending payout or a live contest made that false, so the screen explained
+ *     live contest made that false, so the screen explained
  *     the problem and then offered no way forward. Deletion is now always
  *     available — what varies is WHEN it runs — so there is no state in which
  *     this screen has no primary action.
@@ -142,7 +142,7 @@ export default function DeleteAccountScreen() {
   const pending = eligibility?.request ?? null;
   const graceDays = eligibility?.gracePeriodDays ?? 30;
   const balance = eligibility?.balance ?? 0;
-  // DP coins can still be withdrawn before deleting; Diamonds never can.
+  // DP coins can still be spent in the Shop before deleting.
   const balanceDiamonds = Math.min(Math.max(0, balance), Math.max(0, eligibility?.diamonds ?? 0));
   const balanceDp = Math.max(0, balance - balanceDiamonds);
   const confirmed = confirmText.trim().toUpperCase() === CONFIRM_WORD;
@@ -350,11 +350,9 @@ export default function DeleteAccountScreen() {
             {pending.deferredReason ? (
               <Text style={[styles.body, { color: secondary, marginTop: 8 }]}>
                 We are waiting for something to finish first
-                {pending.deferredReason === 'pending_payout'
-                  ? ': your payout is still being processed.'
-                  : pending.deferredReason === 'active_contest'
-                    ? ': you are in a contest that has not finished.'
-                    : '.'}
+                {pending.deferredReason === 'active_contest'
+                  ? ': you are in a contest that has not finished.'
+                  : '.'}
               </Text>
             ) : null}
           </View>
@@ -435,7 +433,7 @@ export default function DeleteAccountScreen() {
           What we have to keep
         </Text>
         <Text style={[styles.body, { color: secondary }]}>
-          Records of payments, coin transactions and contests you took part in are kept for
+          Records of coin transactions, shop orders and contests you took part in are kept for
           accounting and because other players&apos; contest results depend on them. They are no
           longer linked to your name, email or phone number, and your contest photos and videos are
           destroyed with everything else.

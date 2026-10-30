@@ -122,15 +122,6 @@ export interface Env {
   // the app uploads to the Worker, which starts the Qencode job itself.
   QENCODE_API_KEY?: string;
 
-  // Razorpay payment gateway — used to verify coin top-ups server-side.
-  // If RAZORPAY_KEY_SECRET is unset, top-ups are rejected (never free-minted).
-  RAZORPAY_KEY_ID: string;
-  RAZORPAY_KEY_SECRET: string;
-  // Razorpay webhook signing secret (set in the Razorpay dashboard when you
-  // configure the webhook). Used to verify /webhook/razorpay payloads. If unset,
-  // webhook events are rejected (never credited) — the client callback still works.
-  RAZORPAY_WEBHOOK_SECRET?: string;
-
   // Observability — optional. When SENTRY_DSN is set, unhandled server errors
   // are forwarded to Sentry (in addition to structured console logs). If unset,
   // error tracking is a no-op and nothing else changes.
@@ -142,8 +133,6 @@ export interface Env {
    * Leave unset in production until an ad-network SSV callback exists.
    */
   ALLOW_UNVERIFIED_AD_REWARDS?: string;
-  /** Anything but "false" = real-money deposits/withdrawals retired (lib/cashRetirement.ts). */
-  CASH_FLOWS_RETIRED?: string;
 
   // Capacity monitoring (admin dashboard "Database Capacity" widget). All
   // OPTIONAL and fail-open: without them the widget still shows table growth +

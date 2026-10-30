@@ -22,7 +22,7 @@ import { emitToast } from '@/src/lib/toastBridge';
 import { appShareOrigin, isCompletedShare, shareBattleLink, whatsappShareUrl, openShareUrl } from '@/src/lib/share';
 import { referralCaption } from '@/src/lib/shareCaptions';
 import {
-  QUALIFY_COPY,
+  qualifyCopy,
   REFERRALS_QUERY_KEY,
   applyReferralCode,
   clearPendingInvite,
@@ -114,7 +114,7 @@ export default function ReferralScreen() {
         emitToast(
           res.referralStatus === 'rewarded'
             ? 'Referral reward mil gaya! 🎉'
-            : `Code lag gaya! ${QUALIFY_COPY[res.qualifyAction as keyof typeof QUALIFY_COPY]?.short ?? 'qualify'} karte hi reward milega.`,
+            : `Code lag gaya! ${qualifyCopy(res.qualifyAction).short} karte hi reward milega.`,
           'success',
         );
       } else if (res?.status === 'already_referred') {
@@ -228,7 +228,7 @@ export default function ReferralScreen() {
                 `Dost signup par aapka code lagaye${program.applyWindowDays ? ` (join karne ke ${Math.max(1, program.applyWindowDays)} din ke andar)` : ''}`,
                 program.qualifyAction === 'signup'
                   ? `Signup hote hi dono ko ${unit} mil jaate hain`
-                  : `${QUALIFY_COPY[program.qualifyAction].step}${program.qualifyAction === 'first_purchase' && program.minPurchaseInr ? ` (kam se kam ₹${program.minPurchaseInr})` : ''} — ${program.qualifyWindowDays} din ke andar`,
+                  : `${qualifyCopy(program.qualifyAction).step} — ${program.qualifyWindowDays} din ke andar`,
                 `Aapko ${program.referrerReward} ${unit}, dost ko ${program.refereeReward} ${unit} — seedha wallet mein`,
               ].map((s, i) => (
                 <View key={i} style={styles.step}>
@@ -284,7 +284,7 @@ export default function ReferralScreen() {
                     : data.referredBy.status === 'pending' && data.referredBy.qualifyAction
                       ? data.referredBy.qualifyAction === 'signup'
                         ? 'Reward process ho raha hai'
-                        : `${QUALIFY_COPY[data.referredBy.qualifyAction].short} karte hi ${program?.refereeReward ?? ''} ${unit} milenge`
+                        : `${qualifyCopy(data.referredBy.qualifyAction).short} karte hi ${program?.refereeReward ?? ''} ${unit} milenge`
                       : data.referredBy.status === 'review'
                         ? 'Reward review mein hai — jaldi milega'
                         : 'Ye referral reward ke liye eligible nahi raha'}
@@ -340,7 +340,7 @@ export default function ReferralScreen() {
                         ? `+${r.reward} ${unit} mile`
                         : 'Dost ko reward mila (aapki limit poori)'
                       : r.status === 'pending' && program
-                        ? `${QUALIFY_COPY[program.qualifyAction].short} ka intezaar${r.expiresAt ? ` · ${new Date(r.expiresAt).toLocaleDateString()} tak` : ''}`
+                        ? `${qualifyCopy(program.qualifyAction).short} ka intezaar${r.expiresAt ? ` · ${new Date(r.expiresAt).toLocaleDateString()} tak` : ''}`
                         : r.status === 'review'
                           ? 'Review mein'
                           : r.status === 'expired'

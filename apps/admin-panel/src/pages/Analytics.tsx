@@ -7,7 +7,7 @@ import { PageHeader, fmtNumber } from "@/lib/format";
 import { useAuth, isFullAdminRole } from "@/lib/auth";
 import { toast } from "@/lib/toast";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { Users, UserPlus, Activity, IndianRupee, Swords, Vote, Image, PlayCircle, Trophy } from "lucide-react";
+import { Users, UserPlus, Activity, Swords, Vote, Image, PlayCircle, Trophy } from "lucide-react";
 
 export default function Analytics() {
   const { confirm } = useConfirm();
@@ -24,7 +24,7 @@ export default function Analytics() {
   const d = data;
   return (
     <div>
-      <PageHeader title="Analytics" subtitle="Growth, engagement and money at a glance" />
+      <PageHeader title="Analytics" subtitle="Growth, engagement and contests at a glance" />
 
       {isLoading ? (
         <div className="text-sm text-muted-foreground py-10 text-center">Loading…</div>
@@ -46,16 +46,13 @@ export default function Analytics() {
             <StatCard icon={Image} label="Posts (today)" value={fmtNumber(d?.postsToday ?? 0)} gradient="gradient-orange" />
           </div>
 
-          <h3 className="font-bold text-foreground mb-3">Money & Contests</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            {/* These cards used to render a COIN count with a ₹ icon. */}
-            <StatCard icon={IndianRupee} label="Revenue (today)" value={`₹${fmtNumber(d?.revenueTodayInr ?? 0)}`} gradient="gradient-green" />
-            <StatCard icon={IndianRupee} label="Revenue (30d)" value={`₹${fmtNumber(d?.revenue30dInr ?? 0)}`} gradient="gradient-green" />
+          <h3 className="font-bold text-foreground mb-3">Contests</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
             <StatCard icon={Swords} label="Active Battles" value={fmtNumber(d?.activeMatches ?? 0)} gradient="gradient-purple" />
             <StatCard icon={Trophy} label="Completed Battles" value={fmtNumber(d?.completedMatches ?? 0)} gradient="gradient-blue" />
           </div>
 
-          {/* Closed loop: earning vs shopping (replaces deposits vs withdrawals). */}
+          {/* Closed loop: earning vs shopping. */}
           <div className="mb-6"><ClosedLoopTrend days={14} /></div>
 
           {isFullAdmin && <UsageCard days={usageDays} setDays={setUsageDays} q={usage} />}

@@ -39,7 +39,7 @@ import {
 } from '@/src/lib/share';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { CoinMedallion } from '@/src/components/result/CoinMedallion';
-import { useCoinRate } from '@/src/hooks/useCoinPackages';
+import { useCoinRate } from '@/src/hooks/useCoinRate';
 import { coinsInInr } from '@/src/lib/coinValue';
 import {
   coinsLabel,

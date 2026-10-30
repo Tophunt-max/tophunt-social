@@ -18,8 +18,8 @@ import {
  * App Settings — the operational knobs that used to be a raw JSON textarea.
  *
  * A JSON editor is fine for a developer and hostile to everyone else: no
- * validation, no discoverability, and one stray comma away from breaking wallet
- * limits in production.
+ * validation, no discoverability, and one stray comma away from breaking a
+ * setting in production.
  *
  * Two rules this page follows:
  *
@@ -28,7 +28,7 @@ import {
  *     form does not model, so saving here can never silently drop a setting a
  *     future version added.
  *  2. Machine-critical settings (maintenance mode, feature flags) live on the App
- *     Control page. This page is money, legal and messaging.
+ *     Control page. This page is contact emails, links and messaging.
  */
 
 const field =
@@ -48,7 +48,6 @@ const MANAGED_KEYS = [
   // Owned by the Feed Ranking page (validated + audited there).
   "feedWeights",
   "verificationReward",
-  "paymentGateway",
   "ads",
   "adminAlertEmail",
   "supportEmail",
@@ -75,10 +74,9 @@ const MANAGED_KEYS = [
   "authMethods",
   // Free-reward locking: owned by Coin Economy → Earn.
   "rewardLocking",
-  // Withdrawals & payouts and coin pricing are money settings owned ONLY by the
-  // Coin Economy hub. Not editable here, and never re-posted from this page — a stale copy
-  // could silently undo a payout freeze or re-price the store.
-  "withdrawal",
+  // Coin values (₹ per DP coin / Diamond) are owned ONLY by the Coin Economy hub.
+  // Not editable here, and never re-posted from this page — a stale copy could
+  // silently re-price the shop.
   "coinPricing",
   // Server-stamped.
   "_version",
@@ -107,7 +105,6 @@ interface VerificationRewardCfg {
 
 interface Cfg {
   verificationReward: VerificationRewardCfg;
-  paymentGateway: { mode: "auto" | "manual" | "both" };
   ads: { enabled: boolean; trustClient: boolean; provider: string; reward: number; dailyCap: number };
   adminAlertEmail: string;
   supportEmail: string;
@@ -135,7 +132,6 @@ const DEFAULTS: Cfg = {
     emailResendCooldownSec: 60,
     smsResendCooldownSec: 60,
   },
-  paymentGateway: { mode: "auto" },
   ads: { enabled: false, trustClient: false, provider: "", reward: 5, dailyCap: 10 },
   adminAlertEmail: "",
   supportEmail: "",
@@ -225,7 +221,6 @@ export default function AppSettings() {
       ...DEFAULTS,
       ...data,
       verificationReward: { ...DEFAULTS.verificationReward, ...(data.verificationReward || {}) },
-      paymentGateway: { ...DEFAULTS.paymentGateway, ...(data.paymentGateway || {}) },
       ads: { ...DEFAULTS.ads, ...(data.ads || {}) },
       socialLinks: { ...DEFAULTS.socialLinks, ...(data.socialLinks || {}) },
     });
@@ -302,7 +297,7 @@ export default function AppSettings() {
                 placeholder="ops@tophunt.in"
                 className={field}
               />
-              <p className={hint}>Receives shop order, budget and money-health alerts. Never exposed to the app.</p>
+              <p className={hint}>Receives shop order, budget and coin-ledger health alerts. Never exposed to the app.</p>
             </div>
             <div>
               <label className={label}>Public support email</label>

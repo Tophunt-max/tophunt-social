@@ -1,9 +1,9 @@
 /**
  * The two balances a user sees (worker lib/diamonds.ts).
  *
- *   Diamond  play-only. The only way to pay a contest entry fee. Comes from
- *            coin packages and free rewards. Never withdrawable.
- *   DP coin  contest prizes. The only balance that can be withdrawn.
+ *   Diamond  play-only. The only way to pay a contest entry fee. Earned free
+ *            (XP conversion and rewards).
+ *   DP coin  contest prizes. Spent in the Shop and on gifts.
  *
  * The server stores one total (`dpcoin`, mapped to `Dpcoin` on the profile) and
  * the Diamond part of it (`lockedCoins`), so both are derived here.

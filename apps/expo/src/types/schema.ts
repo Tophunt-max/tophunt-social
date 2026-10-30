@@ -33,7 +33,7 @@ export interface UserProfile {
 
   // Gamification & Wallet
   Dpcoin: number; // TOTAL of DP coin + Diamond; split with balancesOf()
-  /** The Diamond part of `Dpcoin` (users.locked_coins): entry fees only, never withdrawable. */
+  /** The Diamond part of `Dpcoin` (users.locked_coins): contest entry fees only. */
   lockedCoins?: number;
   xp: number;
   level: number;
@@ -188,7 +188,7 @@ export interface Story {
 export interface Transaction {
   id: string;
   userId: string;
-  type: 'deposit' | 'withdrawal' | 'entry_fee' | 'contest_win' | 'daily_bonus';
+  type: 'entry_fee' | 'contest_win' | 'daily_bonus';
   amount: number;
   description: string;
   

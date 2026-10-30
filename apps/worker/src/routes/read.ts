@@ -57,9 +57,7 @@ import { memoGet, memoPut } from "../lib/memo";
 import { recordBlogView } from "../lib/viewCounter";
 import { kickSettlementIfDue } from "../lib/settleDue";
 import { publicAppConfig } from "../lib/appControl";
-import { listPublicCoinPackages } from "../lib/coinCatalog";
 import { liveCampaigns } from "../lib/sponsored";
-import { cashFlowsRetired } from "../lib/cashRetirement";
 import { profileGiftSummary } from "../lib/gifts";
 import { adsAllowedIn, parseMonetizationConfig } from "../lib/monetizationConfig";
 import { contestPrizeCoins, economyConfig } from "../lib/economyLimits";
@@ -1987,7 +1985,7 @@ readRoute.get("/app-config", async (c) => {
     c,
     APP_CONFIG_EDGE_TTL_SEC,
     async () => ({
-      ...publicAppConfig((await getAppConfig(c.env)) || {}, Date.now(), cashFlowsRetired(c.env)),
+      ...publicAppConfig((await getAppConfig(c.env)) || {}, Date.now()),
       // The client builds responsive Cloudflare variants itself
       // (apps/expo/src/lib/imageVariants.ts). This is its kill switch: false makes
       // every image load the original, without an app release. Env-derived, so
@@ -2021,8 +2019,7 @@ readRoute.get("/app-config", async (c) => {
  * so a policy nobody had typed arrived at the client as `""` and the screen
  * rendered "Our privacy policy has not been published yet." — which is what
  * tophunt.in/legal/terms, /legal/privacy and /legal/refund were all serving. An
- * empty privacy policy is an app-store rejection reason, and an empty refund policy
- * is a Razorpay compliance gap for paid digital goods.
+ * empty privacy policy is an app-store rejection reason.
  */
 readRoute.get("/legal", async (c) => {
   // 10 minutes rather than the 2 used for app-config. A legal document changes a
@@ -2040,37 +2037,6 @@ readRoute.get("/legal", async (c) => {
   });
 });
 
-// ================= WALLET (auth) =================
-// (Coin-packages + transactions endpoints are defined once below — the
-// server-authoritative, cursor-paginated versions.)
-
-// The signed-in user's own manual deposit requests.
-readRoute.get("/deposits", requireAuth, async (c) => {
-  const db = getDb(c.env);
-  const uid = c.get("user").uid;
-  const rows = await db
-    .select()
-    .from(schema.deposits)
-    .where(eq(schema.deposits.userId, uid))
-    .orderBy(desc(schema.deposits.createdAt))
-    .limit(50)
-    .all();
-  return c.json({
-    deposits: rows.map((r) => ({
-      id: r.id,
-      amount: r.amount,
-      payAmount: r.payAmount,
-      method: r.method,
-      utr: r.utr,
-      status: r.status,
-      adminNote: r.adminNote,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    })),
-  });
-});
-
-// The signed-in user's own withdrawal requests.
 /**
  * The signed-in user's referral dashboard: code + share link, program terms,
  * stats, the friends they invited (with status), their own referral (if any) and
@@ -2082,33 +2048,6 @@ readRoute.get("/me/referrals", requireAuth, async (c) => {
   const summary = await referralSummary(c.env, uid, origin);
   c.header("Cache-Control", "private, no-store");
   return c.json(summary);
-});
-
-readRoute.get("/withdrawals", requireAuth, async (c) => {
-  const db = getDb(c.env);
-  const uid = c.get("user").uid;
-  const rows = await db
-    .select()
-    .from(schema.withdrawals)
-    .where(eq(schema.withdrawals.userId, uid))
-    .orderBy(desc(schema.withdrawals.createdAt))
-    .limit(50)
-    .all();
-  return c.json(
-    rows.map((r) => ({
-      id: r.id,
-      amount: r.amount,
-      // NET: what is actually paid, after the platform fee.
-      cashAmount: r.cashAmount,
-      grossAmount: r.grossAmount ?? r.cashAmount,
-      feeAmount: Number(r.feeAmount) || 0,
-      method: r.method,
-      status: r.status,
-      adminNote: r.adminNote,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    })),
-  );
 });
 
 // ================= ANNOUNCEMENT POPUPS (auth) =================
@@ -2371,18 +2310,6 @@ readRoute.get("/transactions", requireAuth, async (c) => {
     })),
     nextCursor,
   });
-});
-
-// Public catalog of purchasable coin packages (used by the store to build a
-// Razorpay order via the server-authoritative `createOrder` action). Only
-// active packages are exposed; pricing lives server-side. Never cached by
-// browsers, phones or the edge: an admin's price edit must show at once (it is
-// also pushed live — lib/coinCatalog.ts).
-readRoute.get("/coin-packages", async (c) => {
-  // Coin purchases are retired (lib/cashRetirement.ts): nothing is for sale.
-  const res = c.json(cashFlowsRetired(c.env) ? [] : await listPublicCoinPackages(c.env));
-  res.headers.set("Cache-Control", "no-store, max-age=0");
-  return res;
 });
 
 // ================= MONETIZATION (lib/sponsored.ts, lib/gifts.ts) =================
@@ -2993,11 +2920,10 @@ async function serveUserProfile(c: any, id: string): Promise<Response> {
   // Uncached, which is a deliberate improvement rather than a cost. This payload
   // carries a WALLET BALANCE that none of the ~15 coin-mutating paths invalidate —
   // the match entry fee, the daily reward, the rewarded-ad credit, the task claim,
-  // the Razorpay top-up, the withdrawal debit, admin wallet adjustments and deposit
-  // approvals, settlement, payouts and the cron prize sweep. While it was served
-  // from a shared cache, a user who had just paid an entry fee or bought coins could
-  // see a stale balance for the whole TTL, which in a coin app reads as a lost
-  // payment. Reading their own row directly removes that window entirely: one
+  // XP conversion, gifts, shop orders, admin wallet adjustments, settlement and the
+  // cron prize sweep. While it was served from a shared cache, a user who had just
+  // paid an entry fee could see a stale balance for the whole TTL, which in a coin
+  // app reads as lost coins. Reading their own row directly removes that window entirely: one
   // indexed lookup by primary key, and the balance is always current.
   //
   // It also means the shared entry below can never contain anyone's private fields,
@@ -3282,7 +3208,7 @@ readRoute.get("/users/:id/bookmarks", requireAuth, async (c) => {
   // Bookmarks are private. Derive the owner from the verified token and treat
   // the :id param as an assertion to check, never as the lookup key — using the
   // param directly made this an IDOR (any user could read anyone's saved posts).
-  // Same pattern as /read/deposits, /read/withdrawals and /read/transactions.
+  // Same pattern as /read/transactions.
   const uid = c.get("user").uid;
   const userId = c.req.param("id");
   if (userId !== uid) throw httpsError("permission-denied", "Not allowed.");

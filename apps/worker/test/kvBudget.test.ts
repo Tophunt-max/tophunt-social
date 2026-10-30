@@ -161,7 +161,6 @@ const HOT_ENDPOINTS: Array<{ name: string; path: string }> = [
   { name: 'blog categories', path: '/read/blog/categories' },
   { name: 'app config', path: '/read/app-config' },
   { name: 'legal', path: '/read/legal' },
-  { name: 'coin packages', path: '/read/coin-packages' },
 ];
 
 describe('the hot public read endpoints spend ZERO KV writes', () => {
@@ -382,7 +381,7 @@ describe('the deep health check really re-probes', () => {
   });
 });
 
-describe('job state and payment intents are not in KV', () => {
+describe('job state is not in KV', () => {
   it('keeps blog import progress in D1, so an import cannot exhaust the write quota', async () => {
     // This was one KV write per import BATCH with a 24h ttl, so a single import of a
     // few thousand URLs produced hundreds of writes and could take the whole

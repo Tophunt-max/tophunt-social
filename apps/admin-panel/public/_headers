@@ -1,6 +1,6 @@
 # Security headers for the admin panel (Cloudflare Pages).
 #
-# This app authorises withdrawals, wallet adjustments and role changes, and it
+# This app authorises coin adjustments, shop orders and role changes, and it
 # shipped with no CSP, no HSTS and no framing protection at all.
 #
 # Unlike the user web app, this project is a plain static SPA — no `_worker.js`,
@@ -23,8 +23,8 @@
 #    It is exactly one API host: https://api.tophunt.in. No WebSocket entry,
 #    because this app has no realtime subscription (the user app does), and no
 #    media host, because it only ever *displays* media via <img>, which img-src
-#    covers — deposit screenshots are never fetch()ed.
-#  - https://*.workers.dev is deliberately GONE. On a page that can move money,
+#    covers — uploaded images are never fetch()ed.
+#  - https://*.workers.dev is deliberately GONE. On a page that can move coins,
 #    that wildcard made every Cloudflare customer's Worker a permitted
 #    destination for stolen data. In local dev the Worker is reached through the
 #    Vite proxy (same-origin, covered by 'self'), so nothing needs it.

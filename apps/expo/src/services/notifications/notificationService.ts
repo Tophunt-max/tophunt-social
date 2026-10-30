@@ -164,12 +164,12 @@ class NotificationService {
      *
      * Previously there was a single "default" channel, which made OS-level
      * muting all-or-nothing: a user who wanted to stop like notifications had to
-     * silence everything, including payout confirmations. Separate channels let
+     * silence everything, including prize and shop-order updates. Separate channels let
      * Android's own notification settings mute one category at a time.
      *
      * The ids must match `ANDROID_CHANNEL` in the worker's lib/notify.ts, since
      * the worker stamps `channel_id` onto each FCM message. Importance is tuned
-     * per category — money and announcements should not vibrate the same way a
+     * per category — rewards and announcements should not vibrate the same way a
      * like does.
      */
     async configureAndroidChannels(): Promise<void> {
@@ -183,7 +183,7 @@ class NotificationService {
         }[] = [
             { id: ANDROID_CHANNEL_ID.social, name: 'Likes, comments & follows', importance: AndroidImportance.DEFAULT, vibrate: true },
             { id: ANDROID_CHANNEL_ID.contest, name: 'Contests & battles', importance: AndroidImportance.HIGH, vibrate: true },
-            { id: ANDROID_CHANNEL_ID.wallet, name: 'Diamond, DP coin & payouts', importance: AndroidImportance.HIGH, vibrate: true },
+            { id: ANDROID_CHANNEL_ID.wallet, name: 'Diamond, DP coin & shop orders', importance: AndroidImportance.HIGH, vibrate: true },
             { id: ANDROID_CHANNEL_ID.admin, name: 'Announcements', importance: AndroidImportance.DEFAULT, vibrate: false },
         ];
 
