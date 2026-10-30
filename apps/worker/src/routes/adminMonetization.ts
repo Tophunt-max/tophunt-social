@@ -498,6 +498,43 @@ export function registerMonetizationRoutes(
     });
   });
 
+  /** One user's shopping, gifts, digital items and XP conversions (Users → Shopping tab). */
+  adminRoute.get("/monetization/users/:uid/summary", async (c) => {
+    const uid = c.req.param("uid");
+    if (!uid || uid.length > 128) throw httpsError("invalid-argument", "Invalid user id.");
+    const db = c.env.DB;
+    const [orders, giftsOut, giftsIn, store, xp, limits] = await Promise.all([
+      db.prepare(
+        `SELECT o.id, o.status, o.review_status, o.risk_flags, o.total_coins, o.created_at,
+                (SELECT title FROM shop_order_items i WHERE i.order_id = o.id ORDER BY i.id LIMIT 1) AS title
+           FROM shop_orders o WHERE o.uid = ? ORDER BY o.created_at DESC LIMIT 50`,
+      ).bind(uid).all<any>(),
+      db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(total_coins), 0) AS coins FROM gift_transactions WHERE sender_uid = ?`).bind(uid).first<any>(),
+      db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(total_coins), 0) AS coins, COUNT(DISTINCT sender_uid) AS senders FROM gift_transactions WHERE recipient_uid = ?`).bind(uid).first<any>(),
+      db.prepare(
+        `SELECT p.id, p.item_id, r.name, p.price_coins, p.status, p.created_at FROM store_purchases p
+           LEFT JOIN reward_catalog r ON r.id = p.item_id WHERE p.uid = ? ORDER BY p.created_at DESC LIMIT 50`,
+      ).bind(uid).all<any>(),
+      db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(diamonds), 0) AS diamonds, COALESCE(SUM(xp_spent), 0) AS xp FROM xp_conversions WHERE uid = ?`).bind(uid).first<any>(),
+      db.prepare(
+        `SELECT COUNT(*) AS orders30, COALESCE(SUM(CASE WHEN status NOT IN ('cancelled','returned') THEN total_coins ELSE 0 END), 0) AS coins30
+           FROM shop_orders WHERE uid = ? AND created_at >= ? AND status != 'cancelled'`,
+      ).bind(uid, Date.now() - 30 * 86_400_000).first<any>(),
+    ]);
+    const fraud = parseMonetizationConfig(await getAppConfig(c.env)).shop.fraud;
+    return c.json({
+      orders: (orders.results ?? []).map((o) => ({
+        id: o.id, status: o.status, reviewStatus: o.review_status, riskFlags: JSON.parse(o.risk_flags || "[]"),
+        totalCoins: Number(o.total_coins), createdAt: Number(o.created_at), title: o.title,
+      })),
+      limits: { orders30: Number(limits?.orders30 ?? 0), maxOrders30: fraud.maxOrdersPer30Days, coins30: Number(limits?.coins30 ?? 0), maxCoins30: fraud.maxCoinsPer30Days },
+      gifts: { sent: Number(giftsOut?.n ?? 0), sentCoins: Number(giftsOut?.coins ?? 0), received: Number(giftsIn?.n ?? 0), receivedCoins: Number(giftsIn?.coins ?? 0), supporters: Number(giftsIn?.senders ?? 0) },
+      digital: (store.results ?? []).map((p) => ({ id: p.id, itemId: p.item_id, name: p.name, priceCoins: Number(p.price_coins), status: p.status, createdAt: Number(p.created_at) })),
+      xpConversions: { count: Number(xp?.n ?? 0), diamonds: Number(xp?.diamonds ?? 0), xpSpent: Number(xp?.xp ?? 0) },
+      riskLabels: RISK_FLAG_LABELS,
+    });
+  });
+
   /** Fraud review decision for a held order: approve (can be packed) or reject (cancelled, DP coin refunded). */
   adminRoute.post("/monetization/shop/orders/:id/review", async (c) => {
     const id = c.req.param("id");

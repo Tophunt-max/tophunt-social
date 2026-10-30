@@ -82,6 +82,10 @@ export default function Withdrawals() {
 
   return (
     <div>
+      <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        Withdrawals are retired: users spend DP coin in the Shop instead. This page is history. An open request can only be
+        rejected (the DP coin goes back to the user); an already approved one can still be marked paid.
+      </div>
       <PageHeader
         title="Withdrawals"
         subtitle="Cash payout requests"
@@ -153,12 +157,8 @@ export default function Withdrawals() {
               <div className="flex items-center justify-end gap-1.5">
                 {w.status === "pending" && (
                   <>
-                    <ActionBtn tone="green" title="Approve" onClick={async () => {
-                      if (await confirm({ title: "Approve payout?", description: `${w.amount} DP will be deducted from the user's balance.` }))
-                        actionMut.mutate({ id: w.id, action: "approve" });
-                    }}><Check size={14} /> Approve</ActionBtn>
                     <ActionBtn tone="red" title="Reject" onClick={async () => {
-                      if (await confirm({ title: "Reject request?", description: "The request will be rejected.", variant: "destructive" }))
+                      if (await confirm({ title: "Reject request?", description: "The request will be rejected and the held DP coin returned to the user.", variant: "destructive" }))
                         actionMut.mutate({ id: w.id, action: "reject" });
                     }}><X size={14} /> Reject</ActionBtn>
                   </>

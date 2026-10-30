@@ -60,8 +60,11 @@ export default function Dashboard() {
   // Actionable items that need an admin's attention right now.
   const o = overview.data;
   const alerts = [
-    { n: o?.pendingWithdrawals ?? 0, label: "payout(s) awaiting action", href: "/withdrawals", icon: Banknote, tone: "amber" as const },
-    { n: o?.pendingDeposits ?? 0, label: "deposit(s) to verify", href: "/deposits", icon: Wallet, tone: "blue" as const },
+    { n: (o as any)?.pendingShopReview ?? 0, label: "shop order(s) need a fraud review", href: "/shopping?tab=orders", icon: Flag, tone: "red" as const },
+    { n: (o as any)?.pendingShopOrders ?? 0, label: "shop order(s) to pack, ship or answer", href: "/shopping?tab=orders", icon: Wallet, tone: "blue" as const },
+    // Retired flows: only shown while an old request is still open.
+    { n: o?.pendingWithdrawals ?? 0, label: "old withdrawal(s) to reject", href: "/withdrawals", icon: Banknote, tone: "amber" as const },
+    { n: o?.pendingDeposits ?? 0, label: "old deposit(s) to resolve", href: "/deposits", icon: Wallet, tone: "amber" as const },
     { n: o?.reports ?? 0, label: "open report(s)", href: "/reports", icon: Flag, tone: "red" as const },
     { n: o?.support ?? 0, label: "pending ticket(s)", href: "/support", icon: MessageSquare, tone: "violet" as const },
   ].filter((a) => a.n > 0);
@@ -133,7 +136,7 @@ export default function Dashboard() {
 
         {/* Finance trends: deposits vs withdrawals (14 days) */}
         <div className="bg-card border border-border rounded-2xl p-5">
-          <h3 className="font-bold text-foreground mb-1">Deposits vs Withdrawals</h3>
+          <h3 className="font-bold text-foreground mb-1">Deposits vs Withdrawals (retired, history)</h3>
           <p className="text-xs text-muted-foreground mb-4">Approved deposits &amp; processed payouts (₹, last 14 days)</p>
           <div className="h-64">
             {financeData.length > 0 ? (

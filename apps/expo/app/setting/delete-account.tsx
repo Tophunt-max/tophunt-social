@@ -408,8 +408,8 @@ export default function DeleteAccountScreen() {
               You still have {balanceDp} DP coin and {balanceDiamonds} Diamond
             </Text>
             <Text style={[styles.body, { color: secondary }]}>
-              Both will be forfeited and cannot be recovered. Diamonds cannot be withdrawn. If you want to cash out your DP
-              coins, withdraw them first and delete your account once the payout is complete.
+              Both will be forfeited and cannot be recovered. Coins are never paid out in cash. If you want something for
+              your DP coin, spend it in the Shop first, and delete your account once your order has been delivered.
             </Text>
           </View>
         )}

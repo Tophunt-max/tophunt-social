@@ -2649,7 +2649,10 @@ adminRoute.get("/overview", async (c) => {
   const pendingShopOrders = Number(
     (await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM shop_orders WHERE status IN ('placed', 'packed', 'return_requested')`).first<{ n: number }>())?.n ?? 0,
   );
-  const overview = { users, posts, reports, support, revenue, revenueInr, activeMatches, liveContests, pendingWithdrawals, pendingDeposits, pendingPrizeClaims, pendingShopOrders };
+  const pendingShopReview = Number(
+    (await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM shop_orders WHERE review_status = 'pending'`).first<{ n: number }>())?.n ?? 0,
+  );
+  const overview = { users, posts, reports, support, revenue, revenueInr, activeMatches, liveContests, pendingWithdrawals, pendingDeposits, pendingPrizeClaims, pendingShopOrders, pendingShopReview };
   memoPut(OVERVIEW_MEMO_KEY, overview, 30);
   return c.json(withViewerRole(c, overview));
 });

@@ -392,6 +392,21 @@ describe('shop fraud protection', () => {
     expect(await env.DB.prepare(`SELECT 1 FROM admin_audit_log WHERE action = 'shop.order.review.reject'`).first()).toBeTruthy();
   });
 
+  it('admin user summary shows orders, limits and review state; moderators are refused', async () => {
+    const env = await setup();
+    await seedUser(env, 'alice', 5000, 0, verified('9876543210'));
+    await buy(env, 'alice', 2, 1);
+    const r = await admin(env, 'GET', '/monetization/users/alice/summary');
+    expect(r.status).toBe(200);
+    expect(r.body.orders).toHaveLength(1);
+    expect(r.body.orders[0]).toMatchObject({ totalCoins: 200, reviewStatus: 'pending' });
+    expect(r.body.limits).toMatchObject({ orders30: 1, maxOrders30: 2, coins30: 200, maxCoins30: 800 });
+    await seedUser(env, 'mod', 0, 0, { role: 'moderator' });
+    expect((await admin(env, 'GET', '/monetization/users/alice/summary', undefined, 'mod:moderator')).status).toBe(403);
+    const ov = await admin(env, 'GET', '/overview');
+    expect(ov.body.pendingShopReview).toBe(1);
+  });
+
   it('a customer can still cancel an order that is under review', async () => {
     const env = await setup();
     await seedUser(env, 'alice', 5000, 0, verified('9876543210'));

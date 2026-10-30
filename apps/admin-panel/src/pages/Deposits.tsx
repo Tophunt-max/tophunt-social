@@ -49,6 +49,10 @@ export default function Deposits() {
 
   return (
     <div>
+      <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        Buying Diamonds is retired: Diamonds are only earned now. This page is history. A deposit still pending means the user
+        paid real money before the switch: approve it, or reject it and refund the money to them.
+      </div>
       <PageHeader
         title="Deposits"
         subtitle="Payment gateway & manual top-up approvals"

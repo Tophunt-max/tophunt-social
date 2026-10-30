@@ -1000,6 +1000,7 @@ export const api = {
       ),
     shopOrder: (id: string) => get<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}`),
     setOrderStatus: (id: string, payload: any) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/status`, payload),
+    userSummary: (uid: string) => get<any>(`/admin/monetization/users/${encodeURIComponent(uid)}/summary`),
     reviewOrder: (id: string, decision: "approve" | "reject", note?: string) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/review`, { decision, note }),
   },
   appSettings: () => get<any>("/admin/app-settings"),

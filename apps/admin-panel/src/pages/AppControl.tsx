@@ -28,8 +28,8 @@ const FEATURES: { key: string; label: string }[] = [
   { key: "chat", label: "Chat" },
   { key: "stories", label: "Stories" },
   { key: "posts", label: "Posts" },
-  { key: "topups", label: "💎 Diamond store / top-up" },
-  { key: "withdrawals", label: "Withdrawals" },
+  { key: "topups", label: "💎 Diamond store / top-up (retired: server always refuses)" },
+  { key: "withdrawals", label: "Withdrawals (retired: server always refuses)" },
 ];
 
 const PRESETS: { label: string; hint: string; features: Record<string, boolean> }[] = [

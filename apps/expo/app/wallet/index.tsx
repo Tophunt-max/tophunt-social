@@ -34,6 +34,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useDesignWindow } from '@/src/lib/layout';
 import { StreakMilestoneBanner } from '@/src/components/gamification/MotionBits';
 import { WalletShortcuts } from '@/src/components/gifts/WalletShortcuts';
+import { ledgerLabel } from '@/src/lib/ledgerLabels';
 
 
 const FILTERS = ['All', 'Income', 'Expense'];
@@ -53,7 +54,7 @@ type DailySlot = { day: number; amount: number; status: 'claimed' | 'ready' | 'u
 // A reward credited as Diamonds (play-only) or as DP coins (withdrawable).
 const rewardUnit = (res: any) => (Number(res?.lockedCoins || 0) > 0 ? 'Diamond' : 'DP coin');
 const playOnly = (res: any) =>
-  Number(res?.lockedCoins || 0) > 0 ? '\nDiamond se contest khelo. Jeet kar DP coin milenge, jo withdraw hote hain.' : '';
+  Number(res?.lockedCoins || 0) > 0 ? '\nDiamond se contest khelo. Jeet kar DP coin milenge, jinse Shopping kar sakte ho.' : '';
 
 export default function WalletScreen() {
   // Seven day slots across the design width (the phone column on desktop).
@@ -365,7 +366,7 @@ export default function WalletScreen() {
         </View>
         <View style={{ flex: 1, marginLeft: 14 }}>
             <Text style={[styles.transTitle, { color: textColor }]}>{item.description}</Text>
-            <Text style={[styles.transDate, { color: subTextColor }]}>{item.date} • {item.type.replace('_', ' ').toUpperCase()}</Text>
+            <Text style={[styles.transDate, { color: subTextColor }]}>{item.date} • {ledgerLabel(item.type)}</Text>
         </View>
         {/* Each row split into its Diamond and DP coin parts (src/lib/balances.ts). */}
         <View style={styles.transAmounts}>

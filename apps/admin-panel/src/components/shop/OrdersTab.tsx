@@ -5,7 +5,7 @@ import { toast } from "@/lib/toast";
 import { Table } from "@/components/ui/Table";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
-import { fmtDateTime, fmtNumber } from "@/lib/format";
+import { exportCsv, fmtDateTime, fmtNumber } from "@/lib/format";
 import { Button, Card, Notice, Text, Toggle, field, inr } from "@/components/monetization/shared";
 
 const LABEL: Record<string, string> = {
@@ -40,7 +40,15 @@ export function OrdersTab() {
           </button>
         ))}
       </div>
-      <Card title="Orders" subtitle="You pack and ship by hand. Add the courier tracking number when you mark an order shipped.">
+      <Card
+        title="Orders"
+        subtitle="You pack and ship by hand. Add the courier tracking number when you mark an order shipped."
+        action={
+          <Button variant="secondary" disabled={!q.data?.orders?.length} onClick={() => void exportPackingList(q.data?.orders ?? [])}>
+            Export packing list (CSV)
+          </Button>
+        }
+      >
         <Table
           data={q.data?.orders ?? []}
           loading={q.isLoading}
@@ -217,4 +225,37 @@ function ReviewBox({ id, risk, onDone }: { id: string; risk: any; onDone: () => 
       )}
     </div>
   );
+}
+
+/** CSV of the listed orders with full address and items, for packing and courier booking. */
+async function exportPackingList(orders: any[]) {
+  try {
+    const rows: any[] = [];
+    for (const o of orders.slice(0, 100)) {
+      const d = await api.monetization.shopOrder(o.id);
+      const a = (d.order.address ?? {}) as any;
+      rows.push({
+        order: o.id,
+        placed: fmtDateTime(o.createdAt),
+        status: d.order.status,
+        review: d.risk?.reviewStatus ?? "",
+        items: d.order.items.map((i: any) => `${i.qty} x ${i.title} (${i.variantLabel})`).join("; "),
+        dpCoin: d.order.totalCoins,
+        name: a.recipientName ?? "",
+        phone: a.phone ?? "",
+        address: [a.addressLine1, a.addressLine2, a.landmark].filter(Boolean).join(", "),
+        city: a.city ?? "",
+        state: a.state ?? "",
+        pin: a.postalCode ?? "",
+        notes: a.notes ?? "",
+        tracking: d.order.trackingNumber ?? "",
+      });
+    }
+    // Customer-typed text must not run as a spreadsheet formula.
+    const safe = rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === "string" && /^[=+\-@\t\r]/.test(v) ? `'${v}` : v])));
+    exportCsv(`shop-orders-${new Date().toISOString().slice(0, 10)}.csv`, safe, Object.keys(safe[0] ?? { order: "" }));
+    toast.success(`Exported ${rows.length} order(s)`);
+  } catch (e) {
+    toast.error(describeError(e));
+  }
 }

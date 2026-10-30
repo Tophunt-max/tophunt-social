@@ -31,7 +31,7 @@ export default function GiftHistoryScreen() {
         ))}
       </View>
       <Text style={[styles.note, { color: p.sub }]}>
-        {tab === 'received' ? 'Gifts are a sign of support. They are not coins and cannot be withdrawn.' : 'Coins you spent on gifts. Gifts cannot be undone.'}
+        {tab === 'received' ? 'Gifts are a sign of support. They are not coins.' : 'Coins you spent on gifts. Gifts cannot be undone.'}
       </Text>
       {q.isLoading ? (
         <View style={styles.center}><ActivityIndicator color={BRAND} /></View>
