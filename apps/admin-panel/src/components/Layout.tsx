@@ -43,6 +43,7 @@ import {
   X,
   ChevronRight,
   Search,
+  CircleDollarSign,
 } from "lucide-react";
 
 /** Short beep via Web Audio API — no asset needed. */
@@ -83,6 +84,7 @@ const nav = [
   // Coin hub: settings, packages, ledger, budgets and reports in one place.
   // (/coin-packages and /transactions still open directly; they live inside it.)
   { href: "/coin-economy", label: "Coin Economy", icon: Scale, section: "finance" },
+  { href: "/monetization", label: "Monetization", icon: CircleDollarSign, section: "finance" },
   { href: "/posts", label: "Posts", icon: Image, section: "content" },
   { href: "/stories", label: "Stories", icon: Clapperboard, section: "content" },
   { href: "/comments", label: "Comments", icon: MessageCircle, section: "content" },
