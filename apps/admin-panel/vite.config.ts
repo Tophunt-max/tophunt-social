@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, searchForWorkspaceRoot, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
@@ -48,6 +48,9 @@ export default defineConfig({
   server: {
     port: 5000,
     host: "0.0.0.0",
+    // The digital-store previews import the app's own Shop artwork
+    // (apps/expo/assets/shop/digital, see src/lib/shopArt.ts).
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), path.resolve(import.meta.dirname, "../expo/assets/shop")] },
     proxy: {
       "/admin": { target: WORKER_URL, changeOrigin: true, secure: false },
       "/api": { target: WORKER_URL, changeOrigin: true, secure: false },
