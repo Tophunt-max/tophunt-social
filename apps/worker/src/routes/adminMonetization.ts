@@ -67,14 +67,15 @@ export function registerMonetizationRoutes(
     const { from, to } = range(c);
     const db = c.env.DB;
     const one = async (sql: string, ...b: unknown[]) => (await db.prepare(sql).bind(...b).first<any>()) ?? {};
-    const [gifts, store, refunds, coinSales, adRevenue, sponsorship, diag] = await Promise.all([
+    const [gifts, store, refunds, shop, adRevenue, sponsorship, diag] = await Promise.all([
       one(`SELECT COUNT(*) AS n, COALESCE(SUM(total_coins),0) AS coins, COALESCE(SUM(locked_spent),0) AS diamonds,
                   COUNT(DISTINCT sender_uid) AS senders, COUNT(DISTINCT recipient_uid) AS recipients
              FROM gift_transactions WHERE created_at >= ? AND created_at < ?`, from, to),
       one(`SELECT COUNT(*) AS n, COALESCE(SUM(price_coins),0) AS coins FROM store_purchases WHERE created_at >= ? AND created_at < ?`, from, to),
       one(`SELECT COUNT(*) AS n, COALESCE(SUM(price_coins),0) AS coins FROM store_purchases WHERE status = 'refunded' AND refunded_at >= ? AND refunded_at < ?`, from, to),
-      one(`SELECT COUNT(*) AS n, COALESCE(SUM(amount_paise),0) AS paise, COALESCE(SUM(refunded_amount_paise),0) AS refunded_paise
-             FROM payment_orders WHERE status = 'paid' AND created_at >= ? AND created_at < ?`, from, to),
+      // Physical shop (lib/shop.ts); cancelled / returned orders are not spend.
+      one(`SELECT COUNT(*) AS n, COALESCE(SUM(total_coins),0) AS coins, COALESCE(SUM(total_inr_paise),0) AS paise
+             FROM shop_orders WHERE status NOT IN ('cancelled','returned') AND created_at >= ? AND created_at < ?`, from, to),
       db.prepare(`SELECT currency, status, SUM(revenue_micros) AS micros, SUM(impressions) AS impressions
                     FROM ad_revenue_reports WHERE day BETWEEN ? AND ? GROUP BY currency, status`).bind(utcDay(from), utcDay(to)).all<any>(),
       // Booked = approved/paused/ended campaigns overlapping the range (contract value, not cash collected).
@@ -87,10 +88,7 @@ export function registerMonetizationRoutes(
     return c.json({
       from,
       to,
-      coinSales: {
-        orders: Number(coinSales.n), grossInr: Number(coinSales.paise) / 100, refundedInr: Number(coinSales.refunded_paise) / 100,
-        note: "Razorpay orders marked paid. Manual deposits are in Coin Economy.",
-      },
+      shop: { orders: Number(shop.n), coins: Number(shop.coins), valueInr: Number(shop.paise) / 100 },
       gifts: { sends: Number(gifts.n), coins: Number(gifts.coins), diamonds: Number(gifts.diamonds), senders: Number(gifts.senders), recipients: Number(gifts.recipients) },
       store: { purchases: Number(store.n), coins: Number(store.coins), refunds: Number(refunds.n), refundedCoins: Number(refunds.coins) },
       adNetwork: (adRevenue.results ?? []).map((r) => ({ currency: r.currency, status: r.status, revenue: Number(r.micros) / 1_000_000, impressions: Number(r.impressions) })),
@@ -496,6 +494,46 @@ export function registerMonetizationRoutes(
         otherAccountsOnAddressOrPhone: Number(owner?.other_accounts ?? 0),
       },
     });
+  });
+
+  /**
+   * Closed-loop trend per UTC day (replaces the old deposits-vs-withdrawals chart):
+   * Diamonds earned (free rewards + XP conversion), DP coin won in contests,
+   * DP coin spent on gifts / digital items / shop (net of refunds), shop orders.
+   */
+  adminRoute.get("/monetization/daily", async (c) => {
+    const days = Math.min(Math.max(Number(c.req.query("days")) || 14, 1), 90);
+    const since = Date.now() - days * DAY_MS;
+    const earnTypes = ["daily_reward", "daily_task", "referral_bonus", "verification_bonus", "signup_bonus", "ad_reward", "gamification_reward", "xp_conversion", "monthly_hall_of_fame_reward"];
+    const spendTypes = ["gift_send", "store_purchase", "shop_order", "store_refund", "shop_refund"];
+    const ph = (a: string[]) => a.map(() => "?").join(",");
+    const [ledger, orders] = await Promise.all([
+      c.env.DB.prepare(
+        `SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch') AS day,
+                COALESCE(SUM(CASE WHEN type IN (${ph(earnTypes)}) AND locked_delta > 0 THEN locked_delta ELSE 0 END), 0) AS diamonds_earned,
+                COALESCE(SUM(CASE WHEN type = 'contest_win_reward' AND amount > 0 THEN amount - locked_delta ELSE 0 END), 0) AS dp_won,
+                COALESCE(SUM(CASE WHEN type IN (${ph(spendTypes)}) THEN -amount ELSE 0 END), 0) AS dp_spent
+           FROM coin_transactions WHERE created_at >= ? GROUP BY day`,
+      ).bind(...earnTypes, ...spendTypes, since).all<any>(),
+      c.env.DB.prepare(
+        `SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
+           FROM shop_orders WHERE created_at >= ? AND status != 'cancelled' GROUP BY day`,
+      ).bind(since).all<any>(),
+    ]);
+    const byDay = new Map<string, any>();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = utcDay(Date.now() - i * DAY_MS);
+      byDay.set(d, { date: d, diamondsEarned: 0, dpCoinWon: 0, dpCoinSpent: 0, orders: 0 });
+    }
+    for (const r of ledger.results ?? []) {
+      const row = byDay.get(r.day);
+      if (row) Object.assign(row, { diamondsEarned: Number(r.diamonds_earned), dpCoinWon: Number(r.dp_won), dpCoinSpent: Number(r.dp_spent) });
+    }
+    for (const r of orders.results ?? []) {
+      const row = byDay.get(r.day);
+      if (row) row.orders = Number(r.n);
+    }
+    return c.json([...byDay.values()]);
   });
 
   /** One user's shopping, gifts, digital items and XP conversions (Users → Shopping tab). */

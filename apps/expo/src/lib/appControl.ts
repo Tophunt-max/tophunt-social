@@ -9,7 +9,8 @@ import { inRollout } from './rollout';
  */
 
 export type ClientPlatform = 'web' | 'android' | 'ios';
-export type FeatureKey = 'contests' | 'chat' | 'stories' | 'topups' | 'withdrawals' | 'posts';
+// `earning` / `shopping` replaced the retired `topups` / `withdrawals` switches.
+export type FeatureKey = 'contests' | 'chat' | 'stories' | 'earning' | 'shopping' | 'posts';
 export type AnnouncementTone = 'info' | 'warning' | 'success' | 'danger';
 
 /** "v1.4.0-beta.2" -> [1,4,0]; mirrors the Worker's parser. */
@@ -44,8 +45,9 @@ export function featureForRoute(segments: readonly string[]): FeatureKey | null 
   if (a === 'contest') return 'contests';
   if (a === 'messages') return 'chat';
   if (a === 'story') return 'stories';
-  if (a === 'wallet' && (b === 'deposit' || b === 'store')) return 'topups';
-  if (a === 'wallet' && b === 'withdraw') return 'withdrawals';
+  if (a === 'earn') return 'earning';
+  if (a === 'shop') return 'shopping';
+  if (a === 'rewards' && b === 'store') return 'shopping';
   return null;
 }
 

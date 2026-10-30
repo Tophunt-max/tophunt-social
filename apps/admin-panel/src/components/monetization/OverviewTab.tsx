@@ -20,8 +20,8 @@ export function OverviewTab({ range }: { range: Range }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard icon={Wallet} label="Coin sales (gross, Razorpay)" value={inr(data.coinSales.grossInr)} gradient="gradient-purple" />
-        <StatCard icon={Undo2} label="Coin sales refunded" value={inr(data.coinSales.refundedInr)} gradient="bg-slate-500" />
+        <StatCard icon={Wallet} label="Shop orders (physical)" value={fmtNumber(data.shop?.orders ?? 0)} gradient="gradient-purple" />
+        <StatCard icon={Undo2} label="DP coin spent in the shop" value={fmtNumber(data.shop?.coins ?? 0)} gradient="bg-slate-500" />
         <StatCard icon={Megaphone} label="Sponsorships booked" value={inr(data.sponsorships.bookedInr)} gradient="bg-amber-500" />
         <StatCard icon={Gift} label="Coins spent on gifts" value={fmtNumber(data.gifts.coins)} gradient="bg-pink-500" />
         <StatCard icon={ShoppingBag} label="Coins spent in store" value={fmtNumber(data.store.coins)} gradient="bg-emerald-500" />
@@ -65,7 +65,7 @@ export function OverviewTab({ range }: { range: Range }) {
       </div>
 
       <Notice>
-        Coin spends (gifts, store) are not new cash: the cash came in when coins were bought. Wallet liabilities, ledger health and manual deposits are in Coin Economy. Sponsorship &quot;booked&quot; is contract value, not cash collected. {data.coinSales.note}
+        Coin spends (gifts, store, shop) are not cash: no ₹ comes in or goes out for coins. Ledger health and shop value are in Coin Economy. Sponsorship &quot;booked&quot; is contract value, not cash collected.
       </Notice>
     </div>
   );

@@ -10,19 +10,6 @@ vi.mock('@/src/services/api', () => ({
 beforeEach(() => callApi.mockClear());
 
 describe('walletService', () => {
-  it('createOrder sends only the packageId (server prices it)', async () => {
-    const { walletService } = await import('@/src/services/wallet/walletService');
-    await walletService.createOrder('pkg1');
-    expect(callApi).toHaveBeenCalledWith('createOrder', { packageId: 'pkg1' });
-  });
-
-  it('confirmTopup forwards the Razorpay proof to topup', async () => {
-    const { walletService } = await import('@/src/services/wallet/walletService');
-    const proof = { paymentId: 'p1', orderId: 'o1', signature: 's1' };
-    await walletService.confirmTopup(proof);
-    expect(callApi).toHaveBeenCalledWith('topup', proof);
-  });
-
   it('claimDailyBonus calls claimDailyReward and sends nothing (the server decides the day)', async () => {
     const { walletService } = await import('@/src/services/wallet/walletService');
     await walletService.claimDailyBonus();

@@ -32,6 +32,7 @@ import {
 } from "recharts";
 import { api, type Capacity } from "@/lib/api";
 import { StatCard } from "@/components/ui/StatCard";
+import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
 import { PageHeader, fmtDateTime, fmtNumber } from "@/lib/format";
 import { Badge } from "@/components/ui/Badge";
 
@@ -45,7 +46,6 @@ export default function Dashboard() {
   const analytics = useQuery({ queryKey: ["analytics"], queryFn: api.analytics, refetchInterval: FAST });
   const devices = useQuery({ queryKey: ["device-stats"], queryFn: api.deviceStats, refetchInterval: SLOW });
   const growth = useQuery({ queryKey: ["user-growth"], queryFn: api.userGrowth, refetchInterval: SLOW });
-  const finance = useQuery({ queryKey: ["finance-trends"], queryFn: api.financeTrends, refetchInterval: SLOW });
   const revenue = useQuery({ queryKey: ["revenue"], queryFn: api.revenue, refetchInterval: SLOW });
   const tickets = useQuery({ queryKey: ["recent-tickets"], queryFn: api.recentTickets, refetchInterval: SLOW });
   const capacity = useQuery({ queryKey: ["capacity"], queryFn: api.capacity, refetchInterval: SLOW });
@@ -54,17 +54,13 @@ export default function Dashboard() {
   const chartData =
     growth.data?.categories.map((c, i) => ({ month: c, users: growth.data!.data[i] })) ?? [];
 
-  const financeData =
-    finance.data?.map((d) => ({ day: d.date.slice(5), deposits: d.deposits, withdrawals: d.withdrawals })) ?? [];
 
   // Actionable items that need an admin's attention right now.
   const o = overview.data;
   const alerts = [
     { n: (o as any)?.pendingShopReview ?? 0, label: "shop order(s) need a fraud review", href: "/shopping?tab=orders", icon: Flag, tone: "red" as const },
     { n: (o as any)?.pendingShopOrders ?? 0, label: "shop order(s) to pack, ship or answer", href: "/shopping?tab=orders", icon: Wallet, tone: "blue" as const },
-    // Retired flows: only shown while an old request is still open.
-    { n: o?.pendingWithdrawals ?? 0, label: "old withdrawal(s) to reject", href: "/withdrawals", icon: Banknote, tone: "amber" as const },
-    { n: o?.pendingDeposits ?? 0, label: "old deposit(s) to resolve", href: "/deposits", icon: Wallet, tone: "amber" as const },
+    { n: o?.pendingPrizeClaims ?? 0, label: "prize claim(s) to deliver", href: "/prize-claims", icon: Banknote, tone: "amber" as const },
     { n: o?.reports ?? 0, label: "open report(s)", href: "/reports", icon: Flag, tone: "red" as const },
     { n: o?.support ?? 0, label: "pending ticket(s)", href: "/support", icon: MessageSquare, tone: "violet" as const },
   ].filter((a) => a.n > 0);
@@ -134,30 +130,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Finance trends: deposits vs withdrawals (14 days) */}
-        <div className="bg-card border border-border rounded-2xl p-5">
-          <h3 className="font-bold text-foreground mb-1">Deposits vs Withdrawals (retired, history)</h3>
-          <p className="text-xs text-muted-foreground mb-4">Approved deposits &amp; processed payouts (₹, last 14 days)</p>
-          <div className="h-64">
-            {financeData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={financeData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(220 13% 91%)" vertical={false} />
-                  <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="hsl(220 9% 46%)" />
-                  <YAxis tick={{ fontSize: 12 }} stroke="hsl(220 9% 46%)" allowDecimals={false} />
-                  <Tooltip />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="deposits" name="Deposits" fill="#16A34A" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="withdrawals" name="Withdrawals" fill="#F97316" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-                No deposit / withdrawal activity yet
-              </div>
-            )}
-          </div>
-        </div>
+        {/* Closed loop: Diamonds earned vs DP coin won and spent (14 days). */}
+        <ClosedLoopTrend days={14} />
       </div>
 
       {/* Bottom row: platform split, top spenders, recent tickets. */}

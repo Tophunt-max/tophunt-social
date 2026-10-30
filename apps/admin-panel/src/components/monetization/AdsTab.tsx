@@ -141,7 +141,7 @@ export function AdsTab({ range }: { range: Range }) {
             </div>
           </div>
           <div className="space-y-2 rounded-xl border border-border p-3">
-            <Toggle label="Rewarded ads (verified)" checked={ads.rewarded.enabled} onChange={(v) => set(["rewarded", "enabled"], v)} hint="Paid only by AdMob's server-side verification callback, in Diamonds (never withdrawable)." />
+            <Toggle label="Rewarded ads (verified)" checked={ads.rewarded.enabled} onChange={(v) => set(["rewarded", "enabled"], v)} hint="Paid only by AdMob's server-side verification callback, in Diamonds." />
             <div className="grid grid-cols-2 gap-2">
               <Num label="Diamonds per view" value={ads.rewarded.rewardDiamonds} onChange={(v) => set(["rewarded", "rewardDiamonds"], v)} />
               <Num label="Per user per day" value={ads.rewarded.dailyCap} onChange={(v) => set(["rewarded", "dailyCap"], v)} />

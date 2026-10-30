@@ -18,7 +18,7 @@
  *   forceUpdate, forceUpdateMode 'hard'|'soft', minAppVersion,
  *   updateUrls { android, ios }, updateUrl (legacy), updateMessage,
  *   announcement { id, enabled, message, link, tone, audience, startAt, endAt },
- *   features { contests, chat, stories, topups, withdrawals, posts },
+ *   features { contests, chat, stories, earning, shopping, posts },
  *   withdrawal { enabled, payoutsFrozen, minAmount, maxAmount, maxPerDay, conversionRate,
  *               feePercent, feeFlat, feeMin, feeMax },
  *   _version (ms; bumped on every save).
@@ -34,8 +34,11 @@ import { httpsError } from "./http";
 import { legacyAuthSettings, methodAllowed, resolveAuthMethods } from "./authMethods";
 import { onboardingEnabled, ONBOARDING_MAX_SLIDES } from "./onboardingConfig";
 
-export const FEATURE_KEYS = ["contests", "chat", "stories", "topups", "withdrawals", "posts"] as const;
+// `earning` and `shopping` replaced the retired `topups` / `withdrawals`
+// switches (lib/cashRetirement.ts); stored values of the old keys are ignored.
+export const FEATURE_KEYS = ["contests", "chat", "stories", "earning", "shopping", "posts"] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
+export const RETIRED_FEATURE_KEYS = ["topups", "withdrawals"] as const;
 
 /** Realtime channels every app instance can listen on (one is picked at random). */
 export const APP_CONFIG_SHARDS = 16;
@@ -360,6 +363,7 @@ export function validateAppControlPatch(body: any, existing: any, nowMs: number 
   if (body.featureRollout !== undefined) {
     const r = body.featureRollout;
     if (!r || typeof r !== "object" || Array.isArray(r)) bad("featureRollout must be an object.");
+    for (const k of RETIRED_FEATURE_KEYS) delete r[k];
     for (const [k, v] of Object.entries(r)) {
       if (!(FEATURE_KEYS as readonly string[]).includes(k)) bad(`Unknown feature: ${k}.`);
       if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 100) bad(`featureRollout.${k} must be a whole percent from 0 to 100.`);
@@ -376,6 +380,9 @@ export function validateAppControlPatch(body: any, existing: any, nowMs: number 
   if (body.features !== undefined) {
     const f = body.features;
     if (!f || typeof f !== "object" || Array.isArray(f)) bad("features must be an object.");
+    // Retired switches (lib/cashRetirement.ts) are dropped, not refused, so a
+    // panel that still holds them in its copy of the config can save.
+    for (const k of RETIRED_FEATURE_KEYS) delete f[k];
     for (const [k, v] of Object.entries(f)) {
       if (!(FEATURE_KEYS as readonly string[]).includes(k)) bad(`Unknown feature '${k}'.`);
       if (!isBool(v)) bad(`features.${k} must be true or false.`);
@@ -431,8 +438,10 @@ export const FEATURE_ACTIONS: Record<FeatureKey, string[]> = {
   contests: ["startMatch", "joinMatch", "join", "submitVote", "vote", "setMatchVsImage"],
   chat: ["startChat", "sendMessage", "setTyping"],
   stories: ["createStory", "getStoryUrl", "reactToStory", "createHighlight", "addStoryToHighlight"],
-  topups: ["createOrder", "topup", "requestDeposit"],
-  withdrawals: ["requestWithdrawal"],
+  // Emergency switches for the closed loop. Turning one off stops new claims /
+  // purchases; cancelling an order or viewing history keeps working.
+  earning: ["claimDailyReward", "claimDailyTask", "claimAdReward", "convertXp", "claimRewardGrant"],
+  shopping: ["placeShopOrder", "buyStoreItem", "sendGift"],
   posts: ["createPost"],
 };
 const ACTION_FEATURE = new Map<string, FeatureKey>(
@@ -463,8 +472,8 @@ const FEATURE_LABEL: Record<FeatureKey, string> = {
   contests: "Contests",
   chat: "Chat",
   stories: "Stories",
-  topups: "Diamond top-up",
-  withdrawals: "Withdrawals",
+  earning: "Earning",
+  shopping: "Shopping",
   posts: "Posts",
 };
 

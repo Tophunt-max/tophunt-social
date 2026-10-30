@@ -284,10 +284,9 @@ export default function AppSettings() {
         {/* ---- Coins: owned by Coin Economy ---- */}
         <Section icon={Coins} title="Coins & rewards" blurb="Ab sab ek jagah: Coin Economy.">
           <p className="text-sm text-muted-foreground">
-            Signup bonus, referral, daily login, daily tasks, rewarded ads, Hall of Fame, withdrawals, buy rate aur payment
-            gateway{" "}
-            <Link href="/coin-economy" className="font-semibold text-foreground underline">Coin Economy</Link> (Earn, Buy aur Cash out
-            tabs) mein set hote hain.
+            Signup bonus, referral, daily login, daily tasks, rewarded ads, Hall of Fame, coin value (₹) aur XP conversion{" "}
+            <Link href="/coin-economy" className="font-semibold text-foreground underline">Coin Economy</Link> (Earning aur Coin value
+            tabs) mein set hote hain. Products aur orders: Shopping.
           </p>
         </Section>
 
@@ -303,7 +302,7 @@ export default function AppSettings() {
                 placeholder="ops@tophunt.in"
                 className={field}
               />
-              <p className={hint}>Receives withdrawal-request and deposit alerts. Never exposed to the app.</p>
+              <p className={hint}>Receives shop order, budget and money-health alerts. Never exposed to the app.</p>
             </div>
             <div>
               <label className={label}>Public support email</label>

@@ -80,12 +80,10 @@ const nav = [
   { href: "/matches", label: "Matches", icon: Swords, section: "contests" },
   { href: "/prize-claims", label: "Prize Claims", icon: Package, section: "contests", badgeKey: "pendingPrizeClaims" },
   { href: "/leaderboard", label: "Leaderboard", icon: Crown, section: "contests" },
-  // Closed loop: Earning (Diamond) → contests → DP coin → Shopping. Real-money
-  // deposits / withdrawals are retired; their history pages are under System.
+  // Closed loop: Earning (Diamond) → contests → DP coin → Shopping.
   { href: "/coin-economy?tab=earn", label: "Earning", icon: Sparkles, section: "finance" },
   { href: "/shopping", label: "Shopping", icon: ShoppingBag, section: "finance", badgeKey: "pendingShopOrders" },
-  // Coin hub: settings, packages, ledger, budgets and reports in one place.
-  // (/coin-packages and /transactions still open directly; they live inside it.)
+  // Coin hub: coin values, earning, ledger, budgets and reports in one place.
   { href: "/coin-economy", label: "Coin Economy", icon: Scale, section: "finance" },
   { href: "/monetization", label: "Monetization", icon: CircleDollarSign, section: "finance" },
   { href: "/posts", label: "Posts", icon: Image, section: "content" },
@@ -112,8 +110,6 @@ const nav = [
   { href: "/onboarding", label: "Onboarding", icon: GalleryHorizontal, section: "system" },
   { href: "/legal", label: "Legal Content", icon: ScrollText, section: "system" },
   { href: "/integrations", label: "Integrations", icon: Plug, section: "system" },
-  { href: "/withdrawals", label: "Old withdrawals (history)", icon: Banknote, section: "system", badgeKey: "pendingWithdrawals" },
-  { href: "/deposits", label: "Old deposits (history)", icon: ArrowDownToLine, section: "system", badgeKey: "pendingDeposits" },
 ];
 
 /**
@@ -174,7 +170,7 @@ function NavItem({ href, label, icon: Icon, active, onClick, badge }: any) {
 function Sidebar({ onClose }: { onClose?: () => void }) {
   const [loc] = useLocation();
   const { user, logout } = useAuth();
-  // Live pending counts for sidebar badges (deposits / withdrawals).
+  // Live pending counts for sidebar badges (shop orders, prize claims).
   const { data: overview } = useQuery({
     queryKey: ["overview"],
     queryFn: api.overview,

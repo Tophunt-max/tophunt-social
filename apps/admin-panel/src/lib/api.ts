@@ -891,18 +891,6 @@ export const api = {
   userRewards: (uid: string) => get<any>(`/admin/users/${encodeURIComponent(uid)}/rewards`),
   setUserStreak: (uid: string, body: { streak: number; continueStreak?: boolean; reason: string }) =>
     patch(`/admin/users/${encodeURIComponent(uid)}/streak`, body),
-  // `deposits` / `withdrawals` are RUPEES (they used to be coin counts charted as
-  // money); the *Coins fields carry the coin volume.
-  financeTrends: () =>
-    get<{
-      date: string;
-      deposits: number;
-      withdrawals: number;
-      depositsInr: number;
-      withdrawalsInr: number;
-      depositsCoins: number;
-      withdrawalsCoins: number;
-    }[]>("/admin/finance-trends"),
 
   // support
   support: () => get<any[]>("/admin/support"),
@@ -1000,6 +988,7 @@ export const api = {
       ),
     shopOrder: (id: string) => get<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}`),
     setOrderStatus: (id: string, payload: any) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/status`, payload),
+    daily: (days = 14) => get<any[]>(`/admin/monetization/daily?days=${days}`),
     userSummary: (uid: string) => get<any>(`/admin/monetization/users/${encodeURIComponent(uid)}/summary`),
     reviewOrder: (id: string, decision: "approve" | "reject", note?: string) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/review`, { decision, note }),
   },
@@ -1124,24 +1113,6 @@ export const api = {
   userFollowers: (id: string) => get<any[]>(`/admin/users/${id}/followers`),
   userFollowing: (id: string) => get<any[]>(`/admin/users/${id}/following`),
 
-  // withdrawals
-  withdrawals: (status?: string) =>
-    get<any[]>(`/admin/withdrawals${status ? `?status=${encodeURIComponent(status)}` : ""}`),
-  // `payoutRef` (bank UTR / RRN) is REQUIRED by the server when marking a
-  // payout paid, so an outgoing rupee can be reconciled against a statement.
-  actionWithdrawal: (
-    id: string,
-    action: "approve" | "reject" | "paid",
-    adminNote?: string,
-    payoutRef?: string,
-  ) => patch(`/admin/withdrawals/${id}`, { action, adminNote, payoutRef }),
-
-  // deposits (manual QR/UPI top-ups)
-  deposits: (status?: string) =>
-    get<any[]>(`/admin/deposits${status ? `?status=${encodeURIComponent(status)}` : ""}`),
-  actionDeposit: (id: string, action: "approve" | "reject", adminNote?: string) =>
-    patch(`/admin/deposits/${id}`, { action, adminNote }),
-
   // audit log
   auditLog: (action?: string) =>
     get<any[]>(`/admin/audit-log${action ? `?action=${encodeURIComponent(action)}` : ""}`),
@@ -1201,12 +1172,6 @@ export const api = {
   createScheduledNotification: (payload: any) => post("/admin/scheduled-notifications", payload),
   cancelScheduledNotification: (id: string) => del(`/admin/scheduled-notifications/${id}`),
 
-  // coin packages
-  coinPackages: () => get<any[]>("/admin/coin-packages"),
-  createCoinPackage: (payload: any) => post("/admin/coin-packages", payload),
-  updateCoinPackage: (id: string, payload: any) => patch(`/admin/coin-packages/${id}`, payload),
-  deleteCoinPackage: (id: string) => del(`/admin/coin-packages/${id}`),
-
   // banned words
   bannedWords: () => get<string[]>("/admin/banned-words"),
   addBannedWord: (word: string) => post("/admin/banned-words", { word }),
@@ -1265,7 +1230,6 @@ export const api = {
     return get<CoinEconomy>(`/admin/coin-economy${qs ? `?${qs}` : ""}`);
   },
   coinEconomyContests: () => get<ContestPnl[]>("/admin/coin-economy/contests"),
-  coinEconomyPackages: () => get<PackagePnl[]>("/admin/coin-economy/packages"),
   coinEconomyUser: (uid: string, limit = 300) =>
     get<UserStatement>(`/admin/coin-economy/users/${encodeURIComponent(uid)}?limit=${limit}`),
   promoBudgets: () => get<PromoBudget[]>("/admin/promo-budgets"),
@@ -1389,20 +1353,6 @@ export interface ContestPnl {
   net: number;
 }
 
-export interface PackagePnl {
-  id: string;
-  name: string | null;
-  active: boolean;
-  coins: number;
-  bonusCoins: number;
-  budgetId: string | null;
-  purchases: number;
-  inr: number;
-  refundedInr: number;
-  baseCoins: number;
-  bonusCoinsGiven: number;
-  promoBonusGiven: number;
-}
 
 export interface UserStatement {
   user: { uid: string; username: string | null; fullName: string | null; email: string | null; balance: number; locked: number; withdrawable: number };

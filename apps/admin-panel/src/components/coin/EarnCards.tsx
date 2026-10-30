@@ -533,7 +533,7 @@ export function HallOfFameCard({ rewards }: { rewards: any }) {
         ))}
       </div>
       <p className={hint}>
-        Mahine ke sabse zyada jeetne wale 3 users ko, mahina khatam hone par, Diamond me. Ye platform ka free inaam hai, isliye withdraw nahi hota (fake accounts se jeet farm karke paisa nikalna band).
+        Mahine ke sabse zyada jeetne wale 3 users ko, mahina khatam hone par, Diamond me. Ye platform ka free inaam hai, isliye Diamond mein milta hai.
         Badlav agle mahine ke settlement par lagega.
       </p>
     </Card>

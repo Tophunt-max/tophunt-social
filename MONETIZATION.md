@@ -18,6 +18,15 @@ Earning (free) → 💎 Diamond → contest entry → win → 🪙 DP coin → S
   `CASH_FLOWS_RETIRED` is the literal `"false"` (wrangler.toml sets `"true"`). Admins cannot approve new withdrawals; they can
   still reject (DP coin returned) and mark an already-approved payout paid. Razorpay webhook, `topup` and the reconcile
   cron still credit an order that was paid before the switch, so nobody loses money.
+- **Old screens and switches are gone, replaced by new ones.** Admin: the Withdrawals, Deposits and Coin Packages pages
+  were deleted (old links redirect to Shopping / Coin Economy). The Buy and Cash out tabs became Coin value and Shopping.
+  The "Deposits vs Withdrawals" charts became **Earning vs Shopping** (`GET /admin/monetization/daily`). App Control
+  switches `topups` / `withdrawals` were renamed to **`earning`** (check-in, tasks, ads, XP → Diamond, level rewards) and
+  **`shopping`** (shop orders, digital items, gifts). Stored values of the old keys are ignored and dropped on the next save.
+  App: the Razorpay checkout, withdrawal fee quote and the deposit/withdraw service calls were deleted, along with
+  `react-native-razorpay`. `/wallet/store`, `/wallet/deposit` and `/wallet/withdraw` redirect to Earn / Shop.
+  Free rewards can no longer be switched to DP coin (`rewardLocking` refuses `false`): they are always Diamonds.
+  The server still has the retired actions behind `lib/cashRetirement.ts` (refused), so an old app build gets a clear message.
 - Diamond → DP coin conversion does not exist, by design. XP → Diamond does (`lib/xpConversion.ts`): convertible XP is
   `xp - xp_converted`, so XP, levels and leaderboards never go down. Daily cap, charged to the free-rewards budget.
 - **Fresh start (done once, 2026-10-30, by the operator, not an admin tool).** On `tophunt-social-db`: 9 users,

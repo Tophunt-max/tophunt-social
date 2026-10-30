@@ -39,6 +39,11 @@ export function validateRewardLockingPatch(patch: any): void {
     if (!(REWARD_LOCK_KINDS as readonly string[]).includes(key)) {
       throw httpsError("invalid-argument", `rewardLocking.${key} is not a known reward (${REWARD_LOCK_KINDS.join(", ")}).`);
     }
+    // Closed loop (lib/cashRetirement.ts): free rewards are always Diamonds.
+    // Paying them as DP coin would hand out free shopping money.
+    if (value === false) {
+      throw httpsError("invalid-argument", "Free rewards are always paid in Diamonds now; DP coin only comes from winning contests.");
+    }
     if (typeof value !== "boolean") {
       throw httpsError("invalid-argument", `rewardLocking.${key} must be true (sirf khelne ke liye) or false (withdraw ho sakta hai).`);
     }

@@ -407,6 +407,17 @@ describe('shop fraud protection', () => {
     expect(ov.body.pendingShopReview).toBe(1);
   });
 
+  it('daily trend reports Diamonds earned, DP coin spent and orders', async () => {
+    const env = await setup({ ...STRICT, reviewFirstOrder: false, reviewAboveCoins: 0 });
+    await seedUser(env, 'alice', 5000, 0, verified('9876543210'));
+    await env.DB.prepare(`INSERT INTO coin_transactions (id, uid, amount, type, description, created_at, locked_delta) VALUES ('d1', 'alice', 7, 'daily_reward', 'x', ?, 7)`).bind(Date.now()).run();
+    await buy(env, 'alice', 2, 1);
+    const r = await admin(env, 'GET', '/monetization/daily?days=3');
+    expect(r.status).toBe(200);
+    expect(r.body).toHaveLength(3);
+    expect(r.body[2]).toMatchObject({ diamondsEarned: 7, dpCoinSpent: 200, orders: 1 });
+  });
+
   it('a customer can still cancel an order that is under review', async () => {
     const env = await setup();
     await seedUser(env, 'alice', 5000, 0, verified('9876543210'));

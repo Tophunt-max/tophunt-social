@@ -283,9 +283,11 @@ describe('free rewards', () => {
     await call(env, 'al', 'claimAdReward');
     expect(await user(env, 'al')).toMatchObject({ dpcoin: daily + 5, lockedCoins: daily + 5 });
     expect((await admin(env, 'POST', '/app-settings', { rewardLocking: { bogus: true } })).status).toBe(400);
-    expect((await admin(env, 'POST', '/app-settings', { rewardLocking: { ads: false } })).status).toBe(200);
+    expect((await admin(env, 'POST', '/app-settings', { rewardLocking: { ads: false } })).status).toBe(400); // closed loop: always Diamonds
+    expect((await admin(env, 'POST', '/app-settings', { rewardLocking: { ads: true } })).status).toBe(200);
     await call(env, 'al', 'claimAdReward');
-    expect(await user(env, 'al')).toMatchObject({ dpcoin: daily + 10, lockedCoins: daily + 5 });
+    // The switch can no longer turn a free reward into DP coin: still all Diamonds.
+    expect(await user(env, 'al')).toMatchObject({ dpcoin: daily + 10, lockedCoins: daily + 10 });
 
     // Cap: budget of 7 coins, per user max 5. Linking needs the approval password.
     const fb = await budget(env, 'free_rewards', 7, { perUserLimit: 5 });

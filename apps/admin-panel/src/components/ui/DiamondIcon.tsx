@@ -1,7 +1,7 @@
 /**
  * Diamond: the play-only balance (users.locked_coins). Pays contest entry fees,
- * comes from coin packages and free rewards, never withdrawn. DP coin
- * (dpcoin − locked_coins) is the withdrawable prize balance.
+ * comes from free earning and pays contest entry. DP coin
+ * (dpcoin − locked_coins) is won in contests and spent in the shop.
  *
  * Same drawing as the app's src/components/ui/DiamondIcon.tsx and
  * public/diamond.svg. Takes the lucide icon props it is used with (size,

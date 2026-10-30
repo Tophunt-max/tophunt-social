@@ -55,9 +55,6 @@ const Matches = lazyWithReload(() => import("@/pages/Matches"));
 const PrizeClaims = lazyWithReload(() => import("@/pages/PrizeClaims"));
 const Leaderboard = lazyWithReload(() => import("@/pages/Leaderboard"));
 const Transactions = lazyWithReload(() => import("@/pages/Transactions"));
-const Withdrawals = lazyWithReload(() => import("@/pages/Withdrawals"));
-const Deposits = lazyWithReload(() => import("@/pages/Deposits"));
-const CoinPackages = lazyWithReload(() => import("@/pages/CoinPackages"));
 const CoinEconomy = lazyWithReload(() => import("@/pages/CoinEconomy"));
 const Monetization = lazyWithReload(() => import("@/pages/Monetization"));
 const Shopping = lazyWithReload(() => import("@/pages/Shopping"));
@@ -125,9 +122,10 @@ function ProtectedApp() {
           <Route path="/prize-claims" component={PrizeClaims} />
           <Route path="/leaderboard" component={Leaderboard} />
           <Route path="/transactions" component={Transactions} />
-          <Route path="/withdrawals" component={Withdrawals} />
-          <Route path="/deposits" component={Deposits} />
-          <Route path="/coin-packages" component={CoinPackages} />
+          {/* Retired real-money pages: old links land on their replacements. */}
+          <Route path="/withdrawals" component={() => <Redirect to="/shopping" />} />
+          <Route path="/deposits" component={() => <Redirect to="/coin-economy?tab=earn" />} />
+          <Route path="/coin-packages" component={() => <Redirect to="/coin-economy?tab=values" />} />
           <Route path="/coin-economy" component={CoinEconomy} />
           <Route path="/monetization" component={Monetization} />
           <Route path="/shopping" component={Shopping} />

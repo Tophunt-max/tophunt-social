@@ -29,26 +29,25 @@ import { SegTabs } from "@/components/finance/bits";
 import { PageHeader, exportCsv, fmtDateTime, fmtNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { CoinPricingCard, RewardLockingCard, WithdrawalCard } from "@/components/coin/CoinCards";
+import { RewardLockingCard } from "@/components/coin/CoinCards";
 import { CoinAlertsCard, FreeRewardsBudgetCard } from "@/components/coin/AlertCards";
 import { AdsRewardCard, DailyLoginCard, DailyTasksCard, HallOfFameCard, RewardStatsCard, VerificationRewardCard } from "@/components/coin/EarnCards";
 import { ProgramSettings } from "@/pages/Referrals";
-import { GatewayConfig } from "@/pages/Deposits";
-import CoinPackages from "@/pages/CoinPackages";
 import Transactions from "@/pages/Transactions";
 import { CoinValuesCard, ShoppingSummaryCard, XpConversionCard } from "@/components/coin/ClosedLoopCards";
+import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
 
 /**
  * Coin Economy — the one place for everything coins: where every coin came from,
  * where it went, and every setting that creates, sells or pays out coins.
  *
- *   Overview   supply (withdrawable vs locked), ₹ liability, flows by source, the
+ *   Overview   supply (DP coin vs Diamond), ₹ shop value, flows by source, the
  *              platform's own side, reconciliation checks, pending queues
  *   Earn       every free-coin source (verification, referral, daily login,
  *              daily tasks, rewarded ads, Hall of Fame) + the play-only switch
- *   Buy        buy rate, payment gateway, coin packages and their P&L
+ *   Coin value ₹ per DP coin / Diamond (prices shop products)
  *   Contests   per-contest P&L: entry fees, prizes, refunds, subsidy, fees kept
- *   Cash out   withdrawal rules, fee, emergency freeze
+ *   Shopping   DP coin held, shop orders, earning vs shopping trend
  *   Budgets    one promo budget per offer, approval password
  *   Ledger     every coin transaction, and one user's full statement
  *   Health     money-integrity checks
@@ -151,7 +150,6 @@ function useAppConfig() {
     onSuccess: () => {
       toast.success("Saved — users ke app me turant live");
       qc.invalidateQueries({ queryKey: ["app-settings"] });
-      qc.invalidateQueries({ queryKey: ["coin-packages"] });
     },
     onError: (e) => toast.error(describeError(e)),
   });
@@ -161,8 +159,8 @@ function useAppConfig() {
 function PendingQueues() {
   const { data } = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const items = [
-    { label: "Deposits approve karne hain", n: Number((data as any)?.pendingDeposits ?? 0), href: "/deposits" },
-    { label: "Withdrawals pending", n: Number((data as any)?.pendingWithdrawals ?? 0), href: "/withdrawals" },
+    { label: "Shop orders fraud review", n: Number((data as any)?.pendingShopReview ?? 0), href: "/shopping?tab=orders" },
+    { label: "Shop orders pack / ship karne hain", n: Number((data as any)?.pendingShopOrders ?? 0), href: "/shopping?tab=orders" },
     { label: "Prize claims pending", n: Number((data as any)?.pendingPrizeClaims ?? 0), href: "/prize-claims" },
   ];
   return (
@@ -258,15 +256,7 @@ function ShoppingTab() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
       <ShoppingSummaryCard />
-      <Card title="Old deposits and withdrawals">
-        <p className="text-sm text-muted-foreground">
-          Real-money top-ups and withdrawals are switched off on the server. Their history stays readable, and any withdrawal still open can only be rejected (the DP coin goes back to the user).
-        </p>
-        <p className="mt-3 text-sm space-x-4">
-          <Link href="/withdrawals" className="font-semibold text-primary">Withdrawal history →</Link>
-          <Link href="/deposits" className="font-semibold text-primary">Deposit history →</Link>
-        </p>
-      </Card>
+      <ClosedLoopTrend days={30} title="Earning vs Shopping (30 din)" />
     </div>
   );
 }
@@ -281,10 +271,7 @@ function HealthTab() {
     ? [
         { label: "Ledger drift (balance ≠ ledger)", n: m.ledgerDrift.count },
         { label: "Negative balances", n: m.negativeBalances.count },
-        { label: "Paid but not credited orders", n: m.strandedPaidOrders },
-        { label: "Approved deposits not credited", n: m.strandedApprovedDeposits },
         { label: "Clawback shortfalls", n: m.clawbackShortfalls.count },
-        { label: "Withdrawal ledger gaps", n: m.withdrawalLedgerGaps?.count },
         { label: "Diamond drift", n: (m.lockedDrift?.count ?? 0) + (m.lockedDrift?.overBalance ?? 0) },
         { label: "Stuck promo reservations", n: m.staleReservations },
       ]
@@ -410,13 +397,13 @@ function OverviewBody({ data }: { data: CoinEconomyData }) {
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard icon={Coins} label="Total (DP coin + Diamond)" value={fmtNumber(data.supply.total)} gradient="gradient-purple" />
-        <StatCard icon={Wallet} label="DP coin (withdraw ho sakte)" value={fmtNumber(data.supply.withdrawable)} gradient="gradient-green" />
+        <StatCard icon={Wallet} label="DP coin (shopping ke liye)" value={fmtNumber(data.supply.withdrawable)} gradient="gradient-green" />
         <StatCard icon={DiamondIcon as any} label="Diamond (sirf contest entry)" value={fmtNumber(data.supply.locked)} gradient="gradient-cyan" />
-        <StatCard icon={Scale} label={`Liability: DP coin × ₹${fmtNumber(data.payoutRate)}`} value={inr(data.supply.liabilityInr)} gradient="gradient-red" />
+        <StatCard icon={Scale} label={`Shop value: DP coin × ₹${fmtNumber(data.payoutRate)}`} value={inr(data.supply.liabilityInr)} gradient="gradient-red" />
       </div>
       {data.house && data.house.total ? (
         <p className="text-xs text-muted-foreground">
-          Superadmin ke {fmtNumber(data.house.total - data.house.locked)} DP coin aur {fmtNumber(data.house.locked)} Diamond (platform ke apne) is hisab me nahi gine gaye. Unka withdrawal nahi hota.
+          Superadmin ke {fmtNumber(data.house.total - data.house.locked)} DP coin aur {fmtNumber(data.house.locked)} Diamond (platform ke apne) is hisab me nahi gine gaye.
         </p>
       ) : null}
 
@@ -428,29 +415,19 @@ function OverviewBody({ data }: { data: CoinEconomyData }) {
             title="💎 Diamond: kahan se aaye, kahan gaye"
             flow={data.diamondFlow}
             labels={data.categories}
-            note="Diamond sirf contest entry me lagte hain. Kabhi withdraw nahi hote."
+            note="Diamond earning se aate hain aur sirf contest entry me lagte hain."
           />
           <FlowCard
             title="🪙 DP coin: kahan se aaye, kahan gaye"
             flow={data.dpFlow}
             labels={data.categories}
-            note="DP coin hi asli ₹ liability hain: contest prize se bante hain, withdrawal me jaate hain."
+            note="DP coin contest jeet kar milte hain aur Shopping (gifts, digital items, products) me kharch hote hain."
           />
         </div>
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Paisa (₹)">
-          <Row label="Users ne diya (payments)" value={inr(data.cash.paidInInr)} />
-          <Row label="Refund kiya" value={inr(data.cash.refundedInr)} />
-          <Row label="Payout bheja (withdrawals paid)" value={inr(data.cash.paidOutInr)} />
-          <Row label="Payout baaki (pending/approved)" value={inr(data.cash.pendingOutInr)} />
-          <Row
-            label="Net (aaya − refund − bheja − baaki − liability)"
-            value={inr(data.cash.paidInInr - data.cash.refundedInr - data.cash.paidOutInr - data.cash.pendingOutInr - data.supply.liabilityInr)}
-            strong
-          />
-        </Card>
+        <ClosedLoopTrend days={30} title="Earning vs Shopping (30 din)" />
         <Card title="Platform ka hisab (budget se diya / entry se rakha)">
           {platformRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">Abhi koi entry nahi.</p>
@@ -727,7 +704,6 @@ function BudgetDialog({ budget, onClose, onDone }: { budget?: PromoBudget; onClo
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Kis ke liye</label>
             <select className={field} value={form.kind} onChange={(e) => set("kind", e.target.value)}>
-              <option value="package_bonus">Diamond package ka bonus Diamond</option>
               <option value="contest_prize">Contest prize jo pot se zyada ho (DP coin, asli ₹)</option>
               <option value="product_prize">Product prize ki DP coin value (sirf admin ko dikhegi)</option>
               <option value="free_rewards">Free rewards ki limit (daily login, ads, tasks)</option>
@@ -1042,44 +1018,6 @@ function ContestsPnl() {
     </div>
   );
 }
-
-function PackagesPnl() {
-  const { data = [], isLoading, error } = useQuery({ queryKey: ["coin-economy-packages"], queryFn: api.coinEconomyPackages });
-  return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <CsvButton onClick={() => exportCsv("package-pnl.csv", data, ["id", "name", "purchases", "inr", "refundedInr", "baseCoins", "bonusCoinsGiven", "promoBonusGiven"])} />
-      </div>
-      {error ? <ErrorBox error={error} /> : null}
-      <Table
-        loading={isLoading}
-        data={data}
-        keyFn={(p) => p.id}
-        empty="Abhi koi purchase nahi"
-        columns={[
-          {
-            key: "n",
-            header: "Package",
-            render: (p) => (
-              <span>
-                <span className="font-medium text-foreground">{p.name ?? p.id}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {fmtNumber(p.coins)} + {fmtNumber(p.bonusCoins)} bonus{p.budgetId ? " · promo budget" : ""}{p.active ? "" : " · hidden"}
-                </span>
-              </span>
-            ),
-          },
-          { key: "c", header: "Purchases", className: "text-right", render: (p) => fmtNumber(p.purchases) },
-          { key: "i", header: "₹ aaya", className: "text-right", render: (p) => <span>{inr(p.inr)}{p.refundedInr ? <span className="block text-xs text-red-600">−{inr(p.refundedInr)} refund</span> : null}</span> },
-          { key: "b", header: "💎 Diamond (paid)", className: "text-right", render: (p) => fmtNumber(p.baseCoins) },
-          { key: "x", header: "💎 Bonus Diamond", className: "text-right", render: (p) => <span>{fmtNumber(p.bonusCoinsGiven)}{p.promoBonusGiven ? <span className="block text-xs text-purple-600">{fmtNumber(p.promoBonusGiven)} budget se</span> : null}</span> },
-        ]}
-      />
-    </div>
-  );
-}
-
-// ─── User statement ──────────────────────────────────────────────────────────
 
 function UserStatementView() {
   const [q, setQ] = useState("");
