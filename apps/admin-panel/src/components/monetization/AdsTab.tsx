@@ -188,6 +188,33 @@ export function AdsTab({ range }: { range: Range }) {
         </div>
       </Card>
 
+      <Card title="Web display ads on shared battles (Google Ad Manager)" subtitle="A labelled ad box on the pages people open from a shared battle link. Web / PWA only. Never inside the VS or winner image.">
+        {ads.webDisplay.enabled && !ads.enabled && <Notice tone="warning">"Ads enabled" (above) is off, so these are off too.</Notice>}
+        {ads.webDisplay.enabled && !ads.webDisplay.adUnitPath && <Notice tone="warning">Enter the Ad Manager display ad unit path, or these stay off.</Notice>}
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Toggle label="Display ads on shared battles" checked={ads.webDisplay.enabled} onChange={(v) => set(["webDisplay", "enabled"], v)} />
+          <Text
+            label="Display ad unit path"
+            value={ads.webDisplay.adUnitPath}
+            placeholder="/1234567/tophunt_display"
+            onChange={(v) => set(["webDisplay", "adUnitPath"], v)}
+            hint="A display unit sized 300×250 / 336×280 / 320×100 / 320×50 / fluid."
+          />
+          <Toggle
+            label="Battle page (/battle/…)"
+            checked={ads.webDisplay.placements.battlePage}
+            onChange={(v) => set(["webDisplay", "placements", "battlePage"], v)}
+            hint="Below the battle card and its vote buttons, above “See more battles”."
+          />
+          <Toggle
+            label="Result page (/battle/…/result)"
+            checked={ads.webDisplay.placements.resultPage}
+            onChange={(v) => set(["webDisplay", "placements", "resultPage"], v)}
+            hint="Below the winner card, share buttons and prize, above “Apna battle shuru karo”."
+          />
+        </div>
+      </Card>
+
       <Card title="Sponsored posts (direct campaigns)" subtitle="Where approved brand campaigns appear in the home feed.">
         <div className="grid sm:grid-cols-4 gap-3">
           <Toggle label="Sponsored posts enabled" checked={sponsored.enabled} onChange={(v) => setSponsored({ ...sponsored, enabled: v })} />

@@ -50,6 +50,7 @@ import {
   winnerShareMessage,
 } from '@/src/lib/battleResult';
 import { formatClock } from '@/src/lib/countdown';
+import { WebDisplayAd } from '@/src/components/ads/WebDisplayAd';
 
 /**
  * `/battle/<id>/result` — the winner page.
@@ -382,6 +383,9 @@ export default function BattleResult() {
           onClaim={() => router.push(`/prizes/${encodeURIComponent(id)}` as any)}
           onWallet={() => router.push('/shop' as any)}
         />
+
+        {/* Web only. Outside the winner card, so it is never in the shared image. */}
+        <WebDisplayAd placement="resultPage" isDark={isDark} />
 
         <TouchableOpacity style={[styles.cta, styles.newBattle]} onPress={startBattle} accessibilityRole="button">
           <Text style={styles.ctaText}>{role === 'loser' ? 'Naya battle shuru karo 💪' : 'Apna battle shuru karo'}</Text>

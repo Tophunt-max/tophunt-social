@@ -217,6 +217,16 @@ The web CSP (`public/_headers` and `public/_worker.js`) allowlists Google's ad h
 nonce-based strict CSP for GPT, so a new Google host can be blocked; watch the browser console for CSP
 violations after enabling.
 
+### Display ads on shared battle pages (web)
+
+`monetization.ads.webDisplay` {enabled, adUnitPath, placements {battlePage, resultPage}} shows one labelled
+Google Ad Manager display slot (`apps/expo/src/components/ads/WebDisplayAd.tsx`) on the pages a shared battle
+link opens: `/battle/<id>` (below the battle card and its vote buttons) and `/battle/<id>/result` (below the
+winner card, share buttons and prize). Web / PWA only; guests see it too. It is never part of the VS or winner
+image that gets shared (those are captured from the card alone). The slot reserves 250 px while loading and
+collapses when there is no ad. Needs "Ads enabled" and a display ad unit path; no deploy switch, since nothing is
+paid.
+
 ### Measurement
 
 - `ad_event_counters`: app-reported requests/fills/impressions/clicks/failures, per day/platform/placement,

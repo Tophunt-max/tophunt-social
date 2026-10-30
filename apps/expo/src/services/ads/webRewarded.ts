@@ -13,7 +13,7 @@
  *    zoom; on other pages `defineOutOfPageSlot` returns null ("unsupported").
  *  - Same-domain creatives break under a CSP, so safe frames are forced.
  */
-import { Platform } from 'react-native';
+import { loadGpt, webAdsSupported } from './gpt';
 
 export type WebRewardedOutcome =
   /** GPT granted the reward (the user watched to the end). */
@@ -27,46 +27,13 @@ export type WebRewardedOutcome =
   /** GPT failed to load (ad blocker, network, CSP). */
   | 'blocked';
 
-const GPT_SRC = 'https://securepubads.g.doubleclick.net/tag/js/gpt.js';
 /** Give up waiting for an ad to become ready after this long. */
 const READY_TIMEOUT_MS = 20_000;
 
-let loading: Promise<boolean> | null = null;
 let busy = false;
 
 /** True on the web build, where GPT can run at all. */
-export const webRewardedSupported = () => Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined';
-
-function loadGpt(): Promise<boolean> {
-  if (!webRewardedSupported()) return Promise.resolve(false);
-  const w = window as any;
-  if (w.googletag?.apiReady) return Promise.resolve(true);
-  if (loading) return loading;
-  loading = new Promise<boolean>((resolve) => {
-    w.googletag = w.googletag || { cmd: [] };
-    const s = document.createElement('script');
-    s.src = GPT_SRC;
-    s.async = true;
-    s.crossOrigin = 'anonymous';
-    s.onload = () => {
-      w.googletag.cmd.push(() => {
-        // Cross-domain rendering for every creative (needed with a CSP).
-        try {
-          w.googletag.setConfig?.({ safeFrame: { forceSafeFrame: true } });
-        } catch {
-          // Older GPT: the setting is optional.
-        }
-        resolve(true);
-      });
-    };
-    s.onerror = () => {
-      loading = null;
-      resolve(false);
-    };
-    document.head.appendChild(s);
-  });
-  return loading;
-}
+export const webRewardedSupported = webAdsSupported;
 
 /** Load GPT ahead of time (e.g. when the Earn page opens) so the tap is fast. */
 export function preloadWebRewarded(): void {
@@ -78,7 +45,7 @@ export function preloadWebRewarded(): void {
  * closed, or straight away when there is nothing to show.
  */
 export async function showWebRewarded(adUnitPath: string): Promise<WebRewardedOutcome> {
-  if (!webRewardedSupported()) return 'unsupported';
+  if (!webAdsSupported()) return 'unsupported';
   if (busy) return 'closed';
   if (!(await loadGpt())) return 'blocked';
   busy = true;
