@@ -24,7 +24,8 @@ import type { ExplorePalette } from '@/src/components/explore/theme';
 import { GamificationIcon } from './GamificationIcon';
 import { RarityPill } from './RarityPill';
 import { EmptyInventory, FrameRing } from './vectors';
-import { SHOP_FRAME_AVATAR_RATIO, shopArt } from '@/src/lib/shopDigital';
+import { FRAME_AVATAR_RATIO, cosmeticArt } from '@/src/lib/cosmeticArt';
+import { CosmeticFx } from './CosmeticFx';
 
 const BRAND = '#FF4D67';
 
@@ -86,25 +87,28 @@ export function CosmeticPreview({
   name?: string | null;
 }) {
   const locked = item.owned === false;
-  // Shop items (asset.key = shop.*) carry bundled artwork.
-  const art = shopArt(item);
+  // Bundled artwork: XP items (assets/xp, static) and Premium (assets/shop/digital, animated).
+  const art = cosmeticArt(item);
   const tier = !art && item.type === 'frame' ? frameTier(item) : null;
   return (
     <View style={{ width: size, height: size, opacity: locked ? 0.55 : 1 }} accessible accessibilityLabel={`${item.name}${locked ? ', locked' : ''}`}>
       {art && art.kind === 'frame' ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-          <Avatar uri={avatarUri ?? undefined} name={name || 'You'} size={size * SHOP_FRAME_AVATAR_RATIO} />
+          <Avatar uri={avatarUri ?? undefined} name={name || 'You'} size={size * FRAME_AVATAR_RATIO} />
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             <art.Art width={size} height={size} />
+            {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} /> : null}
           </View>
         </View>
       ) : art && art.kind === 'theme' ? (
         <View style={{ width: size, height: size, borderRadius: size * 0.22, overflow: 'hidden' }}>
           <art.Art width={size} height={size} preserveAspectRatio="xMidYMid slice" />
+          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} preserveAspectRatio="xMidYMid slice" /> : null}
         </View>
       ) : art ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
           <art.Art width={size * 0.8} height={size * 0.8} />
+          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size * 0.8} height={size * 0.8} /> : null}
         </View>
       ) : tier ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>

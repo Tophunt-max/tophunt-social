@@ -7,6 +7,7 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { BRAND, PAD, useExplorePalette, type ExplorePalette } from '@/src/components/explore/theme';
 import { SectionError } from '@/src/components/explore/ExploreBits';
 import { RarityPill } from '@/src/components/gamification/RarityPill';
+import { TierPill } from '@/src/components/gamification/CosmeticBits';
 import { CosmeticPreview, GamificationEmpty } from '@/src/components/gamification/RewardBits';
 import { badgeState } from '@/src/lib/gamificationAssets';
 import { useEquipCosmetic, useInventory, type InventoryItemView } from '@/src/services/gamification';
@@ -99,6 +100,7 @@ const ItemRow = React.memo(function ItemRow({
         <View style={styles.titleRow}>
           <Text style={[styles.name, { color: p.text }]} numberOfLines={1}>{item.name}</Text>
           <RarityPill rarity={item.rarity} />
+          <TierPill item={item} compact />
         </View>
         <Text style={[styles.desc, { color: p.sub }]} numberOfLines={2}>{item.description}</Text>
         <Text style={[styles.state, { color: item.equipped ? BRAND : p.sub }]}>{state}</Text>

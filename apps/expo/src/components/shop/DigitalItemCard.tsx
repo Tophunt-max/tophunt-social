@@ -11,7 +11,7 @@ import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { Ionicons } from '@/src/lib/icons';
 import { RarityPill } from '@/src/components/gamification/RarityPill';
 import { CosmeticPreview } from '@/src/components/gamification/RewardBits';
-import { CosmeticBadge, CosmeticTitleChip, FramedAvatar, ThemeBackdrop } from '@/src/components/gamification/CosmeticBits';
+import { CosmeticBadge, CosmeticTitleChip, FramedAvatar, ThemeBackdrop, TierPill } from '@/src/components/gamification/CosmeticBits';
 import { BRAND, type ExplorePalette } from '@/src/components/explore/theme';
 import { assetColors, rarityColor } from '@/src/lib/progression';
 import type { StoreItemView } from '@/src/services/monetization';
@@ -125,7 +125,10 @@ export const DigitalItemCard = React.memo(function DigitalItemCard({
       </LinearGradient>
       <View style={styles.body}>
         <Text style={[styles.name, { color: p.text }]} numberOfLines={1}>{item.name}</Text>
-        <Text style={[styles.type, { color: p.sub }]} numberOfLines={1}>{DIGITAL_TYPE_LABEL[item.type] ?? item.type}</Text>
+        <View style={styles.metaRow}>
+          <TierPill item={item} compact />
+          <Text style={[styles.type, { color: p.sub, flexShrink: 1 }]} numberOfLines={1}>{DIGITAL_TYPE_LABEL[item.type] ?? item.type}</Text>
+        </View>
         <View style={{ marginTop: 8 }}>
           <PriceButton item={item} busy={busy} affordable={affordable} onBuy={onBuy} p={p} />
         </View>
@@ -150,6 +153,7 @@ export function FeaturedDigitalCard({
           <Text style={[styles.spotlightText, { color }]}>SPOTLIGHT</Text>
         </View>
         <Text style={styles.featuredName} numberOfLines={2}>{item.name}</Text>
+        <TierPill item={item} compact />
         {item.description ? <Text style={styles.featuredDesc} numberOfLines={2}>{item.description}</Text> : null}
         <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
           <PriceButton item={item} busy={busy} affordable={affordable} onBuy={onBuy} p={{ ...p, chip: 'rgba(255,255,255,0.14)', text: '#FFF', sub: '#C9C2E0' }} big />
@@ -164,7 +168,8 @@ const styles = StyleSheet.create({
   card: { borderRadius: 18, borderWidth: 1, overflow: 'hidden' },
   body: { padding: 10 },
   name: { fontFamily: 'Urbanist-Bold', fontSize: 14 },
-  type: { fontFamily: 'Urbanist-Medium', fontSize: 11.5, marginTop: 1 },
+  type: { fontFamily: 'Urbanist-Medium', fontSize: 11.5 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
   pillTopLeft: { position: 'absolute', top: 8, left: 8 },
   stockTag: { position: 'absolute', top: 8, right: 8, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
   stockText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 10 },
