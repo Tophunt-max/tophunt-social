@@ -10,6 +10,7 @@ into `apps/expo/assets/shop/digital/`.
 | `themes/`  | Profile header backgrounds                       | WebP + Lottie                     |
 | `badges/`  | Badges shown next to the username                | WebP + Lottie                     |
 | `titles/`  | Title chip icons                                 | WebP                              |
+| `levels/`  | Level badges / level-up artwork (Level 1, 2, 3…) | WebP + Lottie                     |
 
 ## Upload rules
 
