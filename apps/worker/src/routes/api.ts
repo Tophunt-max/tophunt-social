@@ -117,6 +117,7 @@ import { xpAwardStatements, xpEventOutcome, xpReversalStatements } from "../lib/
 import { syncProgressionSafe } from "../lib/achievements";
 import { handleGamificationAction } from "../lib/gamificationApi";
 import { handleMonetizationAction } from "../lib/monetizationApi";
+import { assertCashActionAllowed } from "../lib/cashRetirement";
 import { activeDailyTasks, dailyRewardFor, dailyRewardState, getDailyTaskDefs, getSettings, levelForXp, rewardDayNumber, rewardDayStart, type DailyTaskDef } from "../lib/gamification";
 import { sendEmail, sendUserEmail } from "../lib/email";
 import { passwordChangedEmail, dataExportEmail } from "../lib/emailTemplates";
@@ -430,6 +431,8 @@ apiRoute.post("/", async (c) => {
 
   // Idempotency guard — only enforced when the client opts in with a key
   // (safe for retries on critical writes like purchases/joins/claims).
+  // Real-money deposits / withdrawals are retired (lib/cashRetirement.ts).
+  assertCashActionAllowed(env, String(action));
   if (body.idempotencyKey) await enforceIdempotency(env, uid, String(body.idempotencyKey));
 
   try {
@@ -4453,6 +4456,14 @@ apiRoute.post("/", async (c) => {
     case "buyStoreItem":
     case "recordAdEvents":
     case "recordSponsoredEvent":
+    case "getShopProducts":
+    case "placeShopOrder":
+    case "getMyShopOrders":
+    case "getShopOrder":
+    case "cancelShopOrder":
+    case "requestShopReturn":
+    case "getXpConversion":
+    case "convertXp":
       return c.json(
         await handleMonetizationAction(action, {
           env,

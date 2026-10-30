@@ -1,21 +1,20 @@
 /**
- * Spending coins on in-app goods (virtual gifts, digital store items).
+ * Spending DP coin on goods: virtual gifts, digital store items, physical shop orders.
  *
- * A spend takes Diamonds first (play-only coins, lib/diamonds.ts) and only the
- * rest from DP coins, so a user's withdrawable balance is the last thing used.
- * That is the same split a purchase reversal uses (`DIAMONDS_AFTER_DEBIT`).
+ * Closed-loop economy (lib/cashRetirement.ts): Diamonds are earned and only
+ * pay contest entry fees; DP coin is won in contests and only buys things.
+ * A spend therefore takes DP coin ONLY (`dpcoin - locked_coins`) and never
+ * touches Diamonds; its ledger row has `locked_delta = 0`.
  *
  * Callers build ONE D1 batch: the ledger row, the balance UPDATE and their own
- * record (gift, purchase, entitlement), all behind the same gate, so either
- * everything is written or nothing is. These helpers only return statements;
- * they never run anything themselves.
+ * records, all behind the same gate, so either everything is written or
+ * nothing is. These helpers only return statements.
  *
- * Ordering rule, relied on by every caller: the ledger INSERT comes first and
- * does not touch `users`, so the UPDATE that follows sees the same balance
- * snapshot and the two cannot disagree (the pattern adjustUserWallet uses).
+ * Ordering rule: the ledger INSERT comes first and does not touch `users`, so
+ * the UPDATE that follows sees the same balance snapshot and the two cannot
+ * disagree (the pattern adjustUserWallet uses).
  */
 import type { Env } from "../types";
-import { DIAMONDS_AFTER_DEBIT } from "./money";
 
 export interface SpendInput {
   uid: string;
@@ -29,38 +28,28 @@ export interface SpendInput {
   gateArgs: unknown[];
 }
 
-/** `users` balance condition for a spend of `?` coins (bind the amount once). */
-export const CAN_SPEND = "dpcoin >= ?";
+/** `users` condition: enough DP coin (not Diamonds) for `?` coins. Bind the amount once. */
+export const CAN_SPEND = "dpcoin - locked_coins >= ?";
 
-/**
- * Ledger row + balance UPDATE for a spend. Both are gated on the caller's gate
- * AND the user being able to afford it, evaluated on the same snapshot.
- *
- * `locked_delta` is the Diamond part of the spend, negative.
- */
 export function spendStatements(env: Env, s: SpendInput): D1PreparedStatement[] {
   return [
     env.DB.prepare(
       `INSERT OR IGNORE INTO coin_transactions
          (id, uid, amount, type, description, created_at, locked_delta)
-       SELECT ?, ?, ?, ?, ?, ?,
-              (SELECT ${DIAMONDS_AFTER_DEBIT} - locked_coins FROM users WHERE uid = ?)
+       SELECT ?, ?, ?, ?, ?, ?, 0
         WHERE EXISTS (SELECT 1 FROM users WHERE uid = ? AND ${CAN_SPEND})
           AND ${s.gate}`,
-    ).bind(s.ledgerId, s.uid, -s.coins, s.type, s.description, s.ts, s.coins, s.coins, s.uid, s.uid, s.coins, ...s.gateArgs),
+    ).bind(s.ledgerId, s.uid, -s.coins, s.type, s.description, s.ts, s.uid, s.coins, ...s.gateArgs),
     env.DB.prepare(
-      `UPDATE users
-          SET dpcoin = dpcoin - ?,
-              locked_coins = ${DIAMONDS_AFTER_DEBIT},
-              updated_at = ?
+      `UPDATE users SET dpcoin = dpcoin - ?, updated_at = ?
         WHERE uid = ? AND ${CAN_SPEND}
           AND EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)
           AND ${s.gate}`,
-    ).bind(s.coins, s.coins, s.coins, s.ts, s.uid, s.coins, s.ledgerId, ...s.gateArgs),
+    ).bind(s.coins, s.ts, s.uid, s.coins, s.ledgerId, ...s.gateArgs),
   ];
 }
 
-/** Diamonds spent by a ledger row (positive), for snapshot columns. */
+/** Diamonds spent by a ledger row (always 0 now; kept for the snapshot columns). */
 export const LOCKED_SPENT_OF = "(SELECT -locked_delta FROM coin_transactions WHERE id = ?)";
 
 /** Whether the request id is safe to embed in a deterministic primary key. */

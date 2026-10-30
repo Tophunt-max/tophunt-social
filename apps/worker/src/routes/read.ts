@@ -59,6 +59,7 @@ import { kickSettlementIfDue } from "../lib/settleDue";
 import { publicAppConfig } from "../lib/appControl";
 import { listPublicCoinPackages } from "../lib/coinCatalog";
 import { liveCampaigns } from "../lib/sponsored";
+import { cashFlowsRetired } from "../lib/cashRetirement";
 import { profileGiftSummary } from "../lib/gifts";
 import { adsAllowedIn, parseMonetizationConfig } from "../lib/monetizationConfig";
 
@@ -2369,7 +2370,8 @@ readRoute.get("/transactions", requireAuth, async (c) => {
 // browsers, phones or the edge: an admin's price edit must show at once (it is
 // also pushed live — lib/coinCatalog.ts).
 readRoute.get("/coin-packages", async (c) => {
-  const res = c.json(await listPublicCoinPackages(c.env));
+  // Coin purchases are retired (lib/cashRetirement.ts): nothing is for sale.
+  const res = c.json(cashFlowsRetired(c.env) ? [] : await listPublicCoinPackages(c.env));
   res.headers.set("Cache-Control", "no-store, max-age=0");
   return res;
 });

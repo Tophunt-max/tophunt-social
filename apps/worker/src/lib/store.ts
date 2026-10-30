@@ -161,7 +161,7 @@ export async function buyStoreItem(
     if (Number(still.price_coins) !== price) throw httpsError("failed-precondition", "The price changed. Please confirm again.", "price_changed");
     const revoked = await env.DB.prepare(`SELECT 1 AS x FROM user_inventory WHERE uid = ? AND item_id = ?`).bind(uid, itemId).first();
     if (revoked) throw httpsError("permission-denied", "This item was removed from your account and can't be bought again.", "item_revoked");
-    throw httpsError("failed-precondition", `Not enough coins: this item costs ${price}.`, "insufficient_coins");
+    throw httpsError("failed-precondition", `Not enough DP coin: this item costs ${price} DP coin.`, "insufficient_coins");
   }
   const row = await env.DB.prepare(`SELECT * FROM store_purchases WHERE id = ?`).bind(id).first<any>();
   return toPurchase(row, false);

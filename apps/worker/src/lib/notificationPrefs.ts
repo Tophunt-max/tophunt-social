@@ -102,6 +102,7 @@ export const CATEGORY_BY_TYPE: Record<string, NotificationCategory> = {
   daily_reward: "wallet",
   daily_task: "wallet",
   ad_reward: "wallet",
+  shop_order: "wallet",
 
   // --- admin / marketing ---
   admin: "admin",

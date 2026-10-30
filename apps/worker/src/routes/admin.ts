@@ -118,6 +118,7 @@ import { enforceAdminIdempotency } from "../lib/idempotency";
 import { registerIntegrationRoutes } from "./integrations";
 import { registerGamificationRoutes } from "./adminGamification";
 import { registerMonetizationRoutes } from "./adminMonetization";
+import { CASH_RETIRED_REASON, cashFlowsRetired } from "../lib/cashRetirement";
 import { assertIdentifiersAvailable, recordUsernameTransition, validateUsername } from "../lib/userIdentifiers";
 import { revokeAllSessions } from "../lib/sessionRevocation";
 import {
@@ -290,7 +291,7 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["POST", /^\/gamification\/users\/[^/]+\/inventory\/[^/]+\/(revoke|restore)$/],
   ["PUT", /^\/gamification\/(achievements|catalog)\/[^/]+$/],
   // Monetization writes: prices, refunds, revenue imports, campaign approval.
-  ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns)(\/.*)?$/],
+  ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop|economy)(\/.*)?$/],
 ];
 export function isSensitiveAdminRoute(method: string, path: string): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
@@ -2644,7 +2645,11 @@ adminRoute.get("/overview", async (c) => {
         .where(notInArray(schema.prizeClaims.status, ["delivered", "cancelled"]))
         .get()
     )?.v ?? 0;
-  const overview = { users, posts, reports, support, revenue, revenueInr, activeMatches, liveContests, pendingWithdrawals, pendingDeposits, pendingPrizeClaims };
+  // Shop orders waiting for the admin to pack / ship / answer a return (lib/shop.ts).
+  const pendingShopOrders = Number(
+    (await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM shop_orders WHERE status IN ('placed', 'packed', 'return_requested')`).first<{ n: number }>())?.n ?? 0,
+  );
+  const overview = { users, posts, reports, support, revenue, revenueInr, activeMatches, liveContests, pendingWithdrawals, pendingDeposits, pendingPrizeClaims, pendingShopOrders };
   memoPut(OVERVIEW_MEMO_KEY, overview, 30);
   return c.json(withViewerRole(c, overview));
 });
@@ -4254,6 +4259,12 @@ adminRoute.patch("/withdrawals/:id", async (c) => {
 
   const status = action === "approve" ? "approved" : action === "paid" ? "paid" : "rejected";
   const fromStatus = w.status;
+  // Withdrawals are retired (lib/cashRetirement.ts): nothing new is approved.
+  // Rejecting (refunds the held DP coin) and marking an ALREADY approved payout
+  // as paid (the money may already have been sent) stay possible.
+  if (action === "approve" && cashFlowsRetired(c.env)) {
+    throw httpsError("failed-precondition", "Withdrawals are retired. Reject this request to return the DP coin.", CASH_RETIRED_REASON);
+  }
 
   if (!(WITHDRAWAL_TRANSITIONS[fromStatus] ?? []).includes(status))
     throw httpsError(

@@ -539,6 +539,9 @@ export function makeEnv(overrides: Partial<TestEnv> = {}): { env: TestEnv; db: S
     // Shared server-to-server admin secret. Sending it as X-Admin-Secret is the
     // simplest way to exercise /admin routes at superadmin level.
     ADMIN_PROXY_SECRET: 'test-admin-secret',
+    // Legacy money tests exercise the (retired) cash paths; production defaults
+    // to retired. New tests opt in with { CASH_FLOWS_RETIRED: 'true' }.
+    CASH_FLOWS_RETIRED: 'false',
     ...overrides,
   };
   return { env, db: sqlite };

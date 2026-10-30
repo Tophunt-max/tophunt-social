@@ -136,14 +136,14 @@ describe('virtual gifts', () => {
     expect(res.body.gifts.map((g: any) => g.id)).toEqual(['heart', 'clap', 'rose', 'star', 'fireworks', 'crown']);
   });
 
-  it('sends a gift: one debit, one ledger row, one gift record, Diamonds spent first', async () => {
+  it('sends a gift: one debit of DP coin only (Diamonds untouched), one ledger row, one gift record', async () => {
     const env = await setup(100, 12);
     const res = await send(env, { quantity: 3 });
     expect(res.status).toBe(200);
-    expect(res.body.gift).toMatchObject({ totalCoins: 15, quantity: 3, diamondsSpent: 12, replayed: false });
+    expect(res.body.gift).toMatchObject({ totalCoins: 15, quantity: 3, diamondsSpent: 0, replayed: false });
     const a = await user(env, 'alice');
     expect(a!.dpcoin).toBe(85);
-    expect((a as any).lockedCoins).toBe(0);
+    expect((a as any).lockedCoins).toBe(12);
     const b = await user(env, 'bob');
     expect(b!.dpcoin ?? 0).toBe(0); // the recipient is NOT credited coins
     await assertLedger(env, 'alice');
@@ -177,6 +177,13 @@ describe('virtual gifts', () => {
     expect(results.filter((r) => r.status === 412)).toHaveLength(2);
     expect((await user(env, 'alice'))!.dpcoin).toBe(2);
     await assertLedger(env, 'alice');
+  });
+
+  it('Diamonds can never pay for a gift', async () => {
+    const env = await setup(50, 48); // 2 DP coin + 48 Diamond
+    const res = await send(env);
+    expect(res.body.error.reason).toBe('insufficient_coins');
+    expect((await user(env, 'alice'))!.dpcoin).toBe(50);
   });
 
   it('insufficient balance writes nothing', async () => {
@@ -261,7 +268,7 @@ describe('digital store', () => {
     expect(list.body.items.find((i: any) => i.itemId === item.id)).toMatchObject({ priceCoins: 30, owned: false });
     const res = await buy(env, item.id);
     expect(res.status).toBe(200);
-    expect(res.body.purchase).toMatchObject({ priceCoins: 30, diamondsSpent: 10, status: 'completed' });
+    expect(res.body.purchase).toMatchObject({ priceCoins: 30, diamondsSpent: 0, status: 'completed' });
     const inv = await env.DB.prepare(`SELECT source, revoked_at FROM user_inventory WHERE uid = 'alice' AND item_id = ?`).bind(item.id).first<any>();
     expect(inv).toMatchObject({ source: 'store', revoked_at: null });
     expect((await user(env, 'alice'))!.dpcoin).toBe(70);

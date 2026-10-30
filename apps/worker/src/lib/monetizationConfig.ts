@@ -46,6 +46,10 @@ export interface MonetizationConfig {
   sponsored: { enabled: boolean; firstPosition: number; interval: number; maxPerSession: number };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number; creatorShareBps: number };
   store: { enabled: boolean };
+  /** Physical shop (lib/shop.ts). */
+  shop: { enabled: boolean };
+  /** Ways to earn Diamonds that live here (others: Coin Economy → Earn). */
+  earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
 }
 
 const emptyUnits = (): PlatformUnits => ({ native: "", interstitial: "", rewarded: "" });
@@ -67,6 +71,8 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
   sponsored: { enabled: false, firstPosition: 3, interval: 12, maxPerSession: 3 },
   gifts: { enabled: false, maxQuantity: 99, maxCoinsPerSend: 5000, creatorShareBps: 0 },
   store: { enabled: false },
+  shop: { enabled: false },
+  earning: { xpConversion: { enabled: false, xpPerDiamond: 100, maxDiamondsPerDay: 20 } },
 };
 
 /** Bounds for every numeric knob: [min, max]. */
@@ -82,6 +88,8 @@ const BOUNDS = {
   maxQuantity: [1, 999],
   maxCoinsPerSend: [1, 1_000_000],
   creatorShareBps: [0, 10_000],
+  xpPerDiamond: [1, 1_000_000],
+  maxDiamondsPerDay: [1, 10_000],
 } as const;
 
 const AD_UNIT_RE = /^ca-app-pub-\d{16}\/\d{10}$/;
@@ -162,6 +170,14 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
       creatorShareBps: int(m.gifts?.creatorShareBps, d.gifts.creatorShareBps, BOUNDS.creatorShareBps),
     },
     store: { enabled: bool(m.store?.enabled, false) },
+    shop: { enabled: bool(m.shop?.enabled, false) },
+    earning: {
+      xpConversion: {
+        enabled: bool(m.earning?.xpConversion?.enabled, false),
+        xpPerDiamond: int(m.earning?.xpConversion?.xpPerDiamond, d.earning.xpConversion.xpPerDiamond, BOUNDS.xpPerDiamond),
+        maxDiamondsPerDay: int(m.earning?.xpConversion?.maxDiamondsPerDay, d.earning.xpConversion.maxDiamondsPerDay, BOUNDS.maxDiamondsPerDay),
+      },
+    },
   };
 }
 
@@ -197,6 +213,8 @@ export function publicMonetizationConfig(cfg: any) {
     sponsored: m.sponsored,
     gifts: { enabled: m.gifts.enabled, maxQuantity: m.gifts.maxQuantity, maxCoinsPerSend: m.gifts.maxCoinsPerSend },
     store: m.store,
+    shop: m.shop,
+    earning: m.earning,
   };
 }
 
@@ -237,7 +255,7 @@ export function validateMonetizationPatch(patch: any): void {
   };
 
   if (!obj(patch, "monetization")) return;
-  only(patch, ["ads", "sponsored", "gifts", "store"], "monetization");
+  only(patch, ["ads", "sponsored", "gifts", "store", "shop", "earning"], "monetization");
 
   const a = patch.ads;
   if (obj(a, "ads")) {
@@ -315,5 +333,22 @@ export function validateMonetizationPatch(patch: any): void {
   if (obj(st, "store")) {
     only(st, ["enabled"], "store");
     isBool(st.enabled, "store.enabled");
+  }
+
+  const sh = patch.shop;
+  if (obj(sh, "shop")) {
+    only(sh, ["enabled"], "shop");
+    isBool(sh.enabled, "shop.enabled");
+  }
+
+  const e = patch.earning;
+  if (obj(e, "earning")) {
+    only(e, ["xpConversion"], "earning");
+    if (obj(e.xpConversion, "earning.xpConversion")) {
+      only(e.xpConversion, ["enabled", "xpPerDiamond", "maxDiamondsPerDay"], "earning.xpConversion");
+      isBool(e.xpConversion.enabled, "earning.xpConversion.enabled");
+      isInt(e.xpConversion.xpPerDiamond, "earning.xpConversion.xpPerDiamond", BOUNDS.xpPerDiamond);
+      isInt(e.xpConversion.maxDiamondsPerDay, "earning.xpConversion.maxDiamondsPerDay", BOUNDS.maxDiamondsPerDay);
+    }
   }
 }

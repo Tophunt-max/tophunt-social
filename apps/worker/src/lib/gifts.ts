@@ -2,7 +2,7 @@
  * Virtual gifts: a user spends coins to send a gift to another user.
  *
  * Money rules:
- *  - The sender's coins are spent (Diamonds first, lib/coinSpend.ts). The
+ *  - The sender's DP coin is spent (never Diamonds, lib/coinSpend.ts). The
  *    recipient receives a gift record and a notification, NOT coins. Nothing
  *    here creates a balance payable to the recipient; `creator_share_bps` is a
  *    snapshot for future reporting only (see MONETIZATION.md, creator payouts).
@@ -194,7 +194,7 @@ export async function sendGift(env: Env, senderUid: string, input: SendGiftInput
     const live = await env.DB.prepare(`SELECT price_coins FROM virtual_gifts WHERE id = ? AND ${LIVE_GIFT_SQL}`).bind(giftId, ts, ts).first<any>();
     if (!live) throw httpsError("not-found", "This gift is not available.", "gift_unavailable");
     if (Number(live.price_coins) !== gift.priceCoins) throw httpsError("failed-precondition", "The gift price changed. Please confirm again.", "price_changed");
-    throw httpsError("failed-precondition", `Not enough coins: this gift costs ${total}.`, "insufficient_coins");
+    throw httpsError("failed-precondition", `Not enough DP coin: this gift costs ${total} DP coin.`, "insufficient_coins");
   }
   const row = await env.DB.prepare(`SELECT * FROM gift_transactions WHERE id = ?`).bind(id).first<any>();
   return toResult(row, false);

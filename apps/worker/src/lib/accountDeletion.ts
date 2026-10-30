@@ -290,6 +290,18 @@ async function findDeferrals(env: Env, uid: string): Promise<DeletionDeferral[]>
     });
   }
 
+  // An open shop order (lib/shop.ts) is a parcel on its way, the same obligation.
+  const openOrders = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM shop_orders WHERE uid = ? AND status IN ('placed', 'packed', 'shipped', 'return_requested')`,
+  ).bind(uid).first<{ n: number }>();
+  if (Number(openOrders?.n ?? 0) > 0) {
+    deferrals.push({
+      code: "pending_prize",
+      message: "An order you placed is still on its way. Your account will be deleted once it has been delivered or cancelled.",
+      detail: { shopOrders: Number(openOrders?.n ?? 0) },
+    });
+  }
+
   return deferrals;
 }
 
@@ -1025,6 +1037,10 @@ async function phaseContent(env: Env, uid: string): Promise<void> {
       })
       .where(eq(schema.prizeClaims.uid, uid)),
   ]);
+
+  // Shop orders stay (they are the other half of DP coin ledger rows); the
+  // delivery address and note are the personal part and are scrubbed.
+  await env.DB.prepare(`UPDATE shop_orders SET address = '{}', user_note = NULL WHERE uid = ?`).bind(uid).run();
 
   // Message BODIES now live in per-chat ChatArchive Durable Objects, not the D1
   // `messages` table (the delete above only clears any legacy D1 seed rows). So

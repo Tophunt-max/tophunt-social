@@ -26,6 +26,11 @@ import {
   type CampaignStatus,
 } from "../lib/sponsored";
 import { purgeShared } from "../lib/edgeCache";
+import { ADMIN_TRANSITIONS, ORDER_STATUSES, loadOrder, transitionOrder, unitCoins, validateProductInput, type OrderStatus } from "../lib/shop";
+import { coinValuesFromConfig } from "../lib/coinPricing";
+import { createNotification } from "../lib/notify";
+import { RESET_CONFIRM_PHRASE, resetPreview, runResetChunk } from "../lib/economyReset";
+import { assertApproval } from "../lib/approvalPassword";
 
 type Audit = (c: any, action: string, targetType: string, targetId: string | null, detail?: Record<string, unknown>) => Promise<void>;
 
@@ -379,4 +384,151 @@ export function registerMonetizationRoutes(
   });
 
   adminRoute.get("/monetization/campaigns/:id/report", async (c) => c.json(await campaignReport(c.env, c.req.param("id"))));
+
+  // ------------------------------------------------------------ physical shop
+
+  adminRoute.get("/monetization/shop/products", async (c) => {
+    const { dpCoinInr } = coinValuesFromConfig(await getAppConfig(c.env));
+    const [products, variants, sold] = await Promise.all([
+      c.env.DB.prepare(`SELECT * FROM shop_products ORDER BY active DESC, sort, created_at DESC`).all<any>(),
+      c.env.DB.prepare(`SELECT * FROM shop_variants ORDER BY sort, label`).all<any>(),
+      c.env.DB.prepare(
+        `SELECT i.product_id, SUM(i.qty) AS units FROM shop_order_items i JOIN shop_orders o ON o.id = i.order_id
+          WHERE o.status NOT IN ('cancelled', 'returned') GROUP BY i.product_id`,
+      ).all<any>(),
+    ]);
+    const soldBy = new Map((sold.results ?? []).map((r) => [r.product_id, Number(r.units)]));
+    const varsBy = new Map<string, any[]>();
+    for (const v of variants.results ?? []) varsBy.set(v.product_id, [...(varsBy.get(v.product_id) ?? []), v]);
+    return c.json({
+      dpCoinInr,
+      products: (products.results ?? []).map((p) => ({
+        id: p.id, title: p.title, description: p.description, category: p.category, images: JSON.parse(p.images || "[]"),
+        priceInr: Number(p.price_inr_paise) / 100, shippingInr: Number(p.shipping_inr_paise) / 100,
+        priceCoins: unitCoins(Number(p.price_inr_paise), Number(p.shipping_inr_paise), dpCoinInr),
+        returnDays: Number(p.return_days), active: !!p.active, featured: !!p.featured, sort: Number(p.sort),
+        unitsSold: soldBy.get(p.id) ?? 0,
+        variants: (varsBy.get(p.id) ?? []).map((v) => ({ id: v.id, label: v.label, sku: v.sku, stock: Number(v.stock), active: !!v.active })),
+      })),
+    });
+  });
+
+  adminRoute.put("/monetization/shop/products/:id", async (c) => {
+    const id = c.req.param("id");
+    if (!/^[A-Za-z0-9_-]{2,64}$/.test(id)) throw httpsError("invalid-argument", "Product id: 2-64 letters, digits, - or _.");
+    const v = validateProductInput(await c.req.json<any>().catch(() => ({})));
+    const before = await c.env.DB.prepare(`SELECT * FROM shop_products WHERE id = ?`).bind(id).first<any>();
+    const oldVariants = (await c.env.DB.prepare(`SELECT id FROM shop_variants WHERE product_id = ?`).bind(id).all<any>()).results ?? [];
+    const ts = Date.now();
+    const keep = new Set<string>();
+    const stmts: D1PreparedStatement[] = [
+      c.env.DB.prepare(
+        `INSERT INTO shop_products (id, title, description, category, images, price_inr_paise, shipping_inr_paise, return_days, active, featured, sort, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET title = excluded.title, description = excluded.description, category = excluded.category,
+           images = excluded.images, price_inr_paise = excluded.price_inr_paise, shipping_inr_paise = excluded.shipping_inr_paise,
+           return_days = excluded.return_days, active = excluded.active, featured = excluded.featured, sort = excluded.sort, updated_at = excluded.updated_at`,
+      ).bind(id, v.title, v.description, v.category, v.images, v.pricePaise, v.shippingPaise, v.returnDays, v.active, v.featured, v.sort, ts, ts),
+    ];
+    v.variants.forEach((vr: any, i: number) => {
+      const vid = vr.id && oldVariants.some((o) => o.id === vr.id) ? vr.id : `${id}-${crypto.randomUUID().slice(0, 8)}`;
+      keep.add(vid);
+      stmts.push(
+        c.env.DB.prepare(
+          `INSERT INTO shop_variants (id, product_id, label, sku, stock, active, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (id) DO UPDATE SET label = excluded.label, sku = excluded.sku, stock = excluded.stock, active = excluded.active, sort = excluded.sort, updated_at = excluded.updated_at`,
+        ).bind(vid, id, vr.label, vr.sku, vr.stock, vr.active, i, ts, ts),
+      );
+    });
+    // Variants dropped from the form are hidden, never deleted: past orders point at them.
+    for (const o of oldVariants) if (!keep.has(o.id)) stmts.push(c.env.DB.prepare(`UPDATE shop_variants SET active = 0, updated_at = ? WHERE id = ?`).bind(ts, o.id));
+    await c.env.DB.batch(stmts);
+    await logAudit(c, before ? "shop.product.update" : "shop.product.create", "shop_product", id, {
+      before: before ? { title: before.title, priceInrPaise: before.price_inr_paise, active: !!before.active } : null,
+      after: { title: v.title, priceInrPaise: v.pricePaise, shippingInrPaise: v.shippingPaise, active: !!v.active, variants: v.variants.map((x: any) => ({ label: x.label, stock: x.stock })) },
+    });
+    return c.json({ success: true });
+  });
+
+  adminRoute.get("/monetization/shop/orders", async (c) => {
+    const status = c.req.query("status");
+    const where: string[] = [];
+    const binds: unknown[] = [];
+    if (status && (ORDER_STATUSES as readonly string[]).includes(status)) { where.push("o.status = ?"); binds.push(status); }
+    const rows = await c.env.DB.prepare(
+      `SELECT o.id, o.uid, o.status, o.total_coins, o.total_inr_paise, o.tracking_number, o.created_at, o.updated_at, u.username,
+              (SELECT SUM(qty) FROM shop_order_items i WHERE i.order_id = o.id) AS units,
+              (SELECT title FROM shop_order_items i WHERE i.order_id = o.id ORDER BY i.id LIMIT 1) AS title
+         FROM shop_orders o LEFT JOIN users u ON u.uid = o.uid
+        ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY o.created_at DESC LIMIT 200`,
+    ).bind(...binds).all<any>();
+    const counts = await c.env.DB.prepare(`SELECT status, COUNT(*) AS n FROM shop_orders GROUP BY status`).all<any>();
+    return c.json({
+      counts: Object.fromEntries((counts.results ?? []).map((r) => [r.status, Number(r.n)])),
+      orders: (rows.results ?? []).map((r) => ({
+        id: r.id, uid: r.uid, username: r.username, status: r.status, totalCoins: Number(r.total_coins), totalInr: Number(r.total_inr_paise) / 100,
+        trackingNumber: r.tracking_number, units: Number(r.units), title: r.title, createdAt: Number(r.created_at), updatedAt: Number(r.updated_at),
+      })),
+    });
+  });
+
+  adminRoute.get("/monetization/shop/orders/:id", async (c) => {
+    const order = await loadOrder(c.env, c.req.param("id"), null);
+    if (!order) throw httpsError("not-found", "Order not found.");
+    const owner = await c.env.DB.prepare(`SELECT o.uid, u.username FROM shop_orders o LEFT JOIN users u ON u.uid = o.uid WHERE o.id = ?`).bind(order.id).first<any>();
+    return c.json({ order, uid: owner?.uid, username: owner?.username, next: ADMIN_TRANSITIONS[order.status] });
+  });
+
+  adminRoute.post("/monetization/shop/orders/:id/status", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json<any>().catch(() => ({}));
+    const to = String(body?.status ?? "") as OrderStatus;
+    if (!(ORDER_STATUSES as readonly string[]).includes(to)) throw httpsError("invalid-argument", "Unknown status.");
+    const cur = await c.env.DB.prepare(`SELECT uid, status FROM shop_orders WHERE id = ?`).bind(id).first<any>();
+    if (!cur) throw httpsError("not-found", "Order not found.");
+    if (!ADMIN_TRANSITIONS[cur.status as OrderStatus]?.includes(to)) throw httpsError("failed-precondition", `A ${cur.status} order can't move to ${to}.`);
+    const text = (v: unknown, max: number) => (v == null || v === "" ? null : String(v).trim().slice(0, max));
+    const trackingNumber = text(body.trackingNumber, 64);
+    const trackingUrl = text(body.trackingUrl, 500);
+    if (trackingUrl && !/^https:\/\/\S+$/i.test(trackingUrl)) throw httpsError("invalid-argument", "Tracking link must be an https URL.");
+    if (to === "shipped" && !trackingNumber) throw httpsError("invalid-argument", "A tracking number is required to mark an order shipped.");
+    const note = text(body.note, 300);
+    if ((to === "cancelled" || to === "return_rejected") && !note) throw httpsError("invalid-argument", "A reason is required.");
+    await transitionOrder(c.env, id, to, {
+      actor: actorOf(c), from: [cur.status], note, carrier: text(body.carrier, 60), trackingNumber, trackingUrl, restock: body.restock === true,
+    });
+    await logAudit(c, "shop.order.status", "shop_order", id, { from: cur.status, to, note, trackingNumber });
+    const label: Record<string, string> = {
+      packed: "is packed", shipped: "has been shipped", delivered: "was delivered", cancelled: "was cancelled (DP coin refunded)",
+      returned: "return was accepted (DP coin refunded)", return_rejected: "return request was declined",
+    };
+    c.executionCtx.waitUntil(
+      createNotification(c.env, cur.uid, {
+        title: "Order update", body: `Your order ${label[to] ?? `is ${to}`}.${trackingNumber && to === "shipped" ? ` Tracking: ${trackingNumber}` : ""}`,
+        type: "shop_order", targetId: id,
+      }).catch(() => undefined),
+    );
+    return c.json({ success: true, order: await loadOrder(c.env, id, null) });
+  });
+
+  // ------------------------------------------------------------ economy reset (lib/economyReset.ts)
+
+  adminRoute.get("/monetization/economy/reset", async (c) => {
+    const history = await c.env.DB.prepare(`SELECT * FROM economy_resets ORDER BY created_at DESC LIMIT 20`).all<any>();
+    return c.json({ preview: await resetPreview(c.env), history: history.results ?? [] });
+  });
+
+  adminRoute.post("/monetization/economy/reset", async (c) => {
+    // Superadmin only, recent sign-in (sensitive route), approval password, typed phrase.
+    if (c.get("adminRole") !== "superadmin") throw httpsError("permission-denied", "Only a superadmin can reset the economy.");
+    const body = await c.req.json<any>().catch(() => ({}));
+    if (body?.confirm !== RESET_CONFIRM_PHRASE) throw httpsError("invalid-argument", `Type "${RESET_CONFIRM_PHRASE}" to confirm.`);
+    await assertApproval(c, body);
+    const reason = reasonOf(body);
+    const progress = await runResetChunk(c.env, {
+      resetId: String(body.resetId ?? ""), resetDpCoin: body.resetDpCoin === true, resetDiamonds: body.resetDiamonds === true, reason, actor: actorOf(c),
+    });
+    await logAudit(c, "economy.reset.chunk", "economy_reset", progress.resetId, { ...progress, resetDpCoin: body.resetDpCoin === true, resetDiamonds: body.resetDiamonds === true, reason });
+    return c.json(progress);
+  });
 }

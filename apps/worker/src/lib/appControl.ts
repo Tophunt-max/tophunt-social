@@ -23,7 +23,7 @@
  *               feePercent, feeFlat, feeMin, feeMax },
  *   _version (ms; bumped on every save).
  */
-import { validateCoinPricingPatch } from "./coinPricing";
+import { coinValuesFromConfig, validateCoinPricingPatch } from "./coinPricing";
 import { validateRewardLockingPatch } from "./rewardLocking";
 import { validateCoinAlertPatch } from "./coinAlerts";
 import { feeRuleFromConfig, validateWithdrawalFeePatch } from "./withdrawalFee";
@@ -242,6 +242,8 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
     ads: { enabled: ads.enabled === true, reward: Number(ads.reward ?? 0), dailyCap: Number(ads.dailyCap ?? 0) },
     // Ad placements, sponsored posts, gifts and the store (lib/monetizationConfig.ts).
     monetization: publicMonetizationConfig(cfg),
+    // ₹ value of one coin (Coin Economy → Values). Products are priced from dpCoinInr.
+    coinValues: coinValuesFromConfig(cfg),
     supportEmail: cfg.supportEmail || "",
     socialLinks: cfg.socialLinks || {},
     splashImageUrl: typeof cfg.splashImageUrl === "string" ? cfg.splashImageUrl : "",
