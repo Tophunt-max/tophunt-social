@@ -56,6 +56,11 @@ export default function OrderScreen() {
         <ScrollView contentContainerStyle={{ padding: PAD, gap: 14, paddingBottom: 40 }}>
           <View style={[styles.card, { backgroundColor: p.card, borderColor: p.border }]}>
             <Text style={[styles.status, { color: BRAND }]}>{ORDER_STATUS_LABEL[o.status]}</Text>
+            {o.reviewStatus === 'pending' && o.status === 'placed' ? (
+              <Text style={[styles.sub, { color: '#B45309' }]}>
+                Aapka order team check kar rahi hai (safety check). Approve hote hi pack hoga. Aap abhi bhi cancel kar sakte ho.
+              </Text>
+            ) : null}
             {stepIndex >= 0 && (
               <View style={styles.track}>
                 {STEPS.map((s, i) => (

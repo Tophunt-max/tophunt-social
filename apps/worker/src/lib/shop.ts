@@ -23,6 +23,8 @@ import { spendStatements, validRequestId } from "./coinSpend";
 import { coinValuesFromConfig, dpCoinsForPaise } from "./coinPricing";
 import { getAppConfig } from "./settings";
 import { parseDeliveryAddress } from "./deliveryAddress";
+import { parseMonetizationConfig } from "./monetizationConfig";
+import { addressFingerprints, assessOrder, explainRefusal, limitGate } from "./shopRisk";
 
 export const ORDER_STATUSES = ["placed", "packed", "shipped", "delivered", "cancelled", "return_requested", "returned", "return_rejected"] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
@@ -151,6 +153,8 @@ export interface OrderView {
   returnUntil: number | null;
   items: { productId: string; variantId: string; title: string; variantLabel: string; image: string | null; qty: number; unitCoins: number }[];
   history: { from: string | null; to: string; note: string | null; at: number }[];
+  /** 'pending' = waiting for an admin check before it can be packed. */
+  reviewStatus: "none" | "pending" | "approved" | "rejected";
   replayed?: boolean;
 }
 
@@ -179,6 +183,7 @@ export async function loadOrder(env: Env, id: string, uid: string | null): Promi
     returnUntil: o.delivered_at && returnDays > 0 ? Number(o.delivered_at) + returnDays * 86_400_000 : null,
     items: (items.results ?? []).map((i) => ({ productId: i.product_id, variantId: i.variant_id, title: i.title, variantLabel: i.variant_label, image: i.image, qty: Number(i.qty), unitCoins: Number(i.unit_coins) })),
     history: (history.results ?? []).map((h) => ({ from: h.from_status, to: h.to_status, note: h.note, at: Number(h.created_at) })),
+    reviewStatus: o.review_status ?? "none",
   };
 }
 
@@ -196,7 +201,9 @@ export async function placeOrder(
   const lines = parseCart(input.items);
   const address = parseDeliveryAddress(input.address);
   const note = input.note == null || input.note === "" ? null : String(input.note).trim().slice(0, 300);
-  const { dpCoinInr } = coinValuesFromConfig(await getAppConfig(env));
+  const appCfg = await getAppConfig(env);
+  const { dpCoinInr } = coinValuesFromConfig(appCfg);
+  const fraud = parseMonetizationConfig(appCfg).shop.fraud;
 
   // Current prices and stock for every line.
   const ph = lines.map(() => "?").join(",");
@@ -222,6 +229,12 @@ export async function placeOrder(
     throw httpsError("failed-precondition", `The total changed to ${totalCoins} DP coin. Please review your cart.`, "price_changed");
   }
 
+  // Fraud rules (lib/shopRisk.ts): hard rules refuse here with a reason;
+  // weak signals only hold the order for an admin review.
+  const fps = await addressFingerprints(address);
+  const risk = await assessOrder(env, uid, totalCoins, fps, fraud, ts);
+  const limits = limitGate(uid, totalCoins, fps, fraud, ts);
+
   const ledgerId = `shop_order:${id}`;
   // Every line still in stock at the same ₹ price; order not yet written.
   const lineGate = priced
@@ -230,10 +243,12 @@ export async function placeOrder(
                            AND p.price_inr_paise = ? AND p.shipping_inr_paise = ?)`)
     .join(" AND ");
   const lineArgs = priced.flatMap((l) => [l.variantId, l.qty, Number(l.r.price_inr_paise), Number(l.r.shipping_inr_paise)]);
-  const gate = `NOT EXISTS (SELECT 1 FROM shop_orders WHERE id = ?) AND ${lineGate}`;
+  // The hard limits are re-checked here, inside the transaction, so two
+  // racing orders can't both slip under a cap.
+  const gate = `NOT EXISTS (SELECT 1 FROM shop_orders WHERE id = ?) AND ${lineGate} AND ${limits.sql}`;
   const charged = `EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?) AND NOT EXISTS (SELECT 1 FROM shop_orders WHERE id = ?)`;
   const stmts: D1PreparedStatement[] = [
-    ...spendStatements(env, { uid, coins: totalCoins, ledgerId, type: "shop_order", description: `Shop order (${priced.length} item${priced.length > 1 ? "s" : ""})`, ts, gate, gateArgs: [id, ...lineArgs] }),
+    ...spendStatements(env, { uid, coins: totalCoins, ledgerId, type: "shop_order", description: `Shop order (${priced.length} item${priced.length > 1 ? "s" : ""})`, ts, gate, gateArgs: [id, ...lineArgs, ...limits.args] }),
     ...priced.map((l) =>
       env.DB.prepare(`UPDATE shop_variants SET stock = stock - ?, updated_at = ? WHERE id = ? AND stock >= ? AND ${charged}`)
         .bind(l.qty, ts, l.variantId, l.qty, ledgerId, id),
@@ -250,9 +265,14 @@ export async function placeOrder(
     ).bind(`${id}:h0`, id, ts, ledgerId, id),
     // Last: the order row itself, which closes every `charged` gate above.
     env.DB.prepare(
-      `INSERT INTO shop_orders (id, uid, status, total_coins, total_inr_paise, dp_coin_inr, address, ledger_id, user_note, created_at, updated_at)
-       SELECT ?, ?, 'placed', ?, ?, ?, ?, ?, ?, ?, ? WHERE ${charged}`,
-    ).bind(id, uid, totalCoins, totalPaise, dpCoinInr, JSON.stringify(address), ledgerId, note, ts, ts, ledgerId, id),
+      `INSERT INTO shop_orders (id, uid, status, total_coins, total_inr_paise, dp_coin_inr, address, ledger_id, user_note,
+                                address_fp, phone_fp, device_id, risk_flags, review_status, created_at, updated_at)
+       SELECT ?, ?, 'placed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${charged}`,
+    ).bind(
+      id, uid, totalCoins, totalPaise, dpCoinInr, JSON.stringify(address), ledgerId, note,
+      fps.addressFp, fps.phoneFp, risk.deviceId, JSON.stringify(risk.flags), risk.needsReview ? "pending" : "none", ts, ts,
+      ledgerId, id,
+    ),
   ];
   const results = await env.DB.batch(stmts);
   if (Number(results[results.length - 1]?.meta?.changes || 0) === 0) {
@@ -262,6 +282,8 @@ export async function placeOrder(
     if (bal && Number(bal.dp) < totalCoins) {
       throw httpsError("failed-precondition", `Not enough DP coin: this order costs ${totalCoins} DP coin.`, "insufficient_coins");
     }
+    // A concurrent order may have used up a limit between the check and the batch.
+    await explainRefusal(env, uid, totalCoins, fps, fraud, ts);
     throw httpsError("failed-precondition", "Stock or price changed while ordering. Please review your cart.", "price_changed");
   }
   return (await loadOrder(env, id, uid))!;
@@ -281,6 +303,9 @@ export async function transitionOrder(
   const o = await env.DB.prepare(`SELECT * FROM shop_orders WHERE id = ?`).bind(orderId).first<any>();
   if (!o) throw httpsError("not-found", "Order not found.");
   if (!opts.from.includes(o.status)) throw httpsError("failed-precondition", `A ${o.status} order can't move to ${to}.`);
+  if (o.review_status === "pending" && to !== "cancelled") {
+    throw httpsError("failed-precondition", "This order is waiting for a fraud review. Approve or reject it first.", "review_pending");
+  }
   const live = `EXISTS (SELECT 1 FROM shop_orders WHERE id = ? AND status = ?)`;
   const stmts: D1PreparedStatement[] = [];
   const refund = REFUNDING.includes(to);
@@ -315,8 +340,8 @@ export async function transitionOrder(
               carrier = COALESCE(?, carrier), tracking_number = COALESCE(?, tracking_number), tracking_url = COALESCE(?, tracking_url),
               delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END,
               refund_ledger_id = CASE WHEN ? THEN ? ELSE refund_ledger_id END
-        WHERE id = ? AND status = ?`,
-    ).bind(to, ts, opts.carrier ?? null, opts.trackingNumber ?? null, opts.trackingUrl ?? null, to, ts, refund ? 1 : 0, refundLedgerId, orderId, o.status),
+        WHERE id = ? AND status = ? AND (review_status != 'pending' OR ? = 'cancelled')`,
+    ).bind(to, ts, opts.carrier ?? null, opts.trackingNumber ?? null, opts.trackingUrl ?? null, to, ts, refund ? 1 : 0, refundLedgerId, orderId, o.status, to),
   );
   const results = await env.DB.batch(stmts);
   if (Number(results[results.length - 1]?.meta?.changes || 0) === 0) {

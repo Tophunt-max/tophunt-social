@@ -39,6 +39,25 @@ Earning (free) → 💎 Diamond → contest entry → win → 🪙 DP coin → S
   notification at each step. Addresses are scrubbed on account deletion; an open order defers deletion.
 - Shipping is manual (the admin enters courier + tracking). No courier API, GST invoice or payment gateway is involved.
 
+### Shop fraud protection (`lib/shopRisk.ts`, admin Shopping → Fraud rules)
+
+Free Diamonds can end as real products, so checkout applies two kinds of rule (all thresholds editable):
+
+| Kind | Rule (default) | Effect |
+|---|---|---|
+| Hard | Verified mobile number required | Order refused (`phone_not_verified`); the app opens the verify screen |
+| Hard | Account at least 3 days old | Refused (`account_too_new`) |
+| Hard | 3 orders per account per 30 days (cancelled don't count) | Refused (`order_limit`) |
+| Hard | 5,000 DP coin per account per 30 days | Refused (`coin_limit`) |
+| Hard | At most 2 accounts per delivery address or phone in 90 days | Refused (`address_limit`) |
+| Review | First order of an account; order ≥ 2,000 DP coin; another account on the same device; address/phone used by another account; account < 7 days; most contest wins against one opponent | Order placed, DP coin and stock held, **cannot be packed until an admin approves**. Reject = cancelled + DP coin refunded once, customer told the reason |
+
+The hard limits are evaluated twice: once for a clear error message, and again inside the checkout transaction, so
+two orders sent at the same moment cannot both pass a cap. Address and phone are compared as SHA-256 fingerprints of
+the normalised value (PIN code + first address line; last 10 phone digits). The fingerprints are kept after account
+deletion (the address itself is scrubbed) so deleting and re-registering does not reset the caps. Weak signals never
+refuse on their own. A customer can always cancel an order that is under review.
+
 ### Spending rule changed
 
 Gifts, digital items and shop orders are paid in **DP coin only** (`lib/coinSpend.ts`, `dpcoin - locked_coins >= price`,

@@ -55,6 +55,11 @@ async function assertLedger(env: TestEnv, uid: string) {
 }
 
 const rid = (n: number | string) => `req-${String(n).padStart(8, '0')}`;
+const OLD = Date.now() - 30 * 86_400_000;
+/** A shop customer who passes the hard rules: verified phone, 30-day-old account. */
+const verified = (phone: string, extra: Record<string, any> = {}) => ({ phone, phoneVerified: true, createdAt: OLD, ...extra });
+/** Fraud rules relaxed so the lifecycle tests are about the lifecycle. */
+const RELAXED = { requireVerifiedPhone: true, minAccountAgeDays: 3, maxOrdersPer30Days: 50, maxCoinsPer30Days: 1_000_000, maxAccountsPerAddress: 5, reviewFirstOrder: false, reviewAboveCoins: 0 };
 const address = { recipientName: 'Asha Rao', phone: '9876543210', addressLine1: '12 MG Road', city: 'Pune', state: 'Maharashtra', postalCode: '411001', country: 'India' };
 
 // ===========================================================================
@@ -122,9 +127,9 @@ describe('coin values in INR', () => {
 describe('physical shop', () => {
   async function setup(dp = 1000, diamonds = 0) {
     const { env } = makeEnv(RETIRED);
-    await config(env, { monetization: { shop: { enabled: true } }, coinPricing: { dpCoinInr: 1 } });
-    await seedUser(env, 'alice', dp + diamonds, diamonds);
-    await seedUser(env, 'bob', 1000);
+    await config(env, { monetization: { shop: { enabled: true, fraud: RELAXED } }, coinPricing: { dpCoinInr: 1 } });
+    await seedUser(env, 'alice', dp + diamonds, diamonds, verified('9876543210'));
+    await seedUser(env, 'bob', 1000, 0, verified('9876500000'));
     const r = await admin(env, 'PUT', '/monetization/shop/products/tshirt', {
       title: 'TopHunt T-shirt', priceInr: 299, shippingInr: 50, active: true, returnDays: 7,
       images: ['https://cdn.test/t.jpg'], variants: [{ label: 'M', stock: 2 }, { label: 'L', stock: 5 }],
@@ -183,7 +188,7 @@ describe('physical shop', () => {
   it('a ₹ rate change re-prices new orders only', async () => {
     const { env, p, l } = await setup();
     const first = await order(env, 'alice', [{ productId: p.id, variantId: l.id, qty: 1 }], 349);
-    await config(env, { monetization: { shop: { enabled: true } }, coinPricing: { dpCoinInr: 0.5 } });
+    await config(env, { monetization: { shop: { enabled: true, fraud: RELAXED } }, coinPricing: { dpCoinInr: 0.5 } });
     const again = (await call(env, 'alice', 'getShopProducts')).body.products[0];
     expect(again.priceCoins).toBe(698);
     const stored = await call(env, 'alice', 'getShopOrder', { orderId: first.body.order.id });
@@ -279,5 +284,128 @@ describe('XP → Diamond conversion', () => {
     const { env } = makeEnv(RETIRED);
     await seedUser(env, 'alice', 0, 0, { xp: 1000 });
     expect((await call(env, 'alice', 'convertXp', { diamonds: 1, requestId: rid(1) })).body.error.reason).toBe('xp_conversion_disabled');
+  });
+});
+
+// ===========================================================================
+describe('shop fraud protection', () => {
+  const STRICT = { requireVerifiedPhone: true, minAccountAgeDays: 3, maxOrdersPer30Days: 2, maxCoinsPer30Days: 800, maxAccountsPerAddress: 2, reviewFirstOrder: true, reviewAboveCoins: 500 };
+  async function setup(fraud: any = STRICT) {
+    const { env } = makeEnv(RETIRED);
+    await config(env, { monetization: { shop: { enabled: true, fraud } }, coinPricing: { dpCoinInr: 1 } });
+    await admin(env, 'PUT', '/monetization/shop/products/cap', { title: 'Cap', priceInr: 100, active: true, variants: [{ label: 'One size', stock: 100 }] });
+    const { env: e } = { env };
+    return e;
+  }
+  const variantOf = async (env: TestEnv) => (await env.DB.prepare(`SELECT id FROM shop_variants WHERE product_id = 'cap'`).first<any>()).id as string;
+  const buy = async (env: TestEnv, uid: string, qty: number, n: number | string, addr: any = address) => {
+    const r = await call(env, uid, 'placeShopOrder', { items: [{ productId: 'cap', variantId: await variantOf(env), qty }], address: addr, expectedTotalCoins: 100 * qty, requestId: rid(n) });
+    return r;
+  };
+
+  it('refuses an unverified phone and a brand-new account, charging nothing', async () => {
+    const env = await setup();
+    await seedUser(env, 'nophone', 1000, 0, { createdAt: OLD });
+    expect((await buy(env, 'nophone', 1, 1)).body.error.reason).toBe('phone_not_verified');
+    await seedUser(env, 'newbie', 1000, 0, verified('9000000001', { createdAt: Date.now() - 3600_000 }));
+    expect((await buy(env, 'newbie', 1, 2)).body.error.reason).toBe('account_too_new');
+    expect((await user(env, 'nophone'))!.dpcoin).toBe(1000);
+    expect((await user(env, 'newbie'))!.dpcoin).toBe(1000);
+  });
+
+  it('enforces the 30-day order and DP coin limits, also under concurrency', async () => {
+    const env = await setup({ ...STRICT, reviewFirstOrder: false, reviewAboveCoins: 0 });
+    await seedUser(env, 'alice', 5000, 0, verified('9876543210'));
+    expect((await buy(env, 'alice', 5, 1)).status).toBe(200); // 500
+    expect((await buy(env, 'alice', 4, 2)).body.error.reason).toBe('coin_limit'); // 500 + 400 > 800
+    expect((await buy(env, 'alice', 1, 3)).status).toBe(200); // 2nd order
+    expect((await buy(env, 'alice', 1, 4)).body.error.reason).toBe('order_limit');
+    const { env: env2 } = makeEnv(RETIRED);
+    await config(env2, { monetization: { shop: { enabled: true, fraud: { ...STRICT, reviewFirstOrder: false, reviewAboveCoins: 0, maxOrdersPer30Days: 1 } } }, coinPricing: { dpCoinInr: 1 } });
+    await admin(env2, 'PUT', '/monetization/shop/products/cap', { title: 'Cap', priceInr: 100, active: true, variants: [{ label: 'One size', stock: 100 }] });
+    await seedUser(env2, 'bob', 5000, 0, verified('9876500000'));
+    const results = await Promise.all([1, 2, 3].map((i) => buy(env2, 'bob', 1, `c${i}`)));
+    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
+    expect((await user(env2, 'bob'))!.dpcoin).toBe(4900);
+    await assertLedger(env2, 'bob');
+  });
+
+  it('caps how many accounts can ship to one address or phone', async () => {
+    const env = await setup({ ...STRICT, reviewFirstOrder: false, reviewAboveCoins: 0 });
+    for (const [uid, phone] of [['a1', '9100000001'], ['a2', '9100000002'], ['a3', '9100000003']]) await seedUser(env, uid, 1000, 0, verified(phone));
+    expect((await buy(env, 'a1', 1, 1)).status).toBe(200);
+    expect((await buy(env, 'a2', 1, 2)).status).toBe(200); // 2 accounts allowed
+    const third = await buy(env, 'a3', 1, 3);
+    expect(third.body.error.reason).toBe('address_limit');
+    // Same phone, different address, is caught too.
+    const other = { ...address, phone: '9123456780', addressLine1: '99 Other Lane', postalCode: '560001', city: 'Bengaluru', state: 'Karnataka' };
+    expect((await buy(env, 'a3', 1, 4, other)).status).toBe(200);
+    expect((await buy(env, 'a3', 1, 5, { ...other, phone: address.phone })).body.error.reason).toBe('address_limit');
+  });
+
+  it('holds weak-signal orders for review: first order, large order, shared device, collusion', async () => {
+    const env = await setup();
+    await seedUser(env, 'alice', 5000, 0, verified('9876543210', { deviceId: 'dev-1' }));
+    await seedUser(env, 'twin', 0, 0, verified('9876543211', { deviceId: 'dev-1' }));
+    // 3 wins, all against twin.
+    for (let i = 0; i < 3; i++) {
+      await env.DB.prepare(`INSERT INTO contest_matches (id, status, user_a, user_b, winner_uid, created_at) VALUES (?, 'completed', ?, ?, 'alice', ?)`)
+        .bind(`m${i}`, JSON.stringify({ uid: 'alice' }), JSON.stringify({ uid: 'twin' }), Date.now() - 86_400_000).run();
+    }
+    const r = await buy(env, 'alice', 5, 1); // 500 = large
+    expect(r.status).toBe(200);
+    expect(r.body.order.reviewStatus).toBe('pending');
+    const row = await env.DB.prepare(`SELECT risk_flags FROM shop_orders WHERE id = ?`).bind(r.body.order.id).first<any>();
+    expect(JSON.parse(row.risk_flags).sort()).toEqual(['first_order', 'large_order', 'same_opponent_wins', 'shared_device']);
+    // Coins are held, but the admin cannot pack it until reviewed.
+    expect((await user(env, 'alice'))!.dpcoin).toBe(4500);
+    const id = encodeURIComponent(r.body.order.id);
+    const pack = await admin(env, 'POST', `/monetization/shop/orders/${id}/status`, { status: 'packed' });
+    expect(pack.body.error.reason).toBe('review_pending');
+    const list = await admin(env, 'GET', '/monetization/shop/orders?review=pending');
+    expect(list.body.orders).toHaveLength(1);
+    expect(list.body.counts.review_pending).toBe(1);
+    const detail = await admin(env, 'GET', `/monetization/shop/orders/${id}`);
+    expect(detail.body.next).toEqual(['cancelled']);
+    expect(detail.body.risk.flags).toContain('shared_device');
+  });
+
+  it('approve lets the order ship; reject cancels it and refunds once', async () => {
+    const env = await setup();
+    await seedUser(env, 'alice', 5000, 0, verified('9876543210'));
+    const a = (await buy(env, 'alice', 1, 1)).body.order;
+    expect(a.reviewStatus).toBe('pending'); // first order
+    const ida = encodeURIComponent(a.id);
+    expect((await admin(env, 'POST', `/monetization/shop/orders/${ida}/review`, { decision: 'approve' })).status).toBe(200);
+    expect((await admin(env, 'POST', `/monetization/shop/orders/${ida}/status`, { status: 'packed' })).status).toBe(200);
+    expect((await admin(env, 'POST', `/monetization/shop/orders/${ida}/review`, { decision: 'reject', note: 'x y z' })).status).toBe(412);
+
+    const b = (await buy(env, 'alice', 5, 2)).body.order; // large → pending
+    const idb = encodeURIComponent(b.id);
+    expect((await admin(env, 'POST', `/monetization/shop/orders/${idb}/review`, { decision: 'reject' })).status).toBe(400); // reason needed
+    expect((await admin(env, 'POST', `/monetization/shop/orders/${idb}/review`, { decision: 'reject', note: 'Suspicious account' })).status).toBe(200);
+    const got = (await call(env, 'alice', 'getShopOrder', { orderId: b.id })).body.order;
+    expect(got).toMatchObject({ status: 'cancelled', reviewStatus: 'rejected' });
+    expect((await user(env, 'alice'))!.dpcoin).toBe(4900); // only the approved 100 stays spent
+    expect((await env.DB.prepare(`SELECT stock FROM shop_variants WHERE product_id = 'cap'`).first<any>()).stock).toBe(99);
+    await assertLedger(env, 'alice');
+    expect(await env.DB.prepare(`SELECT 1 FROM admin_audit_log WHERE action = 'shop.order.review.reject'`).first()).toBeTruthy();
+  });
+
+  it('a customer can still cancel an order that is under review', async () => {
+    const env = await setup();
+    await seedUser(env, 'alice', 5000, 0, verified('9876543210'));
+    const o = (await buy(env, 'alice', 1, 1)).body.order;
+    expect((await call(env, 'alice', 'cancelShopOrder', { orderId: o.id })).status).toBe(200);
+    expect((await user(env, 'alice'))!.dpcoin).toBe(5000);
+  });
+
+  it('settings are validated and thresholds are not public', async () => {
+    const { env } = makeEnv(RETIRED);
+    expect((await admin(env, 'POST', '/app-settings', { monetization: { shop: { fraud: { maxAccountsPerAddress: 0 } } } })).status).toBe(400);
+    expect((await admin(env, 'POST', '/app-settings', { monetization: { shop: { fraud: { bogus: 1 } } } })).status).toBe(400);
+    expect((await admin(env, 'POST', '/app-settings', { monetization: { shop: { enabled: true, fraud: { maxOrdersPer30Days: 4 } } } })).status).toBe(200);
+    const pub = (await (await app.request('/read/app-config', { method: 'GET' }, env, fakeCtx())).json()) as any;
+    expect(pub.monetization.shop).toEqual({ enabled: true, requireVerifiedPhone: true });
   });
 });

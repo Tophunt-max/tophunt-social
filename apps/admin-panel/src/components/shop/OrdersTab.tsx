@@ -29,13 +29,14 @@ export function OrdersTab() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2">
-        {["", "placed", "packed", "shipped", "return_requested", "delivered", "cancelled", "returned"].map((s) => (
+        {["review", "", "placed", "packed", "shipped", "return_requested", "delivered", "cancelled", "returned"].map((s) => (
           <button
             key={s || "all"}
             onClick={() => setStatus(s)}
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold ${status === s ? "gradient-purple text-white" : "bg-secondary"}`}
           >
-            {s ? LABEL[s] : "All"}{s && counts[s] ? ` (${counts[s]})` : ""}
+            {s === "review" ? "⚠ Needs review" : s ? LABEL[s] : "All"}
+            {s === "review" ? (counts.review_pending ? ` (${counts.review_pending})` : "") : s && counts[s] ? ` (${counts[s]})` : ""}
           </button>
         ))}
       </div>
@@ -50,7 +51,22 @@ export function OrdersTab() {
             { key: "u", header: "Customer", render: (o: any) => (o.username ? `@${o.username}` : o.uid) },
             { key: "i", header: "Items", render: (o: any) => `${o.title ?? ""}${o.units > 1 ? ` + ${o.units - 1} more` : ""}` },
             { key: "t", header: "Total", render: (o: any) => <div><p className="font-semibold">{fmtNumber(o.totalCoins)} DP coin</p><p className="text-xs text-muted-foreground">{inr(o.totalInr)}</p></div> },
-            { key: "s", header: "Status", render: (o: any) => <Badge variant={VARIANT[o.status]}>{LABEL[o.status]}</Badge> },
+            {
+              key: "s",
+              header: "Status",
+              render: (o: any) => (
+                <div className="flex flex-wrap gap-1">
+                  <Badge variant={VARIANT[o.status]}>{LABEL[o.status]}</Badge>
+                  {o.reviewStatus === "pending" && <Badge variant="warning">Needs review</Badge>}
+                </div>
+              ),
+            },
+            {
+              key: "r",
+              header: "Risk",
+              render: (o: any) =>
+                o.riskFlags?.length ? <span className="text-xs text-amber-700">{o.riskFlags.map((f: string) => q.data?.riskLabels?.[f] ?? f).join(" · ")}</span> : <span className="text-xs text-muted-foreground">–</span>,
+            },
             { key: "tr", header: "Tracking", render: (o: any) => o.trackingNumber ?? "–" },
             { key: "x", header: "", render: (o: any) => <button className="text-primary text-sm font-semibold" onClick={() => setOpenId(o.id)}>Open</button> },
           ]}
@@ -118,6 +134,9 @@ function OrderDialog({ id, onClose }: { id: string; onClose: () => void }) {
             <p>{a.city}, {a.state} {a.postalCode}, {a.country}</p>
             {a.notes ? <p className="text-xs text-muted-foreground mt-1">Note: {a.notes}</p> : null}
           </div>
+          {q.data.risk && (q.data.risk.flags.length > 0 || q.data.risk.reviewStatus !== "none") && (
+            <ReviewBox id={id} risk={q.data.risk} onDone={() => { qc.invalidateQueries({ queryKey: ["shop-order", id] }); qc.invalidateQueries({ queryKey: ["shop-orders"] }); }} />
+          )}
           {o.trackingNumber && <p>Tracking: <b>{o.carrier ? `${o.carrier} ` : ""}{o.trackingNumber}</b>{o.trackingUrl ? <> · <a className="text-primary" href={o.trackingUrl} target="_blank" rel="noreferrer">link</a></> : null}</p>}
           <div>
             <p className="text-xs font-semibold text-muted-foreground mb-1">History</p>
@@ -160,5 +179,42 @@ function OrderDialog({ id, onClose }: { id: string; onClose: () => void }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+function ReviewBox({ id, risk, onDone }: { id: string; risk: any; onDone: () => void }) {
+  const [note, setNote] = useState("");
+  const mut = useMutation({
+    mutationFn: (decision: "approve" | "reject") => api.monetization.reviewOrder(id, decision, note),
+    onSuccess: (_r, d) => {
+      toast.success(d === "approve" ? "Approved. You can pack it now." : "Rejected. Order cancelled and DP coin refunded.");
+      setNote("");
+      onDone();
+    },
+    onError: (e) => toast.error(describeError(e)),
+  });
+  const pending = risk.reviewStatus === "pending";
+  return (
+    <div className={`rounded-xl border p-3 space-y-2 ${pending ? "border-amber-300 bg-amber-50" : "border-border"}`}>
+      <p className="font-semibold">{pending ? "⚠ Fraud review needed before packing" : `Review: ${risk.reviewStatus}`}</p>
+      {risk.flags.length > 0 && (
+        <ul className="list-disc pl-5 text-xs">
+          {risk.flags.map((f: string) => <li key={f}>{risk.labels?.[f] ?? f}</li>)}
+        </ul>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Account joined {risk.accountJoined ? fmtDateTime(risk.accountJoined) : "–"} · {fmtNumber(risk.ordersTotal)} order(s) · {fmtNumber(risk.otherAccountsOnAddressOrPhone)} other account(s) used this address / phone
+      </p>
+      {risk.reviewNote && <p className="text-xs">Note: {risk.reviewNote}</p>}
+      {pending && (
+        <>
+          <Text label="Note (required to reject; the customer sees it)" value={note} onChange={setNote} />
+          <div className="flex gap-2 justify-end">
+            <Button variant="danger" disabled={mut.isPending || note.trim().length < 3} onClick={() => mut.mutate("reject")}>Reject & refund</Button>
+            <Button disabled={mut.isPending} onClick={() => mut.mutate("approve")}>Approve</Button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

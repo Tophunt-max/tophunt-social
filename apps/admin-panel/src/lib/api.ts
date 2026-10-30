@@ -994,9 +994,13 @@ export const api = {
     // Physical shop (worker lib/shop.ts).
     shopProducts: () => get<{ dpCoinInr: number; products: any[] }>("/admin/monetization/shop/products"),
     saveProduct: (id: string, payload: any) => put(`/admin/monetization/shop/products/${encodeURIComponent(id)}`, payload),
-    shopOrders: (status?: string) => get<{ counts: Record<string, number>; orders: any[] }>(`/admin/monetization/shop/orders${status ? `?status=${status}` : ""}`),
+    shopOrders: (status?: string) =>
+      get<{ counts: Record<string, number>; riskLabels: Record<string, string>; orders: any[] }>(
+        `/admin/monetization/shop/orders${status === "review" ? "?review=pending" : status ? `?status=${status}` : ""}`,
+      ),
     shopOrder: (id: string) => get<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}`),
     setOrderStatus: (id: string, payload: any) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/status`, payload),
+    reviewOrder: (id: string, decision: "approve" | "reject", note?: string) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/review`, { decision, note }),
   },
   appSettings: () => get<any>("/admin/app-settings"),
   // For You ranking weights: defaults, ranges, stored and effective values (full admins).

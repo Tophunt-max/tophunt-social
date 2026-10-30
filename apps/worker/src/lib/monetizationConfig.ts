@@ -46,10 +46,27 @@ export interface MonetizationConfig {
   sponsored: { enabled: boolean; firstPosition: number; interval: number; maxPerSession: number };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number; creatorShareBps: number };
   store: { enabled: boolean };
-  /** Physical shop (lib/shop.ts). */
-  shop: { enabled: boolean };
+  /** Physical shop (lib/shop.ts) and its fraud rules (lib/shopRisk.ts). */
+  shop: { enabled: boolean; fraud: ShopFraudConfig };
   /** Ways to earn Diamonds that live here (others: Coin Economy → Earn). */
   earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
+}
+
+export interface ShopFraudConfig {
+  /** Hard rule: the account's mobile number must be verified before any order. */
+  requireVerifiedPhone: boolean;
+  /** Hard rule: account must be at least this many days old (0 = off). */
+  minAccountAgeDays: number;
+  /** Hard rule: orders per account in any 30 days (cancelled ones don't count). */
+  maxOrdersPer30Days: number;
+  /** Hard rule: DP coin spent per account in the shop in any 30 days. */
+  maxCoinsPer30Days: number;
+  /** Hard rule: different accounts that may ship to one address / one phone in 90 days. */
+  maxAccountsPerAddress: number;
+  /** Review hold: an account's first order waits for an admin. */
+  reviewFirstOrder: boolean;
+  /** Review hold: orders at or above this many DP coin wait for an admin (0 = off). */
+  reviewAboveCoins: number;
 }
 
 const emptyUnits = (): PlatformUnits => ({ native: "", interstitial: "", rewarded: "" });
@@ -71,7 +88,18 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
   sponsored: { enabled: false, firstPosition: 3, interval: 12, maxPerSession: 3 },
   gifts: { enabled: false, maxQuantity: 99, maxCoinsPerSend: 5000, creatorShareBps: 0 },
   store: { enabled: false },
-  shop: { enabled: false },
+  shop: {
+    enabled: false,
+    fraud: {
+      requireVerifiedPhone: true,
+      minAccountAgeDays: 3,
+      maxOrdersPer30Days: 3,
+      maxCoinsPer30Days: 5000,
+      maxAccountsPerAddress: 2,
+      reviewFirstOrder: true,
+      reviewAboveCoins: 2000,
+    },
+  },
   earning: { xpConversion: { enabled: false, xpPerDiamond: 100, maxDiamondsPerDay: 20 } },
 };
 
@@ -90,6 +118,11 @@ const BOUNDS = {
   creatorShareBps: [0, 10_000],
   xpPerDiamond: [1, 1_000_000],
   maxDiamondsPerDay: [1, 10_000],
+  minAccountAgeDays: [0, 365],
+  maxOrdersPer30Days: [1, 100],
+  maxCoinsPer30Days: [1, 100_000_000],
+  maxAccountsPerAddress: [1, 20],
+  reviewAboveCoins: [0, 100_000_000],
 } as const;
 
 const AD_UNIT_RE = /^ca-app-pub-\d{16}\/\d{10}$/;
@@ -170,7 +203,22 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
       creatorShareBps: int(m.gifts?.creatorShareBps, d.gifts.creatorShareBps, BOUNDS.creatorShareBps),
     },
     store: { enabled: bool(m.store?.enabled, false) },
-    shop: { enabled: bool(m.shop?.enabled, false) },
+    shop: {
+      enabled: bool(m.shop?.enabled, false),
+      fraud: (() => {
+        const f = m.shop?.fraud || {};
+        const fd = d.shop.fraud;
+        return {
+          requireVerifiedPhone: bool(f.requireVerifiedPhone, fd.requireVerifiedPhone),
+          minAccountAgeDays: int(f.minAccountAgeDays, fd.minAccountAgeDays, BOUNDS.minAccountAgeDays),
+          maxOrdersPer30Days: int(f.maxOrdersPer30Days, fd.maxOrdersPer30Days, BOUNDS.maxOrdersPer30Days),
+          maxCoinsPer30Days: int(f.maxCoinsPer30Days, fd.maxCoinsPer30Days, BOUNDS.maxCoinsPer30Days),
+          maxAccountsPerAddress: int(f.maxAccountsPerAddress, fd.maxAccountsPerAddress, BOUNDS.maxAccountsPerAddress),
+          reviewFirstOrder: bool(f.reviewFirstOrder, fd.reviewFirstOrder),
+          reviewAboveCoins: int(f.reviewAboveCoins, fd.reviewAboveCoins, BOUNDS.reviewAboveCoins),
+        };
+      })(),
+    },
     earning: {
       xpConversion: {
         enabled: bool(m.earning?.xpConversion?.enabled, false),
@@ -213,7 +261,8 @@ export function publicMonetizationConfig(cfg: any) {
     sponsored: m.sponsored,
     gifts: { enabled: m.gifts.enabled, maxQuantity: m.gifts.maxQuantity, maxCoinsPerSend: m.gifts.maxCoinsPerSend },
     store: m.store,
-    shop: m.shop,
+    // Fraud thresholds stay server-side; the app only needs to know the shop is open.
+    shop: { enabled: m.shop.enabled, requireVerifiedPhone: m.shop.fraud.requireVerifiedPhone },
     earning: m.earning,
   };
 }
@@ -337,8 +386,19 @@ export function validateMonetizationPatch(patch: any): void {
 
   const sh = patch.shop;
   if (obj(sh, "shop")) {
-    only(sh, ["enabled"], "shop");
+    only(sh, ["enabled", "fraud"], "shop");
     isBool(sh.enabled, "shop.enabled");
+    if (obj(sh.fraud, "shop.fraud")) {
+      const f = sh.fraud;
+      only(f, ["requireVerifiedPhone", "minAccountAgeDays", "maxOrdersPer30Days", "maxCoinsPer30Days", "maxAccountsPerAddress", "reviewFirstOrder", "reviewAboveCoins"], "shop.fraud");
+      isBool(f.requireVerifiedPhone, "shop.fraud.requireVerifiedPhone");
+      isBool(f.reviewFirstOrder, "shop.fraud.reviewFirstOrder");
+      isInt(f.minAccountAgeDays, "shop.fraud.minAccountAgeDays", BOUNDS.minAccountAgeDays);
+      isInt(f.maxOrdersPer30Days, "shop.fraud.maxOrdersPer30Days", BOUNDS.maxOrdersPer30Days);
+      isInt(f.maxCoinsPer30Days, "shop.fraud.maxCoinsPer30Days", BOUNDS.maxCoinsPer30Days);
+      isInt(f.maxAccountsPerAddress, "shop.fraud.maxAccountsPerAddress", BOUNDS.maxAccountsPerAddress);
+      isInt(f.reviewAboveCoins, "shop.fraud.reviewAboveCoins", BOUNDS.reviewAboveCoins);
+    }
   }
 
   const e = patch.earning;

@@ -53,11 +53,25 @@ CREATE TABLE IF NOT EXISTS shop_orders (
   user_note        TEXT,
   refund_ledger_id TEXT,
   delivered_at     INTEGER,
+  -- Fraud controls (lib/shopRisk.ts). Fingerprints are SHA-256 hashes of the
+  -- normalised address / phone, kept after account deletion (like the
+  -- verification-reward hashes) so delete-and-re-register can't reset the caps.
+  address_fp       TEXT,
+  phone_fp         TEXT,
+  device_id        TEXT,
+  risk_flags       TEXT NOT NULL DEFAULT '[]',     -- JSON array of review reasons
+  review_status    TEXT NOT NULL DEFAULT 'none' CHECK (review_status IN ('none','pending','approved','rejected')),
+  reviewed_by      TEXT,
+  reviewed_at      INTEGER,
+  review_note      TEXT,
   created_at       INTEGER NOT NULL,
   updated_at       INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_shop_orders_uid ON shop_orders (uid, created_at);
 CREATE INDEX IF NOT EXISTS idx_shop_orders_status ON shop_orders (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_shop_orders_address_fp ON shop_orders (address_fp, created_at);
+CREATE INDEX IF NOT EXISTS idx_shop_orders_phone_fp ON shop_orders (phone_fp, created_at);
+CREATE INDEX IF NOT EXISTS idx_shop_orders_review ON shop_orders (review_status, created_at);
 
 CREATE TABLE IF NOT EXISTS shop_order_items (
   id              TEXT PRIMARY KEY,

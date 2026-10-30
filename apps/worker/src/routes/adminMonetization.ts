@@ -28,6 +28,7 @@ import {
 import { purgeShared } from "../lib/edgeCache";
 import { ADMIN_TRANSITIONS, ORDER_STATUSES, loadOrder, transitionOrder, unitCoins, validateProductInput, type OrderStatus } from "../lib/shop";
 import { coinValuesFromConfig } from "../lib/coinPricing";
+import { RISK_FLAG_LABELS } from "../lib/shopRisk";
 import { createNotification } from "../lib/notify";
 
 type Audit = (c: any, action: string, targetType: string, targetId: string | null, detail?: Record<string, unknown>) => Promise<void>;
@@ -453,19 +454,24 @@ export function registerMonetizationRoutes(
     const where: string[] = [];
     const binds: unknown[] = [];
     if (status && (ORDER_STATUSES as readonly string[]).includes(status)) { where.push("o.status = ?"); binds.push(status); }
+    if (c.req.query("review") === "pending") where.push("o.review_status = 'pending'");
     const rows = await c.env.DB.prepare(
       `SELECT o.id, o.uid, o.status, o.total_coins, o.total_inr_paise, o.tracking_number, o.created_at, o.updated_at, u.username,
+              o.review_status, o.risk_flags,
               (SELECT SUM(qty) FROM shop_order_items i WHERE i.order_id = o.id) AS units,
               (SELECT title FROM shop_order_items i WHERE i.order_id = o.id ORDER BY i.id LIMIT 1) AS title
          FROM shop_orders o LEFT JOIN users u ON u.uid = o.uid
         ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY o.created_at DESC LIMIT 200`,
     ).bind(...binds).all<any>();
     const counts = await c.env.DB.prepare(`SELECT status, COUNT(*) AS n FROM shop_orders GROUP BY status`).all<any>();
+    const review = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM shop_orders WHERE review_status = 'pending'`).first<any>();
     return c.json({
-      counts: Object.fromEntries((counts.results ?? []).map((r) => [r.status, Number(r.n)])),
+      counts: { ...Object.fromEntries((counts.results ?? []).map((r) => [r.status, Number(r.n)])), review_pending: Number(review?.n ?? 0) },
+      riskLabels: RISK_FLAG_LABELS,
       orders: (rows.results ?? []).map((r) => ({
         id: r.id, uid: r.uid, username: r.username, status: r.status, totalCoins: Number(r.total_coins), totalInr: Number(r.total_inr_paise) / 100,
         trackingNumber: r.tracking_number, units: Number(r.units), title: r.title, createdAt: Number(r.created_at), updatedAt: Number(r.updated_at),
+        reviewStatus: r.review_status, riskFlags: JSON.parse(r.risk_flags || "[]"),
       })),
     });
   });
@@ -473,8 +479,56 @@ export function registerMonetizationRoutes(
   adminRoute.get("/monetization/shop/orders/:id", async (c) => {
     const order = await loadOrder(c.env, c.req.param("id"), null);
     if (!order) throw httpsError("not-found", "Order not found.");
-    const owner = await c.env.DB.prepare(`SELECT o.uid, u.username FROM shop_orders o LEFT JOIN users u ON u.uid = o.uid WHERE o.id = ?`).bind(order.id).first<any>();
-    return c.json({ order, uid: owner?.uid, username: owner?.username, next: ADMIN_TRANSITIONS[order.status] });
+    const owner = await c.env.DB.prepare(
+      `SELECT o.uid, o.risk_flags, o.review_status, o.review_note, o.reviewed_at, o.address_fp, o.phone_fp, u.username, u.created_at AS joined,
+              (SELECT COUNT(DISTINCT s.uid) FROM shop_orders s WHERE (s.address_fp = o.address_fp OR s.phone_fp = o.phone_fp) AND s.uid != o.uid) AS other_accounts,
+              (SELECT COUNT(*) FROM shop_orders s WHERE s.uid = o.uid AND s.status != 'cancelled') AS orders_total
+         FROM shop_orders o LEFT JOIN users u ON u.uid = o.uid WHERE o.id = ?`,
+    ).bind(order.id).first<any>();
+    // While under review the only move is through the review decision (or cancel).
+    const next = owner?.review_status === "pending" ? ["cancelled"] : ADMIN_TRANSITIONS[order.status];
+    return c.json({
+      order, uid: owner?.uid, username: owner?.username, next,
+      risk: {
+        reviewStatus: owner?.review_status, reviewNote: owner?.review_note, reviewedAt: owner?.reviewed_at,
+        flags: JSON.parse(owner?.risk_flags || "[]"), labels: RISK_FLAG_LABELS,
+        accountJoined: owner?.joined ? Number(owner.joined) : null, ordersTotal: Number(owner?.orders_total ?? 0),
+        otherAccountsOnAddressOrPhone: Number(owner?.other_accounts ?? 0),
+      },
+    });
+  });
+
+  /** Fraud review decision for a held order: approve (can be packed) or reject (cancelled, DP coin refunded). */
+  adminRoute.post("/monetization/shop/orders/:id/review", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json<any>().catch(() => ({}));
+    const decision = body?.decision === "approve" ? "approve" : body?.decision === "reject" ? "reject" : null;
+    if (!decision) throw httpsError("invalid-argument", "decision must be approve or reject.");
+    const note = typeof body?.note === "string" ? body.note.trim().slice(0, 300) : "";
+    if (decision === "reject" && note.length < 3) throw httpsError("invalid-argument", "A reason is required to reject (shown to the customer).");
+    const cur = await c.env.DB.prepare(`SELECT uid, status, review_status FROM shop_orders WHERE id = ?`).bind(id).first<any>();
+    if (!cur) throw httpsError("not-found", "Order not found.");
+    if (cur.review_status !== "pending") throw httpsError("failed-precondition", "This order is not waiting for review.");
+    const ts = Date.now();
+    const actor = actorOf(c);
+    if (decision === "approve") {
+      const res = await c.env.DB.prepare(
+        `UPDATE shop_orders SET review_status = 'approved', reviewed_by = ?, reviewed_at = ?, review_note = ?, updated_at = ? WHERE id = ? AND review_status = 'pending'`,
+      ).bind(actor, ts, note || null, ts, id).run();
+      if (!res.meta?.changes) throw httpsError("failed-precondition", "The order changed meanwhile. Reload and try again.");
+    } else {
+      await transitionOrder(c.env, id, "cancelled", { actor, from: [cur.status], note: `Not approved: ${note}` }, ts);
+      await c.env.DB.prepare(`UPDATE shop_orders SET review_status = 'rejected', reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ?`)
+        .bind(actor, ts, note, id).run();
+      c.executionCtx.waitUntil(
+        createNotification(c.env, cur.uid, {
+          title: "Order update", body: `Your order was not approved and has been cancelled. DP coin refunded. Reason: ${note}`,
+          type: "shop_order", targetId: id,
+        }).catch(() => undefined),
+      );
+    }
+    await logAudit(c, `shop.order.review.${decision}`, "shop_order", id, { note });
+    return c.json({ success: true, order: await loadOrder(c.env, id, null) });
   });
 
   adminRoute.post("/monetization/shop/orders/:id/status", async (c) => {

@@ -68,6 +68,8 @@ export default function CartScreen() {
             setStep('cart');
           }
           emitToast(e?.message || 'Order nahi hua. Aapke coins nahi kate.', 'error');
+          // Fraud rule: a verified mobile number is required to order.
+          if (e?.reason === 'phone_not_verified') router.push('/profile/manage/verification' as any);
         },
       },
     );

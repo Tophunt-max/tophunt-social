@@ -3,11 +3,13 @@ import { PageHeader } from "@/lib/format";
 import { OrdersTab } from "@/components/shop/OrdersTab";
 import { ProductsTab } from "@/components/shop/ProductsTab";
 import { StoreTab } from "@/components/monetization/StoreTab";
+import { FraudRulesTab } from "@/components/shop/FraudRulesTab";
 
 const TABS = [
   { id: "orders", label: "Orders" },
   { id: "products", label: "Physical products" },
   { id: "digital", label: "Digital items" },
+  { id: "fraud", label: "Fraud rules" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
 
@@ -37,6 +39,7 @@ export default function Shopping() {
       {tab === "orders" && <OrdersTab />}
       {tab === "products" && <ProductsTab />}
       {tab === "digital" && <StoreTab />}
+      {tab === "fraud" && <FraudRulesTab />}
     </div>
   );
 }
