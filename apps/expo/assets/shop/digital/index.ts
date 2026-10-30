@@ -1,94 +1,57 @@
-/**
- * Artwork for the PREMIUM digital items sold in the Shop (migration
- * 0076_shop_digital_items.sql). Each catalog row carries `asset.key` =
- * `shop.<kind>_<file>`; `src/lib/cosmeticArt.ts` maps that key to the entry
- * here.
- *
- * Premium = layered and animated. Most items have two layers:
- *   - `Art`: the base (ring, emblem, background), always drawn;
- *   - `Fx`:  the overlay in fx/ (sparkles, glow, flames, aurora) that the app
- *            animates with `fx` (src/components/gamification/CosmeticFx.tsx).
- * Every premium item also carries the gem hallmark, where an earned (XP) item
- * carries the XP seal (assets/xp).
- *
- * Geometry contract, so a new file drops in without code changes:
- *   - frames/*  viewBox 0 0 120 120. The avatar is the circle r=50 at the
- *               centre; the ring and ornaments live in the 10-unit band round it.
- *   - themes/*  viewBox 0 0 360 140, `preserveAspectRatio="xMidYMid slice"`,
- *               drawn behind the profile header.
- *   - badges/*  viewBox 0 0 48 48, shown next to the name (16–24 pt).
- *   - titles/*  viewBox 0 0 48 48, the icon inside the title chip (the chip
- *               itself shimmers in code).
- *   - fx/ subfolders: same box as the base file of the same name.
- *
- * Gradient ids are prefixed per file (`pm…`): react-native-svg on web shares
- * one DOM id space, so two files using `id="g"` would paint each other.
- */
-import type { FC } from 'react';
-import type { SvgProps } from 'react-native-svg';
-
-import FrameRosePetal from './frames/rose_petal.svg';
-import FrameOceanWave from './frames/ocean_wave.svg';
-import FrameNeonPulse from './frames/neon_pulse.svg';
-import FrameFireBlaze from './frames/fire_blaze.svg';
-import FrameGalaxySwirl from './frames/galaxy_swirl.svg';
-import FrameRoyalCrown from './frames/royal_crown.svg';
-import FxRosePetal from './frames/fx/rose_petal.svg';
-import FxOceanWave from './frames/fx/ocean_wave.svg';
-import FxNeonPulse from './frames/fx/neon_pulse.svg';
-import FxFireBlaze from './frames/fx/fire_blaze.svg';
-import FxGalaxySwirl from './frames/fx/galaxy_swirl.svg';
-import FxRoyalCrown from './frames/fx/royal_crown.svg';
-
-import ThemeSunsetGlow from './themes/sunset_glow.svg';
-import ThemeAurora from './themes/aurora.svg';
-import ThemeCyberNeon from './themes/cyber_neon.svg';
-import ThemeGoldenHour from './themes/golden_hour.svg';
-import FxSunsetGlow from './themes/fx/sunset_glow.svg';
-import FxAurora from './themes/fx/aurora.svg';
-import FxCyberNeon from './themes/fx/cyber_neon.svg';
-import FxGoldenHour from './themes/fx/golden_hour.svg';
-
-import BadgeTrendsetter from './badges/trendsetter.svg';
-import BadgeFanFavourite from './badges/fan_favourite.svg';
-import BadgeEliteHunter from './badges/elite_hunter.svg';
-import FxTrendsetter from './badges/fx/trendsetter.svg';
-import FxFanFavourite from './badges/fx/fan_favourite.svg';
-import FxEliteHunter from './badges/fx/elite_hunter.svg';
-
-import TitleStyleIcon from './titles/style_icon.svg';
-import TitleTrendBoss from './titles/trend_boss.svg';
-import TitleHuntMaster from './titles/hunt_master.svg';
+import type { ImageSourcePropType } from 'react-native';
 
 export type ShopArtKind = 'frame' | 'theme' | 'badge' | 'title';
-/** How the fx layer moves (src/components/gamification/CosmeticFx.tsx). */
 export type FxMotion = 'spin' | 'pulse' | 'twinkle' | 'flicker' | 'drift';
 
 export interface ShopArt {
   kind: ShopArtKind;
-  Art: FC<SvgProps>;
-  Fx?: FC<SvgProps>;
+  source: ImageSourcePropType;
+  /** Transparent effect artwork, animated by CosmeticFx. Frames only. */
+  Fx?: ImageSourcePropType;
   fx?: FxMotion;
 }
 
+/** Premium cosmetics purchased with coins in the Shop. */
 export const SHOP_DIGITAL_ART: Record<string, ShopArt> = {
-  'shop.frame_rose_petal': { kind: 'frame', Art: FrameRosePetal, Fx: FxRosePetal, fx: 'twinkle' },
-  'shop.frame_ocean_wave': { kind: 'frame', Art: FrameOceanWave, Fx: FxOceanWave, fx: 'spin' },
-  'shop.frame_neon_pulse': { kind: 'frame', Art: FrameNeonPulse, Fx: FxNeonPulse, fx: 'pulse' },
-  'shop.frame_fire_blaze': { kind: 'frame', Art: FrameFireBlaze, Fx: FxFireBlaze, fx: 'flicker' },
-  'shop.frame_galaxy_swirl': { kind: 'frame', Art: FrameGalaxySwirl, Fx: FxGalaxySwirl, fx: 'spin' },
-  'shop.frame_royal_crown': { kind: 'frame', Art: FrameRoyalCrown, Fx: FxRoyalCrown, fx: 'twinkle' },
+  'shop.frame_rose_petal': { kind: 'frame', source: require('./frames/rose_petal.webp'), Fx: require('./frames/fx/rose_petal.webp'), fx: 'twinkle' },
+  'shop.frame_ocean_wave': { kind: 'frame', source: require('./frames/ocean_wave.webp'), Fx: require('./frames/fx/ocean_wave.webp'), fx: 'drift' },
+  'shop.frame_neon_pulse': { kind: 'frame', source: require('./frames/neon_pulse.webp'), Fx: require('./frames/fx/neon_pulse.webp'), fx: 'pulse' },
+  'shop.frame_fire_blaze': { kind: 'frame', source: require('./frames/fire_blaze.webp'), Fx: require('./frames/fx/fire_blaze.webp'), fx: 'flicker' },
+  'shop.frame_galaxy_swirl': { kind: 'frame', source: require('./frames/galaxy_swirl.webp'), Fx: require('./frames/fx/galaxy_swirl.webp'), fx: 'spin' },
+  'shop.frame_royal_crown': { kind: 'frame', source: require('./frames/royal_crown.webp'), Fx: require('./frames/fx/royal_crown.webp'), fx: 'twinkle' },
 
-  'shop.theme_sunset_glow': { kind: 'theme', Art: ThemeSunsetGlow, Fx: FxSunsetGlow, fx: 'drift' },
-  'shop.theme_aurora': { kind: 'theme', Art: ThemeAurora, Fx: FxAurora, fx: 'drift' },
-  'shop.theme_cyber_neon': { kind: 'theme', Art: ThemeCyberNeon, Fx: FxCyberNeon, fx: 'pulse' },
-  'shop.theme_golden_hour': { kind: 'theme', Art: ThemeGoldenHour, Fx: FxGoldenHour, fx: 'pulse' },
+  // Separate premium collection. These keys are ready when their Shop catalog rows are created.
+  'shop.frame_obsidian_dragon': { kind: 'frame', source: require('./frames/obsidian_dragon.webp'), Fx: require('./frames/fx/obsidian_dragon.webp'), fx: 'flicker' },
+  'shop.frame_prism_halo': { kind: 'frame', source: require('./frames/prism_halo.webp'), Fx: require('./frames/fx/prism_halo.webp'), fx: 'spin' },
+  'shop.frame_ice_phoenix': { kind: 'frame', source: require('./frames/ice_phoenix.webp'), Fx: require('./frames/fx/ice_phoenix.webp'), fx: 'drift' },
+  'shop.frame_celestial_orbit': { kind: 'frame', source: require('./frames/celestial_orbit.webp'), Fx: require('./frames/fx/celestial_orbit.webp'), fx: 'spin' },
+  'shop.frame_emerald_serpent': { kind: 'frame', source: require('./frames/emerald_serpent.webp'), Fx: require('./frames/fx/emerald_serpent.webp'), fx: 'drift' },
+  'shop.frame_velvet_monarch': { kind: 'frame', source: require('./frames/velvet_monarch.webp'), Fx: require('./frames/fx/velvet_monarch.webp'), fx: 'twinkle' },
 
-  'shop.badge_trendsetter': { kind: 'badge', Art: BadgeTrendsetter, Fx: FxTrendsetter, fx: 'twinkle' },
-  'shop.badge_fan_favourite': { kind: 'badge', Art: BadgeFanFavourite, Fx: FxFanFavourite, fx: 'twinkle' },
-  'shop.badge_elite_hunter': { kind: 'badge', Art: BadgeEliteHunter, Fx: FxEliteHunter, fx: 'twinkle' },
+  // Original ornate fantasy collection. Designed from scratch using the local reference style only.
+  'shop.frame_imperial_ruby': { kind: 'frame', source: require('./frames/imperial_ruby.webp'), Fx: require('./frames/fx/imperial_ruby.webp'), fx: 'twinkle' },
+  'shop.frame_frost_empress': { kind: 'frame', source: require('./frames/frost_empress.webp'), Fx: require('./frames/fx/frost_empress.webp'), fx: 'drift' },
+  'shop.frame_astral_oracle': { kind: 'frame', source: require('./frames/astral_oracle.webp'), Fx: require('./frames/fx/astral_oracle.webp'), fx: 'spin' },
+  'shop.frame_cupid_royale': { kind: 'frame', source: require('./frames/cupid_royale.webp'), Fx: require('./frames/fx/cupid_royale.webp'), fx: 'twinkle' },
+  'shop.frame_solar_phoenix': { kind: 'frame', source: require('./frames/solar_phoenix.webp'), Fx: require('./frames/fx/solar_phoenix.webp'), fx: 'flicker' },
+  'shop.frame_emerald_dynasty': { kind: 'frame', source: require('./frames/emerald_dynasty.webp'), Fx: require('./frames/fx/emerald_dynasty.webp'), fx: 'pulse' },
 
-  'shop.title_style_icon': { kind: 'title', Art: TitleStyleIcon },
-  'shop.title_trend_boss': { kind: 'title', Art: TitleTrendBoss },
-  'shop.title_hunt_master': { kind: 'title', Art: TitleHuntMaster },
+  'shop.theme_sunset_glow': { kind: 'theme', source: require('./themes/sunset_glow.webp') },
+  'shop.theme_aurora': { kind: 'theme', source: require('./themes/aurora.webp') },
+  'shop.theme_cyber_neon': { kind: 'theme', source: require('./themes/cyber_neon.webp') },
+  'shop.theme_golden_hour': { kind: 'theme', source: require('./themes/golden_hour.webp') },
+
+  'shop.badge_trendsetter': { kind: 'badge', source: require('./badges/trendsetter.webp'), Fx: require('./badges/fx/trendsetter.webp'), fx: 'twinkle' },
+  'shop.badge_fan_favourite': { kind: 'badge', source: require('./badges/fan_favourite.webp'), Fx: require('./badges/fx/fan_favourite.webp'), fx: 'pulse' },
+  'shop.badge_elite_hunter': { kind: 'badge', source: require('./badges/elite_hunter.webp'), Fx: require('./badges/fx/elite_hunter.webp'), fx: 'twinkle' },
+  'shop.badge_diamond_vanguard': { kind: 'badge', source: require('./badges/diamond_vanguard.webp'), Fx: require('./badges/fx/diamond_vanguard.webp'), fx: 'twinkle' },
+  'shop.badge_cosmic_patron': { kind: 'badge', source: require('./badges/cosmic_patron.webp'), Fx: require('./badges/fx/cosmic_patron.webp'), fx: 'spin' },
+  'shop.badge_royal_founder': { kind: 'badge', source: require('./badges/royal_founder.webp'), Fx: require('./badges/fx/royal_founder.webp'), fx: 'twinkle' },
+
+  'shop.title_style_icon': { kind: 'title', source: require('./titles/style_icon.webp'), Fx: require('./titles/fx/style_icon.webp'), fx: 'drift' },
+  'shop.title_trend_boss': { kind: 'title', source: require('./titles/trend_boss.webp'), Fx: require('./titles/fx/trend_boss.webp'), fx: 'drift' },
+  'shop.title_hunt_master': { kind: 'title', source: require('./titles/hunt_master.webp'), Fx: require('./titles/fx/hunt_master.webp'), fx: 'drift' },
+  'shop.title_dragon_lord': { kind: 'title', source: require('./titles/dragon_lord.webp'), Fx: require('./titles/fx/dragon_lord.webp'), fx: 'drift' },
+  'shop.title_starlight_icon': { kind: 'title', source: require('./titles/starlight_icon.webp'), Fx: require('./titles/fx/starlight_icon.webp'), fx: 'twinkle' },
+  'shop.title_sovereign': { kind: 'title', source: require('./titles/sovereign.webp'), Fx: require('./titles/fx/sovereign.webp'), fx: 'drift' },
 };
