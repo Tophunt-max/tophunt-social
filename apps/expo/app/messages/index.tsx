@@ -32,6 +32,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { Colors } from '@/constants/theme';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { LinearGradient } from 'expo-linear-gradient';
 
 // Instagram-style story ring gradient (warm yellow -> pink -> purple).
@@ -366,10 +367,11 @@ export default function MessagesScreen() {
         >
           {hasUnread ? <View style={styles.unreadAccent} /> : null}
           <View>
-            <Avatar
+            <FramedAvatar
               uri={otherUser?.photoURL}
               name={otherUser?.displayName}
               size={54}
+              frame={cosmeticsOf(otherUser)?.frame}
               style={styles.chatAvatar}
             />
             {isOnline && <View style={[styles.onlineIndicator, styles.chatOnlineIndicator, { borderColor: cardBg }]} />}
@@ -384,6 +386,7 @@ export default function MessagesScreen() {
                 {otherUser?.displayName || 'User'}
               </Text>
               <VerifiedBadge verified={(otherUser as any)?.verified} size={14} />
+              <NameCosmetics cosmetics={cosmeticsOf(otherUser)} badgeSize={15} />
             </View>
 
             <View style={styles.previewRow}>

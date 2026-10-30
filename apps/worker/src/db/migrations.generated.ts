@@ -77,6 +77,7 @@ import m_0072_monetization_sql from "../../migrations/0072_monetization.sql";
 import m_0073_shop_earning_sql from "../../migrations/0073_shop_earning.sql";
 import m_0074_signup_bonus_fraud_sql from "../../migrations/0074_signup_bonus_fraud.sql";
 import m_0075_remove_real_money_sql from "../../migrations/0075_remove_real_money.sql";
+import m_0076_shop_digital_items_sql from "../../migrations/0076_shop_digital_items.sql";
 
 export interface Migration {
   name: string;
@@ -160,4 +161,5 @@ export const MIGRATIONS: Migration[] = [
   { name: "0073_shop_earning.sql", sql: m_0073_shop_earning_sql },
   { name: "0074_signup_bonus_fraud.sql", sql: m_0074_signup_bonus_fraud_sql },
   { name: "0075_remove_real_money.sql", sql: m_0075_remove_real_money_sql },
+  { name: "0076_shop_digital_items.sql", sql: m_0076_shop_digital_items_sql },
 ];

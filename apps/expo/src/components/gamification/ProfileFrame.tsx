@@ -13,6 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { frameAsset, frameTier } from '@/src/lib/gamificationAssets';
 import { useScreenActive } from '@/src/hooks/useScreenActive';
+import { SHOP_FRAME_AVATAR_RATIO, shopArt } from '@/src/lib/shopDigital';
 import { FrameRing } from './vectors';
 
 /** Tiers that get the shimmer when equipped. */
@@ -47,7 +48,9 @@ export function ProfileFrame({
 }) {
   const reduce = useReducedMotion();
   const active = useScreenActive();
-  const tier = frameTier(frame);
+  // Shop frames (asset.key = shop.*) draw their own artwork; others use the tier ring.
+  const art = shopArt(frame, 'frame');
+  const tier = art ? null : frameTier(frame);
   const running = !reduce && !paused && active;
   const pulseOn = running && !!frame?.asset?.animated;
   const shimmerOn = running && !!tier && SHIMMER_TIERS.has(tier.id) && shape === 'circle';
@@ -82,7 +85,7 @@ export function ProfileFrame({
 
   return (
     <View style={{ width: outer, height: outer }}>
-      {frame && tier ? (
+      {frame && art ? null : frame && tier ? (
         <Animated.View
           key={frame.id ?? frame.name}
           entering={reduce ? undefined : FadeIn.duration(300)}
@@ -101,6 +104,22 @@ export function ProfileFrame({
         <View style={[StyleSheet.absoluteFill, { borderRadius: radius, borderWidth: 1, borderColor: fallbackBorder }]} />
       )}
       <View style={[StyleSheet.absoluteFill, styles.center]}>{children}</View>
+      {frame && art ? (
+        <Animated.View
+          key={frame.id ?? frame.name}
+          entering={reduce ? undefined : FadeIn.duration(300)}
+          style={[StyleSheet.absoluteFill, styles.center, pulseStyle]}
+          pointerEvents="none"
+          accessible
+          accessibilityLabel={frame.name}
+        >
+          {/* The artwork's avatar circle is SHOP_FRAME_AVATAR_RATIO of its box, so
+              the box is scaled from the avatar size and may overhang the outer
+              box slightly; the parent does not clip. Drawn ABOVE the photo so
+              ornaments that dip into the ring (the crown) stay visible. */}
+          <art.Art width={size / SHOP_FRAME_AVATAR_RATIO} height={size / SHOP_FRAME_AVATAR_RATIO} />
+        </Animated.View>
+      ) : null}
     </View>
   );
 }

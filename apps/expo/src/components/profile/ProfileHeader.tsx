@@ -17,6 +17,8 @@ import { useRouter } from 'expo-router';
 import { isLevelInfo } from '@/src/lib/progression';
 import { LevelProgressBar } from '@/src/components/gamification/LevelProgressBar';
 import { ProfileFrame } from '@/src/components/gamification/ProfileFrame';
+import { CosmeticBadge, CosmeticTitleChip, ThemeBackdrop } from '@/src/components/gamification/CosmeticBits';
+import { LinearGradient } from 'expo-linear-gradient';
 import { LevelBadge } from '@/src/components/gamification/LevelBadge';
 import Animated, { ZoomIn, useReducedMotion } from 'react-native-reanimated';
 import { useDesignWindow } from '@/src/lib/layout';
@@ -186,7 +188,11 @@ const ProfileHeader: React.FC<ProfileHeaderProps> = ({
   const levelInfo = isLevelInfo((user as any).levelInfo) ? (user as any).levelInfo : null;
   const levelNumber = levelInfo?.level ?? (Number(user.level) || 1);
   const cosmetics = ((user as any).cosmetics ?? null) as PublicCosmetics | null;
-  const titleText = cosmetics?.title?.text ?? levelInfo?.rank?.name ?? null;
+  // An equipped title (bought or earned) replaces the rank line with its chip.
+  const titleText = cosmetics?.title ? null : levelInfo?.rank?.name ?? null;
+  const theme = cosmetics?.theme ?? null;
+  // On a theme the top bar sits on artwork, so it switches to white.
+  const barColor = theme ? '#FFFFFF' : textColor;
   const equippedBadge = user.equippedBadge;
 
   const handleMessagePress = async () => {
@@ -254,17 +260,24 @@ const ProfileHeader: React.FC<ProfileHeaderProps> = ({
 
   return (
     <View style={[styles.container, { backgroundColor }]}>
+      {theme ? (
+        <View style={styles.themeBanner} pointerEvents="none" accessible accessibilityLabel={`Profile theme: ${theme.name}`}>
+          <ThemeBackdrop theme={theme} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.12)' }]} />
+          <LinearGradient colors={['transparent', backgroundColor]} style={styles.themeFade} />
+        </View>
+      ) : null}
       <View style={styles.topBar}>
         <View style={styles.topBarLeft} />
         <View style={styles.titleRow}>
-          <Text style={[styles.usernameText, { color: textColor }]} numberOfLines={1}>
+          <Text style={[styles.usernameText, { color: barColor }]} numberOfLines={1}>
             @{user.username || 'username'}
           </Text>
           <VerifiedBadge verified={user.verified} size={16} />
         </View>
         <View style={styles.topBarRight}>
            {isOwnProfile ? (
-             <TouchableOpacity onPress={() => router.push('/setting')}><Settings_Icon width={24} height={24} color={textColor} /></TouchableOpacity>
+             <TouchableOpacity onPress={() => router.push('/setting')}><Settings_Icon width={24} height={24} color={barColor} /></TouchableOpacity>
            ) : (
              // This slot was empty on other people's profiles, which is why there
              // was nowhere to put Block / Mute / Report.
@@ -275,7 +288,7 @@ const ProfileHeader: React.FC<ProfileHeaderProps> = ({
                accessibilityHint="Block, mute or report this account"
                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
              >
-               <Ionicons name="ellipsis-vertical" size={22} color={textColor} />
+               <Ionicons name="ellipsis-vertical" size={22} color={barColor} />
              </TouchableOpacity>
            )}
         </View>
@@ -326,7 +339,13 @@ const ProfileHeader: React.FC<ProfileHeaderProps> = ({
             {user.fullName || user.username}
           </Text>
           <VerifiedBadge verified={user.verified} size={20} />
+          <CosmeticBadge badge={cosmetics?.badge} size={20} />
         </View>
+        {cosmetics?.title ? (
+          <View style={styles.titleChipRow}>
+            <CosmeticTitleChip title={cosmetics.title} />
+          </View>
+        ) : null}
         {titleText ? (
           <View style={styles.rankRow} accessibilityLabel={`Rank ${titleText}`}>
             <Ionicons name={levelInfo?.rank?.icon || 'star'} size={13} color={levelInfo?.rank?.color || '#FFB300'} />
@@ -430,6 +449,9 @@ const ProfileHeader: React.FC<ProfileHeaderProps> = ({
 
 const styles = StyleSheet.create({
   container: { paddingBottom: 20 },
+  themeBanner: { position: 'absolute', top: 0, left: 0, right: 0, height: 150, overflow: 'hidden' },
+  themeFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 56 },
+  titleChipRow: { alignItems: 'center', marginTop: 6 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, height: 56 },
   topBarLeft: { width: 40 },
   topBarRight: { width: 40, alignItems: 'flex-end' },

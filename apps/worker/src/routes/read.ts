@@ -27,7 +27,7 @@ import {
 import { FEED_DEFAULT_WEIGHTS, rankingVersion, sanitizeFeedWeights, type FeedWeights } from "../lib/feedWeights";
 import { getSettings as getGamificationSettings, levelForXp } from "../lib/gamification";
 import { getProgression, levelInfo, xpForLevel } from "../lib/progression";
-import { loadAchievementDefs, loadCatalog, resolveCosmetics } from "../lib/cosmetics";
+import { loadAchievementDefs, loadCatalog, resolveCardCosmeticsList, resolveCosmetics, withCardCosmetics, type CardCosmetics } from "../lib/cosmetics";
 import { hallOfFame, LEADERBOARD_PERIODS, leaderboardPage, myRank, rangeFor, type LeaderboardPeriod } from "../lib/seasons";
 import { resolveLegalContent } from "../content/legal";
 import {
@@ -213,6 +213,8 @@ interface LiveUserFields {
   followersCount: number;
   /** Epoch ms of last realtime connect/disconnect; null if never seen. */
   lastSeenAt: number | null;
+  /** Equipped frame / badge / title (lib/cosmetics.ts#CardCosmetics); null when none. */
+  cosmetics: CardCosmetics | null;
 }
 
 /**
@@ -249,12 +251,14 @@ async function liveUserFields(
         isBlocked: schema.users.isBlocked,
         createdAt: schema.users.createdAt,
         followersCount: schema.users.followersCount,
+        cosmetics: schema.users.cosmetics,
       })
       .from(schema.users)
       .where(inArray(schema.users.uid, unique))
       .all();
+    const cosmetics = await resolveCardCosmeticsList(env, rows.map((r) => r.cosmetics));
     return new Map(
-      rows.map((r) => [
+      rows.map((r, i) => [
         r.uid,
         {
           verified: !!r.verified,
@@ -265,6 +269,7 @@ async function liveUserFields(
           hidden: isHiddenAccountStatus(r.status) || !!r.isBlocked,
           createdAt: Number(r.createdAt) || 0,
           followersCount: Number(r.followersCount) || 0,
+          cosmetics: cosmetics[i],
         },
       ]),
     );
@@ -309,6 +314,7 @@ async function enrichParticipants(env: Env, matches: any[]): Promise<Map<string,
       profilePic: cdnUrl(env, u.avatar) ?? "",
       profilePicThumb: avatarUrl(env, u.avatar) ?? "",
       username: u.username || u.fullName || p.username,
+      cosmetics: u.cosmetics,
     };
   };
   for (const m of matches) {
@@ -1773,6 +1779,7 @@ readRoute.get("/leaderboard", optionalAuth, guestReadLimit, async (c) => {
           badges: schema.users.badges,
           equippedBadge: schema.users.equippedBadge,
           verified: schema.users.verified,
+          cosmetics: schema.users.cosmetics,
         })
         .from(schema.users)
         .where(discoverableUser)
@@ -1783,7 +1790,7 @@ readRoute.get("/leaderboard", optionalAuth, guestReadLimit, async (c) => {
       // frozen stored column, so the leaderboard shows the level a user has
       // actually earned.
       const gs = await getGamificationSettings(c.env);
-      return rows.map((r: any) => ({
+      return (await withCardCosmetics(c.env, rows)).map((r: any) => ({
         ...r,
         level: levelForXp(r.xp ?? 0, gs),
         profileImageUrlThumb: avatarUrl(c.env, r.profileImageUrl),
@@ -1868,7 +1875,7 @@ readRoute.get("/leaderboard/xp", optionalAuth, guestReadLimit, async (c) => {
       const p = await getProgression(c.env);
       const range = await rangeFor(c.env, p, period);
       if (period === "season" && !range) return { period, active: false, label: null, endsAt: null, rows: [], nextCursor: null };
-      const rows = await leaderboardPage(c.env, range, offset, limit);
+      const rows = await withCardCosmetics(c.env, await leaderboardPage(c.env, range, offset, limit));
       return {
         period,
         active: true,
@@ -2211,7 +2218,7 @@ readRoute.get("/notifications", requireAuth, async (c) => {
           if (!a?.uid) return a;
           const u = liveActors.get(a.uid);
           return u
-            ? { ...a, avatarUrl: cdnUrl(c.env, u.avatar) ?? null, username: u.username || u.fullName || a.username }
+            ? { ...a, avatarUrl: cdnUrl(c.env, u.avatar) ?? null, username: u.username || u.fullName || a.username, cosmetics: u.cosmetics }
             : a;
         });
       }
@@ -2431,6 +2438,7 @@ readRoute.get("/users/suggested", optionalAuth, guestReadLimit, async (c) => {
           verified: schema.users.verified,
           coordinates: schema.users.coordinates,
           followersCount: schema.users.followersCount,
+          cosmetics: schema.users.cosmetics,
         })
         .from(schema.users)
         .where(discoverableUser)
@@ -2439,7 +2447,7 @@ readRoute.get("/users/suggested", optionalAuth, guestReadLimit, async (c) => {
         .orderBy(desc(schema.users.verified), desc(schema.users.followersCount), desc(schema.users.createdAt))
         .limit(100)
         .all();
-      return rows as any[];
+      return (await withCardCosmetics(c.env, rows)) as any[];
     },
   });
 
@@ -2542,6 +2550,7 @@ async function searchPeople(c: any, term: string, limit: number) {
       avatarUrl: schema.users.profileImageUrl,
       verified: schema.users.verified,
       followersCount: schema.users.followersCount,
+      cosmetics: schema.users.cosmetics,
     })
     .from(schema.users)
     .where(and(...conds))
@@ -2550,7 +2559,7 @@ async function searchPeople(c: any, term: string, limit: number) {
     .all();
   if (blocked.size) c.header("Cache-Control", "private, no-store");
   const visible = exclusionTruncated(blocked) ? excludeHiddenBy(rows as any[], blocked, (r: any) => r.id) : rows;
-  return (visible as any[]).map((r) => ({
+  return (await withCardCosmetics(c.env, visible as any[])).map((r: any) => ({
     ...r,
     followersCount: Number(r.followersCount) || 0,
     avatarThumbUrl: avatarUrl(c.env, r.avatarUrl),
@@ -3327,6 +3336,7 @@ async function listConnections(
       profileImageUrl: schema.users.profileImageUrl,
       verified: schema.users.verified,
       status: schema.users.status,
+      cosmetics: schema.users.cosmetics,
       since: schema.follows.createdAt,
       other: otherUid,
     })
@@ -3359,10 +3369,11 @@ async function listConnections(
       profileImageUrl: r.profileImageUrl,
       profileImageUrlThumb: avatarUrl(c.env, r.profileImageUrl),
       verified: !!r.verified,
+      cosmetics: r.cosmetics,
     }));
   const last = hasMore ? rows[limit - 1] : null;
   const nextCursor = last ? `${last.since}_${last.other}` : null;
-  return { items: page, nextCursor };
+  return { items: await withCardCosmetics(c.env, page), nextCursor };
 }
 
 /** Shared handler for both /followers and /following. */
@@ -3780,6 +3791,7 @@ readRoute.get("/chats", requireAuth, async (c) => {
             // driven by realtime `presence` events; this seeds the "last seen"
             // text on first paint before any event arrives.
             lastSeen: u.lastSeenAt ?? null,
+            cosmetics: u.cosmetics,
           };
         });
       }
@@ -4073,6 +4085,7 @@ readRoute.get("/comments", optionalAuth, guestReadLimit, async (c) => {
             id: schema.matchComments.id, userId: schema.matchComments.userId, text: schema.matchComments.text,
             likes: schema.matchComments.likeCount, createdAt: schema.matchComments.createdAt,
             username: schema.users.username, userAvatar: schema.users.profileImageUrl, verified: schema.users.verified,
+            cosmetics: schema.users.cosmetics,
           })
           .from(schema.matchComments)
           .leftJoin(schema.users, eq(schema.matchComments.userId, schema.users.uid))
@@ -4086,6 +4099,7 @@ readRoute.get("/comments", optionalAuth, guestReadLimit, async (c) => {
               id: schema.blogComments.id, userId: schema.blogComments.userId, text: schema.blogComments.text,
               likes: schema.blogComments.likeCount, createdAt: schema.blogComments.createdAt,
               username: schema.users.username, userAvatar: schema.users.profileImageUrl, verified: schema.users.verified,
+            cosmetics: schema.users.cosmetics,
             })
             .from(schema.blogComments)
             .leftJoin(schema.users, eq(schema.blogComments.userId, schema.users.uid))
@@ -4098,6 +4112,7 @@ readRoute.get("/comments", optionalAuth, guestReadLimit, async (c) => {
               id: schema.postComments.id, userId: schema.postComments.userId, text: schema.postComments.text,
               likes: schema.postComments.likeCount, createdAt: schema.postComments.createdAt,
               username: schema.users.username, userAvatar: schema.users.profileImageUrl, verified: schema.users.verified,
+            cosmetics: schema.users.cosmetics,
             })
             .from(schema.postComments)
             .leftJoin(schema.users, eq(schema.postComments.userId, schema.users.uid))
@@ -4110,7 +4125,7 @@ readRoute.get("/comments", optionalAuth, guestReadLimit, async (c) => {
     const pageRows = hasMore ? rows.slice(0, limit) : rows;
     const last: any = pageRows[pageRows.length - 1];
     const nextCursor = hasMore && last ? `${last.createdAt}_${last.id}` : null;
-    const items = pageRows.map((r: any) => ({ ...r, postId: targetId, likes: r.likes ?? 0, likedByMe: false }));
+    const items = (await withCardCosmetics(c.env, pageRows as any[])).map((r: any) => ({ ...r, postId: targetId, likes: r.likes ?? 0, likedByMe: false }));
     const payload: CommentsPayload = { items, nextCursor };
     // One extra COUNT, blog only, and only on a cache miss. It is a thread total
     // rather than `items.length` because the heading has to be right on page one
@@ -4218,22 +4233,23 @@ readRoute.get("/comments", optionalAuth, guestReadLimit, async (c) => {
 });
 
 // ================= STORIES =================
-type AttachedUser = { username: string; avatarUrl: string | null; avatarUrlThumb: string | null; verified: boolean };
+type AttachedUser = { username: string; avatarUrl: string | null; avatarUrlThumb: string | null; verified: boolean; cosmetics: CardCosmetics | null };
 
 async function attachUsers(c: any, userIds: string[]) {
   const db = getDb(c.env);
   if (!userIds.length) return {} as Record<string, AttachedUser>;
   const rows = await db
-    .select({ uid: schema.users.uid, username: schema.users.username, fullName: schema.users.fullName, avatar: schema.users.profileImageUrl, verified: schema.users.verified })
+    .select({ uid: schema.users.uid, username: schema.users.username, fullName: schema.users.fullName, avatar: schema.users.profileImageUrl, verified: schema.users.verified, cosmetics: schema.users.cosmetics })
     .from(schema.users)
     .where(inArray(schema.users.uid, userIds))
     .all();
+  const cosmetics = await resolveCardCosmeticsList(c.env, rows.map((u) => u.cosmetics));
   // avatarUrl is null when the user has no photo. Do NOT synthesize a
   // ui-avatars.com URL here: it embeds the username, so every avatar render
   // would leak it to a third party, and the fallback breaks offline. Clients
   // render initials locally (see apps/expo/src/components/ui/Avatar.tsx).
   const map: Record<string, AttachedUser> = {};
-  for (const u of rows) {
+  for (const [i, u] of rows.entries()) {
     map[u.uid] = {
       username: u.username || u.fullName || "User",
       // Canonicalised onto the current media base so a pre-cutover row is served
@@ -4244,6 +4260,7 @@ async function attachUsers(c: any, userIds: string[]) {
       // Transformations is enabled — see lib/media.ts transformationsAvailable().
       avatarUrlThumb: avatarUrl(c.env, u.avatar) || null,
       verified: !!u.verified,
+      cosmetics: cosmetics[i],
     };
   }
   return map;
@@ -4346,6 +4363,7 @@ readRoute.get("/stories/feed", optionalAuth, guestReadLimit, async (c) => {
     avatarUrl: userMap[userId]?.avatarUrl ?? null,
     avatarUrlThumb: userMap[userId]?.avatarUrlThumb ?? null,
     verified: userMap[userId]?.verified ?? false,
+    cosmetics: userMap[userId]?.cosmetics ?? null,
     stories: grouped[userId].sort((a, b) => a.createdAt - b.createdAt),
     hasUnseen: true,
   }));
@@ -4387,6 +4405,7 @@ readRoute.get("/users/:id/stories", optionalAuth, guestReadLimit, async (c) => {
     avatarUrl: userMap[userId]?.avatarUrl ?? null,
     avatarUrlThumb: userMap[userId]?.avatarUrlThumb ?? null,
     verified: userMap[userId]?.verified ?? false,
+    cosmetics: userMap[userId]?.cosmetics ?? null,
     stories: rows.map((s) => ({ ...s, seen: false })),
     hasUnseen: true,
   });

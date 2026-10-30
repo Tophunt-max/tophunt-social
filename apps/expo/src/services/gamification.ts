@@ -24,12 +24,20 @@ export interface CatalogItemView {
 export interface PublicCosmetics {
   frame: { id: string; name: string; rarity: string; asset: Record<string, any> } | null;
   theme: { id: string; name: string; rarity: string; asset: Record<string, any> } | null;
-  title: { id: string; name: string; rarity: string; text: string } | null;
+  title: { id: string; name: string; rarity: string; text: string; asset?: Record<string, any> } | null;
   badge: { id: string; name: string; rarity: string; asset: Record<string, any> } | null;
   accessory?: { id: string; name: string; rarity: string; asset: Record<string, any> } | null;
   effect?: { id: string; name: string; rarity: string; asset: Record<string, any> } | null;
   pinned: { id: string; name: string; icon: string; rarity: string; description: string }[];
 }
+
+/**
+ * What travels with a person on every list surface (battle cards, comments,
+ * leaderboards, followers, search, stories, chats): the equipped frame, badge
+ * and title. `null` / absent when nothing is equipped. Server:
+ * apps/worker/src/lib/cosmetics.ts#CardCosmetics.
+ */
+export type CardCosmetics = Pick<PublicCosmetics, 'frame' | 'badge' | 'title'>;
 
 export interface RoadmapEntry {
   level: number;

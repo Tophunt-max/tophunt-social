@@ -8,7 +8,7 @@ import { MaterialCommunityIcons, Ionicons } from '@/src/lib/icons';
 import { BackButton } from '@/src/components/ui/BackButton';
 import { LeaderboardSkeleton } from '@/src/components/skeletons/LeaderboardSkeleton';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
-import { Avatar } from '@/src/components/ui/Avatar';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { useDesignWindow } from '@/src/lib/layout';
 import { readApi } from '@/src/services/api';
 import { useAuth } from '@/src/hooks/useAuth';
@@ -151,7 +151,7 @@ function Podium({
             <View style={{ alignItems: 'center' }}>
               {first && <MaterialCommunityIcons name="crown" size={30} color={MEDAL[0]} style={{ marginBottom: -4 }} />}
               <View style={[styles.podiumRing, { borderColor: MEDAL[i] }]}>
-                <Avatar uri={u.profileImageUrlThumb || u.profileImageUrl} name={u.fullName || u.username} size={size} />
+                <FramedAvatar uri={u.profileImageUrlThumb || u.profileImageUrl} name={u.fullName || u.username} size={size} frame={cosmeticsOf(u)?.frame} />
               </View>
               <View style={[styles.medal, { backgroundColor: MEDAL[i], top: size - 6 + (first ? 26 : 0) }]}>
                 <Text style={styles.medalText}>{i + 1}</Text>
@@ -159,6 +159,7 @@ function Podium({
               <View style={[styles.nameRow, { marginTop: 16 }]}>
                 <Text style={[styles.podiumName, { color: p.text }]} numberOfLines={1}>{u.fullName || u.username}</Text>
                 <VerifiedBadge verified={u.verified} size={12} />
+                <NameCosmetics cosmetics={cosmeticsOf(u)} badgeSize={13} />
               </View>
               <Text style={[styles.podiumScore, { color: first ? '#D97706' : p.sub }]}>
                 {compactCount(leaderboardScore(u, by))} {unit}
@@ -196,11 +197,12 @@ const Row = React.memo(function Row({
       accessibilityLabel={`Rank ${rank}, ${u.username || u.fullName}, ${score} ${unit}`}
     >
       <Text style={[styles.rank, { color: p.sub }]}>{rank}</Text>
-      <Avatar uri={u.profileImageUrlThumb || u.profileImageUrl} name={u.fullName || u.username} size={44} />
+      <FramedAvatar uri={u.profileImageUrlThumb || u.profileImageUrl} name={u.fullName || u.username} size={44} frame={cosmeticsOf(u)?.frame} />
       <View style={{ flex: 1, marginLeft: 12 }}>
         <View style={styles.nameRow}>
           <Text style={[styles.rowName, { color: p.text }]} numberOfLines={1}>{u.fullName || u.username}</Text>
           <VerifiedBadge verified={u.verified} size={13} />
+          <NameCosmetics cosmetics={cosmeticsOf(u)} badgeSize={14} showTitle />
           {Number(u.level) > 0 ? (
             <View style={[styles.level, { backgroundColor: p.chip }]}>
               <Text style={[styles.levelText, { color: p.text }]}>Lv {u.level}</Text>

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="neonPulseA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#A855F7"/>
+    </linearGradient>
+    <linearGradient id="neonPulseB" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F0ABFC"/>
+      <stop offset="1" stop-color="#FF4D67"/>
+    </linearGradient>
+  </defs>
+  <circle cx="60" cy="60" r="54" fill="none" stroke="#0B1020" stroke-width="8"/>
+  <circle cx="60" cy="60" r="56.5" fill="none" stroke="url(#neonPulseA)" stroke-opacity="0.35" stroke-width="5"/>
+  <circle cx="60" cy="60" r="56.5" fill="none" stroke="url(#neonPulseA)" stroke-width="2"/>
+  <circle cx="60" cy="60" r="51.5" fill="none" stroke="url(#neonPulseB)" stroke-opacity="0.35" stroke-width="4"/>
+  <circle cx="60" cy="60" r="51.5" fill="none" stroke="url(#neonPulseB)" stroke-width="1.6"/>
+  <g fill="#FDE047" stroke="#0B1020" stroke-width="0.6" stroke-linejoin="round">
+    <path d="M62 0 L55 9 L60 9 L57 15 L65 6 L60 6 Z"/>
+    <path d="M62 0 L55 9 L60 9 L57 15 L65 6 L60 6 Z" transform="rotate(90 60 60)"/>
+    <path d="M62 0 L55 9 L60 9 L57 15 L65 6 L60 6 Z" transform="rotate(180 60 60)"/>
+    <path d="M62 0 L55 9 L60 9 L57 15 L65 6 L60 6 Z" transform="rotate(270 60 60)"/>
+  </g>
+</svg>

@@ -4,8 +4,8 @@ import { AppImage } from '@/src/components/ui/AppImage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@/src/lib/icons';
 import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
-import { Avatar } from '@/src/components/ui/Avatar';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { entryFeePerPlayer } from '@/src/lib/contestPricing';
 import { matchPrize } from '@/src/lib/contestPrize';
 import { participantAvatar, participantThumb } from '@/src/lib/exploreMedia';
@@ -71,9 +71,10 @@ export const OpenBattleCard = React.memo(function OpenBattleCard({
       </View>
 
       <View style={styles.nameRow}>
-        <Avatar uri={participantAvatar(item.userA)} name={item.userA?.username} size={20} />
+        <FramedAvatar uri={participantAvatar(item.userA)} name={item.userA?.username} size={22} frame={cosmeticsOf(item.userA)?.frame} />
         <Text style={[styles.name, { color: palette.text }]} numberOfLines={1}>@{item.userA?.username || 'player'}</Text>
         <VerifiedBadge verified={item.userA?.verified} size={12} />
+        <NameCosmetics cosmetics={cosmeticsOf(item.userA)} badgeSize={12} />
       </View>
       <Text style={[styles.title, { color: palette.text }]} numberOfLines={1}>{title}</Text>
       <View style={styles.metaRow}>

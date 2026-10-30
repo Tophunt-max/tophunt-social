@@ -133,7 +133,7 @@ export function parseEquipped(raw: unknown): EquippedState {
 export interface PublicCosmetics {
   frame: { id: string; name: string; rarity: string; asset: Record<string, unknown> } | null;
   theme: { id: string; name: string; rarity: string; asset: Record<string, unknown> } | null;
-  title: { id: string; name: string; rarity: string; text: string } | null;
+  title: { id: string; name: string; rarity: string; text: string; asset: Record<string, unknown> } | null;
   badge: { id: string; name: string; rarity: string; asset: Record<string, unknown> } | null;
   accessory: { id: string; name: string; rarity: string; asset: Record<string, unknown> } | null;
   effect: { id: string; name: string; rarity: string; asset: Record<string, unknown> } | null;
@@ -156,7 +156,7 @@ export async function resolveCosmetics(env: Env, raw: unknown): Promise<PublicCo
     const item = id ? byId.get(id) : undefined;
     if (!item || !item.active || item.type !== slot) continue;
     if (slot === "title") {
-      out.title = { id: item.id, name: item.name, rarity: item.rarity, text: String((item.asset as any)?.text ?? item.name) };
+      out.title = { id: item.id, name: item.name, rarity: item.rarity, text: String((item.asset as any)?.text ?? item.name), asset: item.asset };
     } else {
       (out as any)[slot] = { id: item.id, name: item.name, rarity: item.rarity, asset: item.asset };
     }
@@ -169,6 +169,61 @@ export async function resolveCosmetics(env: Env, raw: unknown): Promise<PublicCo
     }
   }
   return out;
+}
+
+/**
+ * The slice of someone's equipped cosmetics that travels with them on every list
+ * surface (feed battle cards, comments, leaderboards, followers, search, stories,
+ * chats): the frame round the avatar, the badge next to the name and the title.
+ * The theme and pinned achievements stay on the profile. `null` when none of the
+ * three is equipped, so the common case adds nothing to the payload.
+ */
+export interface CardCosmetics {
+  frame: PublicCosmetics["frame"];
+  badge: PublicCosmetics["badge"];
+  title: PublicCosmetics["title"];
+}
+
+const CARD_SLOTS = ["frame", "badge", "title"] as const;
+
+/**
+ * Resolve the raw `users.cosmetics` column of a whole list in one pass. The
+ * catalog is loaded once (and only if anyone in the list has something
+ * equipped), so a page of 50 rows costs at most one memoized catalog read.
+ */
+export async function resolveCardCosmeticsList(env: Env, raws: unknown[]): Promise<(CardCosmetics | null)[]> {
+  const parsed = raws.map(parseEquipped);
+  if (!parsed.some((eq) => CARD_SLOTS.some((s) => eq[s]))) return parsed.map(() => null);
+  let byId: Map<string, CatalogItem>;
+  try {
+    byId = new Map((await loadCatalog(env)).map((i) => [i.id, i]));
+  } catch (e) {
+    // Purely decorative: a catalog failure must never break the list it decorates.
+    console.error("[cosmetics] card catalog load failed", e);
+    return parsed.map(() => null);
+  }
+  return parsed.map((eq) => {
+    const out: CardCosmetics = { frame: null, badge: null, title: null };
+    let any = false;
+    for (const slot of CARD_SLOTS) {
+      const id = eq[slot];
+      const item = id ? byId.get(id) : undefined;
+      if (!item || !item.active || item.type !== slot) continue;
+      any = true;
+      if (slot === "title") out.title = { id: item.id, name: item.name, rarity: item.rarity, text: String((item.asset as any)?.text ?? item.name), asset: item.asset };
+      else out[slot] = { id: item.id, name: item.name, rarity: item.rarity, asset: item.asset };
+    }
+    return any ? out : null;
+  });
+}
+
+/**
+ * Return copies of `rows` with the raw `cosmetics` column replaced by the
+ * resolved card view. Rows without the column get `cosmetics: null`.
+ */
+export async function withCardCosmetics<T extends { cosmetics?: unknown }>(env: Env, rows: T[]): Promise<(Omit<T, "cosmetics"> & { cosmetics: CardCosmetics | null })[]> {
+  const resolved = await resolveCardCosmeticsList(env, rows.map((r) => r.cosmetics));
+  return rows.map((r, i) => ({ ...r, cosmetics: resolved[i] }));
 }
 
 export interface InventoryEntry {

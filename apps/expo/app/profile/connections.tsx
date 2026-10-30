@@ -21,13 +21,13 @@ import { followButtonLabel, followStateFromResult, intentFor, stateInSets, withS
 import { Alert } from '@/src/lib/appAlert';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useAuthGate } from '@/src/hooks/useAuthGate';
-import { Avatar } from '@/src/components/ui/Avatar';
 import { useProfile } from '@/src/hooks/useProfileData';
 import { useToast } from '@/src/components/toast/ToastProvider';
 import { Colors } from '@/constants/theme';
 import { ThemedView } from '@/components/themed-view';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 
 const CARD_MARGIN = 16;
 
@@ -204,16 +204,18 @@ export default function ConnectionsScreen() {
         activeOpacity={0.7}
         onPress={() => handleAction(() => router.push(`/profile?userId=${item.id}`))}
       >
-          <Avatar
+          <FramedAvatar
             uri={(item as any).profileImageUrlThumb || item.profileImageUrl}
             name={item.fullName || item.username}
             size={50}
+            frame={cosmeticsOf(item)?.frame}
             style={styles.userAvatar}
           />
           <View style={styles.userDetails}>
               <View style={styles.nameRow}>
                 <Text style={[styles.userName, { color: textColor }]} numberOfLines={1}>{item.fullName}</Text>
                 <VerifiedBadge verified={(item as any).verified} size={14} />
+                <NameCosmetics cosmetics={cosmeticsOf(item)} badgeSize={15} showTitle />
               </View>
               <Text style={[styles.userHandle, { color: subTextColor }]} numberOfLines={1}>@{item.username}</Text>
           </View>

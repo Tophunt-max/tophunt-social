@@ -7,8 +7,8 @@ import { BackButton } from '@/src/components/ui/BackButton';
 import { Ionicons } from '@/src/lib/icons';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
-import { Avatar } from '@/src/components/ui/Avatar';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
+import { FramedAvatar, NameCosmetics } from '@/src/components/gamification/CosmeticBits';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useAuthGate } from '@/src/hooks/useAuthGate';
 import { useProfile } from '@/src/hooks/useProfileData';
@@ -173,11 +173,12 @@ export default function ExploreSearchScreen() {
                   return (
                     <View key={u.id} style={styles.person}>
                       <TouchableOpacity style={styles.personMain} onPress={() => go(`/profile?userId=${encodeURIComponent(u.id)}`)} accessibilityRole="link">
-                        <Avatar uri={u.avatar} name={u.name} size={46} />
+                        <FramedAvatar uri={u.avatar} name={u.name} size={46} frame={u.cosmetics?.frame} />
                         <View style={{ flex: 1, marginLeft: 12 }}>
                           <View style={styles.inline}>
                             <Text style={[styles.name, { color: p.text }]} numberOfLines={1}>{u.name}</Text>
                             <VerifiedBadge verified={u.verified} size={13} />
+                            <NameCosmetics cosmetics={u.cosmetics} badgeSize={14} />
                           </View>
                           <Text style={[styles.sub, { color: p.sub }]} numberOfLines={1}>
                             @{u.username}
