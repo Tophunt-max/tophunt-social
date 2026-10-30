@@ -286,8 +286,8 @@ export default function BattleSetupScreen() {
 
     // Logic for "Get Coins" flow
     if (userCoins < fee) {
-      addToast(`Entry ke liye ${fee} Diamond chahiye. Diamond store khul raha hai...`, 'info');
-      router.push('/wallet/store'); // Assuming this route exists
+      addToast(`Entry ke liye ${fee} Diamond chahiye. Free Diamond kamao...`, 'info');
+      router.push('/earn' as any);
       return;
     }
 
@@ -367,7 +367,7 @@ export default function BattleSetupScreen() {
   };
 
   const navigateToWallet = () => {
-    router.push('/wallet/store');
+    router.push('/earn' as any);
   }
   
   const measureWallet = () => {
@@ -657,7 +657,7 @@ export default function BattleSetupScreen() {
                   <View style={styles.joinBtnContent}>
                     {!hasInsufficientCoins && <DiamondIcon size={20} color="#FFF" />}
                     <Text style={styles.joinBtnText}>
-                      {hasInsufficientCoins ? "Diamond lo" : `Pay ${fee} Diamond & Join`}
+                      {hasInsufficientCoins ? "Diamond kamao" : `Pay ${fee} Diamond & Join`}
                     </Text>
                   </View>
                 )}

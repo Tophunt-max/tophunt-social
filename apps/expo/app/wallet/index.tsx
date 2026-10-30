@@ -29,7 +29,6 @@ import { useProfile } from '@/src/hooks/useProfileData';
 import { useAppConfig } from '@/src/services/appSettings';
 import { coinRate, coinsInInr } from '@/src/lib/coinValue';
 import { walletService } from '@/src/services/wallet/walletService';
-import { useFeature } from '@/src/services/appSettings';
 import { readApi } from '@/src/services/api';
 import { useQuery } from '@tanstack/react-query';
 import { useDesignWindow } from '@/src/lib/layout';
@@ -65,8 +64,6 @@ export default function WalletScreen() {
   const { data: profile, refetch: refetchProfile, isLoading: profileLoading } = useProfile(user?.uid || '');
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const topupsEnabled = useFeature('topups'); // admin feature flag
-  const withdrawalsEnabled = useFeature('withdrawals'); // admin feature flag
   // Top-up always starts at the store, whatever the gateway mode. This used to
   // jump straight to /wallet/deposit for manual/both, which skipped the package
   // list — the user never got to see what they were buying. The store is now
@@ -399,8 +396,8 @@ export default function WalletScreen() {
     <View style={styles.header}>
       <BackButton size={26} color={textColor} style={styles.backButton} />
       <Text style={[styles.title, { color: textColor }]}>My Wallet</Text>
-      <TouchableOpacity onPress={() => router.push('/wallet/store')}>
-        <Ionicons name="scan-outline" size={24} color={textColor} />
+      <TouchableOpacity onPress={() => router.push('/shop' as any)} accessibilityLabel="Shop">
+        <Ionicons name="bag-handle-outline" size={24} color={textColor} />
       </TouchableOpacity>
     </View>
   );
@@ -453,7 +450,7 @@ export default function WalletScreen() {
                                             <Text style={styles.coinBadgeText}>DP coin</Text>
                                         </View>
                                         <Text style={styles.balanceValue}>{bal.dpcoin}</Text>
-                                        <Text style={[styles.balanceLabel, { fontSize: 12 }]}>{value ? `Withdraw · ${value}` : 'Withdraw ho sakte'}</Text>
+                                        <Text style={[styles.balanceLabel, { fontSize: 12 }]}>{value ? `Shopping ke liye · ${value}` : 'Shopping ke liye'}</Text>
                                     </View>
                                     <View style={{ flex: 1 }}>
                                         <View style={[styles.coinBadge, styles.balancePill]}>
@@ -467,32 +464,32 @@ export default function WalletScreen() {
                             );
                         })()}
                         
-                        {topupsEnabled && (
-                        <TouchableOpacity 
+                        {/* Real-money top-ups and withdrawals are retired: Diamonds are
+                            earned, DP coin is spent in the shop. */}
+                        <TouchableOpacity
                             style={styles.topUpButton}
                             onPress={() => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                router.push('/wallet/store');
+                                router.push('/earn' as any);
                             }}
                             activeOpacity={0.9}
+                            accessibilityRole="button"
                         >
-                            <Ionicons name="add" size={20} color="#FF4D67" />
-                            <Text style={styles.topUpText}>Diamond lo</Text>
+                            <Ionicons name="sparkles" size={18} color="#FF4D67" />
+                            <Text style={styles.topUpText}>Diamond kamao</Text>
                         </TouchableOpacity>
-                        )}
-                        {withdrawalsEnabled && (
                         <TouchableOpacity
                             style={styles.withdrawButton}
                             onPress={() => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                router.push('/wallet/withdraw');
+                                router.push('/shop' as any);
                             }}
                             activeOpacity={0.9}
+                            accessibilityRole="button"
                         >
-                            <Ionicons name="cash-outline" size={18} color="#FFF" />
-                            <Text style={styles.withdrawText}>Withdraw</Text>
+                            <Ionicons name="bag-handle-outline" size={18} color="#FFF" />
+                            <Text style={styles.withdrawText}>Shop</Text>
                         </TouchableOpacity>
-                        )}
                     </LinearGradient>
                 </Animated.View>
 

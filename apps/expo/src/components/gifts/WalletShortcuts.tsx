@@ -10,7 +10,7 @@ export function WalletShortcuts({ isDark }: { isDark: boolean }) {
   const router = useRouter();
   const links = [
     cfg.gifts.enabled && { key: 'gifts', label: 'Gifts', icon: 'gift-outline', href: '/wallet/gifts' },
-    cfg.store.enabled && { key: 'store', label: 'Store', icon: 'bag-handle-outline', href: '/rewards/store' },
+    cfg.store.enabled && { key: 'store', label: 'Digital items', icon: 'sparkles-outline', href: '/rewards/store' },
   ].filter(Boolean) as { key: string; label: string; icon: string; href: string }[];
   if (!links.length) return null;
   return (

@@ -352,7 +352,7 @@ export default function ExploreScreen() {
             onSearch={() => router.push('/explore/search' as any)}
             onProfile={() => requireAuth('profile') && router.push('/profile' as any)}
             onNotifications={() => requireAuth('notifications') && router.push('/notifications' as any)}
-            onWallet={() => router.push('/wallet/store' as any)}
+            onWallet={() => router.push('/earn' as any)}
             onSignUp={() => router.push('/auth/signup' as any)}
           />
         );
@@ -485,7 +485,7 @@ function TopBar({
         {signedIn && (balanceLoading ? (
           <Skeleton width={76} height={38} borderRadius={19} />
         ) : (
-          <TouchableOpacity style={[styles.coinChip, { backgroundColor: p.chip }]} onPress={onWallet} accessibilityRole="button" accessibilityLabel={`${coins} Diamonds. Buy Diamonds`}>
+          <TouchableOpacity style={[styles.coinChip, { backgroundColor: p.chip }]} onPress={onWallet} accessibilityRole="button" accessibilityLabel={`${coins} Diamonds. Earn Diamonds`}>
             <DiamondIcon size={14} />
             <Text style={[styles.coinText, { color: p.text }]}>{coins.toLocaleString()}</Text>
             <View style={styles.coinPlus}>

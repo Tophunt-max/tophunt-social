@@ -11,7 +11,7 @@ import { newRequestId, useGiftCatalog, useMonetizationConfig, useSendGift, type 
 /**
  * Pick a gift, see the exact cost, confirm, send.
  *
- * Coins are spent Diamonds first, then DP coin. The recipient gets the gift
+ * Paid in DP coin only (Diamonds are for contests). The recipient gets the gift
  * and a notification, not coins. The server re-checks the price, the balance
  * and the recipient; this sheet never decides any of them.
  */
@@ -51,10 +51,9 @@ export function GiftSheet({
   const total = selected ? selected.priceCoins * qty : 0;
   const bal = balancesOf(me as any);
   const live = hasLiveBalance(me);
-  const available = bal.dpcoin + bal.diamonds;
+  // Gifts are paid in DP coin only; Diamonds are for contest entry.
+  const available = bal.dpcoin;
   const maxQty = Math.max(1, Math.min(cfg.gifts.maxQuantity, selected ? Math.floor(cfg.gifts.maxCoinsPerSend / selected.priceCoins) || 1 : 1));
-  const fromDiamonds = Math.min(bal.diamonds, total);
-  const fromDp = total - fromDiamonds;
 
   const choose = (g: GiftView) => {
     setSelected(g);
@@ -127,7 +126,7 @@ export function GiftSheet({
                   onPress={() => choose(item)}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
-                  accessibilityLabel={`${item.name}, ${item.priceCoins} coins`}
+                  accessibilityLabel={`${item.name}, ${item.priceCoins} DP coin`}
                 >
                   {item.asset?.imageUrl ? (
                     <AppImage source={{ uri: item.asset.imageUrl }} style={styles.giftImg} contentFit="contain" />
@@ -135,7 +134,7 @@ export function GiftSheet({
                     <Text style={styles.emoji}>{item.asset?.emoji || '🎁'}</Text>
                   )}
                   <Text style={styles.giftName} numberOfLines={1}>{item.name}</Text>
-                  <Text style={styles.price}>{item.priceCoins} coins</Text>
+                  <Text style={styles.price}>{item.priceCoins} DP coin</Text>
                 </TouchableOpacity>
               );
             }}
@@ -143,7 +142,7 @@ export function GiftSheet({
 
           <View style={styles.footer}>
             <Text style={styles.balance}>
-              Balance: {live ? `${available} coins (${bal.diamonds} Diamond + ${bal.dpcoin} DP coin)` : '—'}
+              Balance: {live ? `${bal.dpcoin} DP coin` : '—'}
             </Text>
             {selected && (
               <View style={styles.qtyRow}>
@@ -158,10 +157,10 @@ export function GiftSheet({
             {selected && confirming ? (
               <View style={styles.confirm}>
                 <Text style={styles.confirmText}>
-                  Send {qty > 1 ? `${qty} × ` : ''}{selected.name} for {total} coins?
+                  Send {qty > 1 ? `${qty} × ` : ''}{selected.name} for {total} DP coin?
                 </Text>
                 <Text style={styles.muted}>
-                  {fromDiamonds} Diamond{fromDp > 0 ? ` + ${fromDp} DP coin` : ''}. {recipientName} gets the gift, not coins. Gifts can&apos;t be undone.
+                  Paid in DP coin. {recipientName} gets the gift, not coins. Gifts can&apos;t be undone.
                 </Text>
                 <View style={styles.row}>
                   <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={() => setConfirming(false)} disabled={send.isPending}>
@@ -180,7 +179,7 @@ export function GiftSheet({
                 accessibilityRole="button"
               >
                 <Text style={styles.btnText}>
-                  {!selected ? 'Choose a gift' : live && total > available ? 'Not enough coins' : `Continue · ${total} coins`}
+                  {!selected ? 'Choose a gift' : live && total > available ? 'Not enough DP coin' : `Continue · ${total} DP coin`}
                 </Text>
               </TouchableOpacity>
             )}

@@ -166,7 +166,7 @@ export default function VideoContestScreen() {
     // Entry fees are paid in Diamonds only (src/lib/balances.ts).
     const userCoins = balancesOf(profile as any).diamonds;
     if (userCoins < fee) {
-        Alert.alert("Diamond kam hain", `Entry ke liye ${fee} Diamond chahiye, aapke paas ${userCoins} hain. Diamond store se lo ya daily reward, tasks se kamao.`);
+        Alert.alert("Diamond kam hain", `Entry ke liye ${fee} Diamond chahiye, aapke paas ${userCoins} hain. Earn page par daily reward, tasks aur XP se free Diamond kamao.`);
         return;
     }
 

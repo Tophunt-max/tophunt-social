@@ -41,11 +41,10 @@ export default function StoreScreen() {
   const items = useMemo(() => q.data ?? [], [q.data]);
 
   const onBuy = async (item: StoreItemView) => {
-    const fromDiamonds = Math.min(bal.diamonds, item.priceCoins);
     const ok = await confirm({
       title: `Buy ${item.name}?`,
       message:
-        `${item.priceCoins} coins (${fromDiamonds} Diamond${item.priceCoins - fromDiamonds > 0 ? ` + ${item.priceCoins - fromDiamonds} DP coin` : ''}). ` +
+        `${item.priceCoins} DP coin. ` +
         `Yours permanently. ${item.refundable ? 'Refunds on request through support.' : 'Not refundable.'}`,
       confirmLabel: 'Buy',
     });
@@ -87,7 +86,7 @@ export default function StoreScreen() {
         </TouchableOpacity>
       </View>
       <Text style={[styles.balance, { color: p.sub }]}>
-        {live ? `Balance: ${bal.diamonds + bal.dpcoin} coins (${bal.diamonds} Diamond + ${bal.dpcoin} DP coin). Diamonds are used first.` : 'Balance: —'}
+        {live ? `Balance: ${bal.dpcoin} DP coin. Items are paid in DP coin.` : 'Balance: —'}
       </Text>
       {!cfg.store.enabled ? (
         <View style={{ margin: PAD }}><GamificationEmpty p={p} text="The store is closed right now." /></View>
@@ -103,7 +102,7 @@ export default function StoreScreen() {
           refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => q.refetch()} tintColor={BRAND} />}
           ListEmptyComponent={<View style={{ margin: PAD }}><GamificationEmpty p={p} text="Nothing for sale right now. Check back soon." /></View>}
           renderItem={({ item }) => (
-            <Row item={item} p={p} avatarUri={user?.photoURL ?? null} name={user?.displayName ?? null} busy={buying === item.itemId} affordable={!live || bal.diamonds + bal.dpcoin >= item.priceCoins} onBuy={() => void onBuy(item)} />
+            <Row item={item} p={p} avatarUri={user?.photoURL ?? null} name={user?.displayName ?? null} busy={buying === item.itemId} affordable={!live || bal.dpcoin >= item.priceCoins} onBuy={() => void onBuy(item)} />
           )}
         />
       )}
@@ -137,7 +136,7 @@ const Row = React.memo(function Row({
           accessibilityRole="button"
           accessibilityLabel={`Buy ${item.name} for ${item.priceCoins} coins`}
         >
-          {busy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.btnText, { color: '#FFF' }]}>{item.priceCoins} coins</Text>}
+          {busy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={[styles.btnText, { color: '#FFF' }]}>{item.priceCoins} DP coin</Text>}
         </TouchableOpacity>
       )}
     </View>

@@ -1,14 +1,14 @@
 /**
- * Coin value (₹ per Dpcoin) and the coin-package catalog, as the app shows them.
+ * Coin value (₹ per DP coin) as the app shows it.
  *
- * The rate is the admin's withdrawal conversion rate (App Control → Withdrawal
- * Settings → "Coin → ₹ rate"), the same number the server pays out at. Live: a
- * change arrives with the pushed app config.
+ * Set by the admin in Coin Economy → Coin value (`coinValues.dpCoinInr` in the
+ * public app config). It is what a DP coin is worth in the shop; nobody is paid
+ * ₹ for coins. Falls back to the legacy withdrawal rate for older servers.
  */
 
-/** ₹ per coin, or null when not configured / invalid (then nothing is shown). */
+/** ₹ per DP coin, or null when not configured / invalid (then nothing is shown). */
 export function coinRate(config: any): number | null {
-  const r = Number(config?.withdrawal?.conversionRate);
+  const r = Number(config?.coinValues?.dpCoinInr ?? config?.withdrawal?.conversionRate);
   return Number.isFinite(r) && r > 0 ? r : null;
 }
 

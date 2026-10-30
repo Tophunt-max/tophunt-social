@@ -55,7 +55,7 @@ export default function FeaturedGrid() {
         <TouchableOpacity 
             style={[styles.smallCard, { backgroundColor: '#FFB300' }]}
             activeOpacity={0.8}
-            onPress={() => router.push('/wallet/store' as any)}
+            onPress={() => router.push('/earn' as any)}
         >
              <View>
                 <Text style={styles.smallTitle}>Rewards</Text>

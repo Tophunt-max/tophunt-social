@@ -33,6 +33,8 @@ export interface MonetizationPublicConfig {
   sponsored: SlotRule & { enabled: boolean };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number };
   store: { enabled: boolean };
+  shop: { enabled: boolean };
+  earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
 }
 
 /** Everything off until the server says otherwise (older servers send nothing). */
@@ -52,6 +54,8 @@ const OFF: MonetizationPublicConfig = {
   sponsored: { enabled: false, firstPosition: 3, interval: 12, maxPerSession: 0 },
   gifts: { enabled: false, maxQuantity: 1, maxCoinsPerSend: 0 },
   store: { enabled: false },
+  shop: { enabled: false },
+  earning: { xpConversion: { enabled: false, xpPerDiamond: 100, maxDiamondsPerDay: 0 } },
 };
 
 export function useMonetizationConfig(): MonetizationPublicConfig {
@@ -59,7 +63,10 @@ export function useMonetizationConfig(): MonetizationPublicConfig {
   const m = (config as any)?.monetization;
   // Stable identity while the config is unchanged, so lists built from it don't re-render.
   return useMemo(
-    () => (m && typeof m === 'object' ? { ...OFF, ...m, ads: { ...OFF.ads, ...(m.ads ?? {}) } } : OFF),
+    () =>
+      m && typeof m === 'object'
+        ? { ...OFF, ...m, ads: { ...OFF.ads, ...(m.ads ?? {}) }, earning: { xpConversion: { ...OFF.earning.xpConversion, ...(m.earning?.xpConversion ?? {}) } } }
+        : OFF,
     [m],
   );
 }
