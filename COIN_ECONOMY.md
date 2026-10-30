@@ -17,11 +17,15 @@ Settings, Referrals, Deposits, Rewards) link there, so each setting has one edit
 - Admin wallet: choose DP coin or Diamond. Subtracting Diamonds takes only Diamonds.
 - Icon: `apps/expo/src/components/ui/DiamondIcon.tsx`, `apps/admin-panel/src/components/ui/DiamondIcon.tsx`, `diamond.svg` (expo `assets/svgs`, admin `public`).
 
-## Spending on gifts and the store
+## Closed loop (current model)
 
-Virtual gifts and digital store items spend coins **Diamonds first, then DP coin**, as one ledger row
-(`gift_send`, `store_purchase`; refunds `store_refund`) in the same batch as the balance change, so the ledger
-invariants below cover them. Recipients of gifts receive no coins. Details: `MONETIZATION.md`.
+Real-money deposits and withdrawals are retired (`lib/cashRetirement.ts`). Diamonds are earned for free and pay
+contest entries; DP coin is won and spent on gifts, digital items and the physical shop, **DP coin only**
+(`gift_send`, `store_purchase`, `shop_order`; refunds `store_refund`, `shop_refund`). XP can be turned into Diamonds
+(`xp_conversion`). An admin fresh start writes `economy_reset` rows. Every one of these is a ledger row in the same
+batch as the balance change, so the invariants below still hold. ₹ per coin: Coin Economy → Coin value
+(`coinPricing.dpCoinInr`, `coinPricing.diamondInr`). The tables below describe the earlier model where noted.
+Details: `MONETIZATION.md`.
 
 ## Concepts
 

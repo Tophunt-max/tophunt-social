@@ -1,5 +1,48 @@
 # Monetization
 
+## The economy is now closed-loop (no real money in or out)
+
+```
+Earning (free) → 💎 Diamond → contest entry → win → 🪙 DP coin → Shopping (gifts, digital items, physical products)
+```
+
+| | Before | Now |
+|---|---|---|
+| Deposits (₹ → Diamond) | Razorpay / manual UPI | **Retired** server-side. Diamonds are only earned |
+| Withdrawals (DP coin → ₹) | Admin paid out by bank/UPI | **Retired** server-side. DP coin is only spent in Shopping |
+| 💎 Diamond | Bought or earned | Earned only: check-in, tasks, referral, verification, level/season, verified ads, **XP → Diamond** |
+| 🪙 DP coin | Withdrawable | Spent only: gifts, digital items, **physical shop** |
+| ₹ value of coins | Buy rate / payout rate | Admin sets **1 DP coin = ₹X** and **1 Diamond = ₹Y** (Coin Economy → Coin value). Used to price products and for reports |
+
+- `lib/cashRetirement.ts`: `createOrder`, `requestDeposit`, `requestWithdrawal` are refused unless the deploy var
+  `CASH_FLOWS_RETIRED` is the literal `"false"` (wrangler.toml sets `"true"`). Admins cannot approve new withdrawals; they can
+  still reject (DP coin returned) and mark an already-approved payout paid. Razorpay webhook, `topup` and the reconcile
+  cron still credit an order that was paid before the switch, so nobody loses money.
+- Diamond → DP coin conversion does not exist, by design. XP → Diamond does (`lib/xpConversion.ts`): convertible XP is
+  `xp - xp_converted`, so XP, levels and leaderboards never go down. Daily cap, charged to the free-rewards budget.
+- **Fresh start** (`lib/economyReset.ts`, Coin Economy → Fresh start): superadmin + approval password + typed phrase
+  `RESET ECONOMY`. Rejects every open withdrawal (held DP coin refunded), then zeroes DP coin and/or Diamonds through
+  `economy_reset` ledger rows, in resumable chunks. Refuses while any manual deposit is pending (those users paid ₹).
+  **Not run automatically.** Take a D1 backup and get legal advice first: DP coin was withdrawable money.
+
+### Physical shop (`lib/shop.ts`, admin Shopping page, app `/shop`)
+
+- Admin creates products with a ₹ price, ₹ delivery, images, variants with stock and a return window. DP coin price per
+  unit = ceil((₹ price + ₹ delivery) ÷ ₹ per DP coin). Each order stores the coins charged and the rate used.
+- Checkout is one D1 batch: DP coin debit gated on every line still in stock at the same ₹ price, stock decrement,
+  order + items + history. No overselling, no double charge (`requestId`), price change refused (`price_changed`).
+- Lifecycle: placed → packed → shipped (tracking number required) → delivered → return requested → returned / declined.
+  The customer can cancel while `placed`; the admin can cancel until shipped. Cancel and accepted returns refund the DP
+  coin exactly once (`shop_refund`), cancel restocks, a return restocks if the admin ticks it. The customer gets a
+  notification at each step. Addresses are scrubbed on account deletion; an open order defers deletion.
+- Shipping is manual (the admin enters courier + tracking). No courier API, GST invoice or payment gateway is involved.
+
+### Spending rule changed
+
+Gifts, digital items and shop orders are paid in **DP coin only** (`lib/coinSpend.ts`, `dpcoin - locked_coins >= price`,
+`locked_delta = 0`). Diamonds pay contest entry fees only. The "Diamonds first" rule described further down was the
+first version and no longer applies.
+
 Ads, direct brand sponsorships, virtual gifts and the digital store. Admin: **Finance → Monetization**
 (`apps/admin-panel/src/pages/Monetization.tsx`). Coin balances, packages, budgets and ledger health stay in
 **Coin Economy** (`COIN_ECONOMY.md`).
