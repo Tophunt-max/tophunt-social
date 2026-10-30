@@ -47,6 +47,9 @@ import { restoreRenderCount, saveFeedSession, takeFeedSession, type FeedSessionS
 import { emitToast } from '@/src/lib/toastBridge';
 import { useAppActive, useReduceMotion } from '@/src/hooks/usePlaybackEnvironment';
 import { useIsFocused } from '@react-navigation/native';
+import { SponsoredCard } from '@/src/components/home/SponsoredCard';
+import { interleaveSponsored, isSponsoredRow } from '@/src/lib/adSlots';
+import { useMonetizationConfig, useSponsoredCampaigns } from '@/src/services/monetization';
 
 type FeedTab = 'foryou' | 'following';
 const PAGE_SIZE = 8;
@@ -102,6 +105,17 @@ export default function HomeScreen() {
   // Read by the (stable) viewability callback to find the card after the visible ones.
   const matchesRef = useRef<any[]>([]);
   matchesRef.current = matches;
+  // Direct sponsored campaigns, interleaved for DISPLAY only: `matches` (what is
+  // snapshotted, paged and undone) never contains them. For You only.
+  const monetization = useMonetizationConfig();
+  const sponsoredOn = monetization.sponsored.enabled && feedTab === 'foryou';
+  const { data: sponsoredCampaigns } = useSponsoredCampaigns(sponsoredOn);
+  const displayItems = useMemo(
+    () => interleaveSponsored(matches, sponsoredCampaigns ?? [], sponsoredOn ? monetization.sponsored : null),
+    [matches, sponsoredCampaigns, sponsoredOn, monetization.sponsored],
+  );
+  const displayRef = useRef<any[]>([]);
+  displayRef.current = displayItems;
   // Scroll restore (src/lib/feedSession.ts): where the reader is, and a position to go back to.
   const listRef = useRef<FlatList<any>>(null);
   const scrollOffsetRef = useRef(0);
@@ -136,12 +150,15 @@ export default function HomeScreen() {
   const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
   // Stable identity is required: FlatList throws if onViewableItemsChanged changes.
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { index: number | null; item: any }[] }) => {
-    const next = liveIdsFor(viewableItems, matchesRef.current);
+    // Indexes are into the DISPLAYED list (battles + sponsored rows).
+    const next = liveIdsFor(viewableItems, displayRef.current);
     setLiveIds((prev) => (sameIds(prev, next) ? prev : next));
     const visible = visibleIdsFor(viewableItems);
     setVisibleIds((prev) => (sameIds(prev, visible) ? prev : visible));
     let fresh = 0;
     for (const id of visible) {
+      // Sponsored rows count their own impressions (SponsoredCard); not battles.
+      if (id.startsWith('sp:')) continue;
       if (!impressedRef.current.has(id)) {
         impressedRef.current.add(id);
         fresh++;
@@ -455,7 +472,9 @@ export default function HomeScreen() {
   const screenFocused = useIsFocused();
   const appActive = useAppActive();
   const reduceMotion = useReduceMotion();
-  const renderItem = useCallback(({ item }: { item: any }) => (
+  const renderItem = useCallback(({ item }: { item: any }) => isSponsoredRow(item) ? (
+    <SponsoredCard row={item} isDark={isDark} visible={visibleIds.has(item.id) && screenFocused} countable={!isGuest} />
+  ) : (
     <PostCard
       item={item}
       isDark={isDark}
@@ -464,7 +483,7 @@ export default function HomeScreen() {
       liveActive={liveIds.has(item.id)}
       playActive={shouldAutoplay({ visible: visibleIds.has(item.id), screenFocused, appActive, reduceMotion })}
     />
-  ), [handleMatchEnded, handleNotInterested, isDark, liveIds, visibleIds, screenFocused, appActive, reduceMotion]);
+  ), [handleMatchEnded, handleNotInterested, isDark, liveIds, visibleIds, screenFocused, appActive, reduceMotion, isGuest]);
 
   const TabBar = (
     <View style={[styles.tabBar, { borderBottomColor: isDark ? '#23262D' : '#EEF0F4' }]}>
@@ -580,7 +599,7 @@ export default function HomeScreen() {
         }}
         scrollEventThrottle={100}
         onContentSizeChange={(_w, h) => applyRestore(h)}
-        data={isLoading ? [1, 2, 3] : matches}
+        data={isLoading ? [1, 2, 3] : displayItems}
         renderItem={({ item }) => isLoading ? <PostSkeleton isDark={isDark} /> : renderItem({ item })}
         // The live window lives outside `data`; FlatList re-renders rows only on a data
         // change unless told. PostCard is memoised, so only cards whose liveActive
@@ -590,7 +609,7 @@ export default function HomeScreen() {
         // PostCard seeds votes / counts / isLiked from `item` into useState once, so
         // reusing a card across the swap would keep the snapshot's stale numbers.
         // One remount per revalidation; network-sourced cards keep the plain id.
-        keyExtractor={(item, index) => (isLoading ? index.toString() : source === 'cache' ? `cached:${item.id}` : item.id)}
+        keyExtractor={(item: any, index) => (isLoading ? index.toString() : isSponsoredRow(item) ? item.id : source === 'cache' ? `cached:${item.id}` : item.id)}
         refreshControl={
             <RefreshControl
               refreshing={isRefreshing}

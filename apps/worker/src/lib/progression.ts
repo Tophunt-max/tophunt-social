@@ -125,13 +125,14 @@ export interface ProgressionConfig {
 /**
  * Defaults. XP amounts are the ones the app ALREADY paid before the ledger, so
  * turning this on changes nobody's earning rate except through the new daily
- * caps (vote: 20 votes' worth a day, entries: 6 a day).
+ * caps (vote: 20 votes' worth a day, entries: 6 a day, wins: 3 a day,
+ * losses: 3 a day, so a farmed battle stops paying XP quickly).
  */
 export const DEFAULT_RULES: Record<ConfigurableXpAction, XpRule> = {
   vote: { xp: 5, enabled: true, dailyCap: 100 },
   contest_entry: { xp: 10, enabled: true, dailyCap: 60 },
-  match_win: { xp: 100, enabled: true, dailyCap: null },
-  match_loss: { xp: 20, enabled: true, dailyCap: null },
+  match_win: { xp: 100, enabled: true, dailyCap: 300 },
+  match_loss: { xp: 20, enabled: true, dailyCap: 60 },
   daily_checkin: { xp: 50, enabled: true, dailyCap: null },
   hall_of_fame: { xp: 500, enabled: true, dailyCap: null },
   daily_task: { xp: 0, enabled: true, dailyCap: 100 },

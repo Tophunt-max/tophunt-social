@@ -197,7 +197,9 @@ describe('server gate', () => {
     const r = await api(env, 'u1', 'sendMessage');
     expect(r.status).toBe(412);
     expect(r.body.error.reason).toBe('feature_disabled');
-    expect(featureForAction('requestWithdrawal')).toBe('withdrawals');
+    expect(featureForAction('placeShopOrder')).toBe('shopping');
+    expect(featureForAction('convertXp')).toBe('earning');
+    expect(featureForAction('requestWithdrawal')).toBeNull(); // retired, refused by lib/cashRetirement.ts
   });
 
   it('a hard update refuses old NATIVE builds only', () => {

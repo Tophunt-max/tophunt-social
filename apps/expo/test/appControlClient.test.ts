@@ -125,8 +125,10 @@ describe('features', () => {
   it('maps routes to their feature switch', () => {
     expect(featureForRoute(['messages', 'chat', '[id]'])).toBe('chat');
     expect(featureForRoute(['contest', 'photo'])).toBe('contests');
-    expect(featureForRoute(['wallet', 'deposit'])).toBe('topups');
-    expect(featureForRoute(['wallet', 'withdraw'])).toBe('withdrawals');
+    expect(featureForRoute(['earn'])).toBe('earning');
+    expect(featureForRoute(['shop', 'cart'])).toBe('shopping');
+    expect(featureForRoute(['rewards', 'store'])).toBe('shopping');
+    expect(featureForRoute(['wallet', 'withdraw'])).toBeNull(); // retired screen, redirects to the shop
     expect(featureForRoute(['wallet'])).toBeNull();
     expect(featureForRoute(['home'])).toBeNull();
   });

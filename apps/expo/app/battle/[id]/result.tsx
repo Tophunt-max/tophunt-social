@@ -380,7 +380,7 @@ export default function BattleResult() {
           textColor={textColor}
           sub={sub}
           onClaim={() => router.push(`/prizes/${encodeURIComponent(id)}` as any)}
-          onWallet={() => router.push('/wallet' as any)}
+          onWallet={() => router.push('/shop' as any)}
         />
 
         <TouchableOpacity style={[styles.cta, styles.newBattle]} onPress={startBattle} accessibilityRole="button">
@@ -460,7 +460,7 @@ function PrizeSection(props: {
         </View>
         {isWinner ? (
           <TouchableOpacity style={[styles.cta, styles.prizeCta]} onPress={props.onWallet} accessibilityRole="button">
-            <Text style={styles.ctaText}>Wallet dekho</Text>
+            <Text style={styles.ctaText}>DP coin se Shopping karo</Text>
           </TouchableOpacity>
         ) : null}
       </View>

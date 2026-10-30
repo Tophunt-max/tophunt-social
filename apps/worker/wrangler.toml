@@ -411,6 +411,10 @@ ALLOWED_ORIGINS = "http://localhost:5000,http://localhost:8081,https://tophunt-s
 [vars]
 FIREBASE_PROJECT_ID = "tophuntdpcontest"
 
+# Real-money deposits and withdrawals are retired (src/lib/cashRetirement.ts).
+# Unset also means retired; only the literal "false" re-enables them.
+CASH_FLOWS_RETIRED = "true"
+
 # Capacity widget (admin dashboard) — account + D1 ids for the Cloudflare GraphQL
 # Analytics query that reports today's live rows_read / rows_written. NOT secret.
 # The read-only token is a SECRET, set separately with:

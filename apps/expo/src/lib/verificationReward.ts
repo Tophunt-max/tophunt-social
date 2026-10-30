@@ -29,12 +29,17 @@ export interface VerificationStatus {
   nextPromptAt: number | null;
   emailResendCooldownSec: number;
   smsResendCooldownSec: number;
+  /** Signup bonus anti-fraud: "pending" = an admin is checking it; "rejected" = not paid. */
+  reviewStatus?: 'none' | 'pending' | 'approved' | 'rejected';
+  /** When the bonus becomes payable (account age rule), or null. */
+  bonusAvailableAt?: number | null;
 }
 
 export interface RewardOutcome {
   credited: boolean;
   coins: number;
   reason: string;
+  availableAt?: number | null;
 }
 
 /**
@@ -44,7 +49,7 @@ export interface RewardOutcome {
  */
 export function rewardExplainer(s: Pick<VerificationStatus, 'registrationReward' | 'completionReward' | 'totalReward'>): string {
   if (!(s.registrationReward > 0)) {
-    return `Email aur mobile number dono verify karne par ${s.completionReward} Diamond milenge.`;
+    return `Signup bonus: email aur mobile number dono verify karne par ${s.completionReward} Diamond milenge.`;
   }
   return (
     `Register karne par ${s.registrationReward} Diamond milte hain. ` +
@@ -65,8 +70,8 @@ export function remainingMessage(s: Pick<VerificationStatus, 'remaining' | 'comp
   if (need.length === 2) return `Verify your email and mobile number to unlock ${s.completionReward} more Diamond.`;
   if (need[0] === 'phone') return `Email verified. Verify your mobile number too to unlock ${s.completionReward} more Diamond.`;
   if (need[0] === 'email') return `Mobile verified. Verify your email too to unlock ${s.completionReward} more Diamond.`;
-  // Both verified but not yet completed: the credit is pending on the server.
-  return 'Both verified — confirming your reward…';
+  // Both verified but not yet paid: the server is still checking (age / review).
+  return 'Both verified. Signup bonus check ho raha hai, jaldi milega.';
 }
 
 /** Has the reward programme anything to show this user at all? */
@@ -99,5 +104,17 @@ export function rewardOutcomeMessage(outcome: RewardOutcome | null | undefined):
   if (outcome.reason === 'identifier_already_rewarded') {
     return 'This email or mobile number has already earned the verification bonus on another account.';
   }
+  // Signup bonus anti-fraud (worker lib/verificationReward.ts).
+  if (outcome.reason === 'device_already_rewarded') return 'Is device par signup bonus pehle hi mil chuka hai.';
+  if (outcome.reason === 'disposable_email') return 'Temporary email par signup bonus nahi milta. Apna asli email lagao.';
+  if (outcome.reason === 'under_review') return 'Verification ho gaya! Aapka signup bonus check ho raha hai, approve hote hi mil jayega.';
+  if (outcome.reason === 'waiting') {
+    const when = outcome.availableAt ? new Date(outcome.availableAt) : null;
+    return when
+      ? `Verification ho gaya! Signup bonus ${when.toLocaleString()} ke baad apne aap mil jayega.`
+      : 'Verification ho gaya! Signup bonus thodi der mein apne aap mil jayega.';
+  }
+  if (outcome.reason === 'rejected') return 'Is account ko signup bonus nahi mil sakta.';
+  if (outcome.reason === 'free_rewards_exhausted') return 'Aaj ke free rewards khatam ho gaye hain. Bonus baad mein mil jayega.';
   return null;
 }

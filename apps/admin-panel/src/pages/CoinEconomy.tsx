@@ -29,25 +29,27 @@ import { SegTabs } from "@/components/finance/bits";
 import { PageHeader, exportCsv, fmtDateTime, fmtNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { CoinPricingCard, RewardLockingCard, WithdrawalCard } from "@/components/coin/CoinCards";
+import { RewardLockingCard } from "@/components/coin/CoinCards";
 import { CoinAlertsCard, FreeRewardsBudgetCard } from "@/components/coin/AlertCards";
-import { AdsRewardCard, DailyLoginCard, DailyTasksCard, HallOfFameCard, RewardStatsCard, VerificationRewardCard } from "@/components/coin/EarnCards";
+import { AdsRewardCard, DailyLoginCard, DailyTasksCard, HallOfFameCard, RewardStatsCard, SignupBonusReviewCard, VerificationRewardCard } from "@/components/coin/EarnCards";
 import { ProgramSettings } from "@/pages/Referrals";
-import { GatewayConfig } from "@/pages/Deposits";
-import CoinPackages from "@/pages/CoinPackages";
 import Transactions from "@/pages/Transactions";
+import { CoinValuesCard, ShoppingSummaryCard } from "@/components/coin/ClosedLoopCards";
+import { CoinsLoop, DiamondTab, DpCoinTab, XpTab } from "@/components/coin/ThreeCoins";
+import { EconomyGuardrailsCard, EconomyHealthCard } from "@/components/coin/EconomyGuardrails";
+import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
 
 /**
  * Coin Economy — the one place for everything coins: where every coin came from,
  * where it went, and every setting that creates, sells or pays out coins.
  *
- *   Overview   supply (withdrawable vs locked), ₹ liability, flows by source, the
- *              platform's own side, reconciliation checks, pending queues
- *   Earn       every free-coin source (verification, referral, daily login,
- *              daily tasks, rewarded ads, Hall of Fame) + the play-only switch
- *   Buy        buy rate, payment gateway, coin packages and their P&L
- *   Contests   per-contest P&L: entry fees, prizes, refunds, subsidy, fees kept
- *   Cash out   withdrawal rules, fee, emergency freeze
+ *   Overview   the three coins at a glance, supply, flows, reconciliation, queues
+ *   ⚡ XP       XP earned / converted, XP → Diamond rate and daily cap
+ *   💎 Diamond  every earning source and its settings (all pay Diamonds), and
+ *              contests: Diamond entry fees → DP coin prizes (per-contest P&L)
+ *   🪙 DP coin  won vs spent, where it can be spent (shop, digital items, gifts),
+ *              the monthly shop budget (the spend limit) and shop fraud rules
+ *   Coin value ₹ per DP coin / Diamond (prices shop products)
  *   Budgets    one promo budget per offer, approval password
  *   Ledger     every coin transaction, and one user's full statement
  *   Health     money-integrity checks
@@ -57,16 +59,19 @@ import Transactions from "@/pages/Transactions";
  *
  * Worker: lib/coinEconomy.ts, lib/promoBudget.ts, lib/approvalPassword.ts.
  */
+// Three coins: ⚡ XP → (convert) → 💎 Diamond → (contest entry, win) → 🪙 DP coin → Shopping.
 const TABS = [
   { key: "overview", label: "Overview" },
-  { key: "earn", label: "Earn" },
-  { key: "buy", label: "Buy" },
-  { key: "contests", label: "Contests" },
-  { key: "cashout", label: "Cash out" },
+  { key: "xp", label: "⚡ XP" },
+  { key: "diamond", label: "💎 Diamond" },
+  { key: "dpcoin", label: "🪙 DP coin" },
+  { key: "values", label: "Coin value (₹)" },
   { key: "budgets", label: "Budgets" },
   { key: "ledger", label: "Ledger" },
   { key: "health", label: "Health" },
 ];
+/** Old tab links keep working. */
+const TAB_ALIASES: Record<string, string> = { earn: "diamond", contests: "diamond", shopping: "dpcoin" };
 
 const KIND_LABEL: Record<PromoBudgetKind, string> = {
   package_bonus: "Package bonus",
@@ -99,26 +104,39 @@ const field =
   "w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
 export default function CoinEconomy() {
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(() => {
+    const raw = new URLSearchParams(window.location.search).get("tab") ?? "";
+    const t = TAB_ALIASES[raw] ?? raw;
+    return TABS.some((x) => x.key === t) ? t : "overview";
+  });
   return (
     <div>
       <PageHeader
         title="Coin Economy"
-        subtitle="Har DP coin aur Diamond ka hisab: kahan se aaya, kahan gaya, aur platform ne apni taraf se kitna diya."
+        subtitle="⚡ XP → 💎 Diamond (contest entry) → jeet → 🪙 DP coin (saari Shopping: digital items, gifts, physical products). Asli ₹ na aata hai na jaata hai; ₹ sirf coin ki value hai."
       />
       <div className="overflow-x-auto">
         <SegTabs tab={tab} setTab={setTab} tabs={TABS} />
       </div>
       {tab === "overview" && (
         <div className="space-y-6">
+          <CoinsLoop />
+          <div className="grid gap-6 lg:grid-cols-2 items-start">
+            <EconomyHealthCard />
+            <EconomyGuardrailsCard />
+          </div>
           <PendingQueues />
           <Overview />
         </div>
       )}
-      {tab === "earn" && <EarnTab />}
-      {tab === "buy" && <BuyTab />}
-      {tab === "contests" && <ContestsPnl />}
-      {tab === "cashout" && <CashOutTab />}
+      {tab === "xp" && <XpTab />}
+      {tab === "diamond" && (
+        <DiamondTab contests={<ContestsPnl />}>
+          <EarnTab />
+        </DiamondTab>
+      )}
+      {tab === "dpcoin" && <DpCoinTab />}
+      {tab === "values" && <ValuesTab />}
       {tab === "budgets" && <Budgets />}
       {tab === "ledger" && (
         <div className="space-y-8">
@@ -145,7 +163,6 @@ function useAppConfig() {
     onSuccess: () => {
       toast.success("Saved — users ke app me turant live");
       qc.invalidateQueries({ queryKey: ["app-settings"] });
-      qc.invalidateQueries({ queryKey: ["coin-packages"] });
     },
     onError: (e) => toast.error(describeError(e)),
   });
@@ -155,8 +172,8 @@ function useAppConfig() {
 function PendingQueues() {
   const { data } = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const items = [
-    { label: "Deposits approve karne hain", n: Number((data as any)?.pendingDeposits ?? 0), href: "/deposits" },
-    { label: "Withdrawals pending", n: Number((data as any)?.pendingWithdrawals ?? 0), href: "/withdrawals" },
+    { label: "Shop orders fraud review", n: Number((data as any)?.pendingShopReview ?? 0), href: "/shopping?tab=orders" },
+    { label: "Shop orders pack / ship karne hain", n: Number((data as any)?.pendingShopOrders ?? 0), href: "/shopping?tab=orders" },
     { label: "Prize claims pending", n: Number((data as any)?.pendingPrizeClaims ?? 0), href: "/prize-claims" },
   ];
   return (
@@ -216,6 +233,7 @@ function EarnTab() {
         <FreeRewardsBudgetCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
         <CoinAlertsCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
         <VerificationRewardCard data={data} />
+        <SignupBonusReviewCard />
         <DailyLoginCard rewards={rewards.data} />
         <DailyTasksCard rewards={rewards.data} />
         <RewardStatsCard />
@@ -232,51 +250,15 @@ function EarnTab() {
   );
 }
 
-// ─── Buy ─────────────────────────────────────────────────────────────────────
+// ─── Coin value (₹) ──────────────────────────────────────────────────────────
 
-function BuyTab() {
+function ValuesTab() {
   const { data, isLoading, save } = useAppConfig();
-  if (isLoading || !data) return <p className="text-sm text-muted-foreground py-10 text-center">Loading…</p>;
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        <CoinPricingCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
-        <GatewayConfig />
-      </div>
-      <CoinPackages />
-      <div>
-        <p className="font-bold text-foreground mb-3">Package P&amp;L</p>
-        <PackagesPnl />
-      </div>
-    </div>
-  );
-}
-
-// ─── Cash out ────────────────────────────────────────────────────────────────
-
-function CashOutTab() {
-  const { data, isLoading, save } = useAppConfig();
-  const { confirm } = useConfirm();
-  const eco = useQuery({ queryKey: ["coin-economy"], queryFn: () => api.coinEconomy() });
   if (isLoading || !data) return <p className="text-sm text-muted-foreground py-10 text-center">Loading…</p>;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-      <WithdrawalCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} confirm={confirm} />
-      <Card title="Payout ka hisab">
-        {eco.data ? (
-          <>
-            <Row label="DP coin (withdraw ho sakte)" value={fmtNumber(eco.data.supply.withdrawable)} />
-            <Row label="Liability (agar sab nikal lein)" value={inr(eco.data.supply.liabilityInr)} />
-            <Row label="Payout bheja" value={inr(eco.data.cash.paidOutInr)} />
-            <Row label="Payout baaki (pending/approved)" value={inr(eco.data.cash.pendingOutInr)} strong />
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        )}
-        <p className="mt-3 text-sm">
-          <Link href="/withdrawals" className="font-semibold text-primary">Withdrawal requests approve / pay karo →</Link>
-        </p>
-      </Card>
+      <CoinValuesCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
+      <ShoppingSummaryCard />
     </div>
   );
 }
@@ -291,10 +273,7 @@ function HealthTab() {
     ? [
         { label: "Ledger drift (balance ≠ ledger)", n: m.ledgerDrift.count },
         { label: "Negative balances", n: m.negativeBalances.count },
-        { label: "Paid but not credited orders", n: m.strandedPaidOrders },
-        { label: "Approved deposits not credited", n: m.strandedApprovedDeposits },
         { label: "Clawback shortfalls", n: m.clawbackShortfalls.count },
-        { label: "Withdrawal ledger gaps", n: m.withdrawalLedgerGaps?.count },
         { label: "Diamond drift", n: (m.lockedDrift?.count ?? 0) + (m.lockedDrift?.overBalance ?? 0) },
         { label: "Stuck promo reservations", n: m.staleReservations },
       ]
@@ -420,13 +399,13 @@ function OverviewBody({ data }: { data: CoinEconomyData }) {
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard icon={Coins} label="Total (DP coin + Diamond)" value={fmtNumber(data.supply.total)} gradient="gradient-purple" />
-        <StatCard icon={Wallet} label="DP coin (withdraw ho sakte)" value={fmtNumber(data.supply.withdrawable)} gradient="gradient-green" />
+        <StatCard icon={Wallet} label="DP coin (shopping ke liye)" value={fmtNumber(data.supply.withdrawable)} gradient="gradient-green" />
         <StatCard icon={DiamondIcon as any} label="Diamond (sirf contest entry)" value={fmtNumber(data.supply.locked)} gradient="gradient-cyan" />
-        <StatCard icon={Scale} label={`Liability: DP coin × ₹${fmtNumber(data.payoutRate)}`} value={inr(data.supply.liabilityInr)} gradient="gradient-red" />
+        <StatCard icon={Scale} label={`Shop value: DP coin × ₹${fmtNumber(data.payoutRate)}`} value={inr(data.supply.liabilityInr)} gradient="gradient-red" />
       </div>
       {data.house && data.house.total ? (
         <p className="text-xs text-muted-foreground">
-          Superadmin ke {fmtNumber(data.house.total - data.house.locked)} DP coin aur {fmtNumber(data.house.locked)} Diamond (platform ke apne) is hisab me nahi gine gaye. Unka withdrawal nahi hota.
+          Superadmin ke {fmtNumber(data.house.total - data.house.locked)} DP coin aur {fmtNumber(data.house.locked)} Diamond (platform ke apne) is hisab me nahi gine gaye.
         </p>
       ) : null}
 
@@ -438,29 +417,19 @@ function OverviewBody({ data }: { data: CoinEconomyData }) {
             title="💎 Diamond: kahan se aaye, kahan gaye"
             flow={data.diamondFlow}
             labels={data.categories}
-            note="Diamond sirf contest entry me lagte hain. Kabhi withdraw nahi hote."
+            note="Diamond earning se aate hain aur sirf contest entry me lagte hain."
           />
           <FlowCard
             title="🪙 DP coin: kahan se aaye, kahan gaye"
             flow={data.dpFlow}
             labels={data.categories}
-            note="DP coin hi asli ₹ liability hain: contest prize se bante hain, withdrawal me jaate hain."
+            note="DP coin contest jeet kar milte hain aur Shopping (gifts, digital items, products) me kharch hote hain."
           />
         </div>
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Paisa (₹)">
-          <Row label="Users ne diya (payments)" value={inr(data.cash.paidInInr)} />
-          <Row label="Refund kiya" value={inr(data.cash.refundedInr)} />
-          <Row label="Payout bheja (withdrawals paid)" value={inr(data.cash.paidOutInr)} />
-          <Row label="Payout baaki (pending/approved)" value={inr(data.cash.pendingOutInr)} />
-          <Row
-            label="Net (aaya − refund − bheja − baaki − liability)"
-            value={inr(data.cash.paidInInr - data.cash.refundedInr - data.cash.paidOutInr - data.cash.pendingOutInr - data.supply.liabilityInr)}
-            strong
-          />
-        </Card>
+        <ClosedLoopTrend days={30} title="Earning vs Shopping (30 din)" />
         <Card title="Platform ka hisab (budget se diya / entry se rakha)">
           {platformRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">Abhi koi entry nahi.</p>
@@ -737,7 +706,6 @@ function BudgetDialog({ budget, onClose, onDone }: { budget?: PromoBudget; onClo
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Kis ke liye</label>
             <select className={field} value={form.kind} onChange={(e) => set("kind", e.target.value)}>
-              <option value="package_bonus">Diamond package ka bonus Diamond</option>
               <option value="contest_prize">Contest prize jo pot se zyada ho (DP coin, asli ₹)</option>
               <option value="product_prize">Product prize ki DP coin value (sirf admin ko dikhegi)</option>
               <option value="free_rewards">Free rewards ki limit (daily login, ads, tasks)</option>
@@ -1052,44 +1020,6 @@ function ContestsPnl() {
     </div>
   );
 }
-
-function PackagesPnl() {
-  const { data = [], isLoading, error } = useQuery({ queryKey: ["coin-economy-packages"], queryFn: api.coinEconomyPackages });
-  return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <CsvButton onClick={() => exportCsv("package-pnl.csv", data, ["id", "name", "purchases", "inr", "refundedInr", "baseCoins", "bonusCoinsGiven", "promoBonusGiven"])} />
-      </div>
-      {error ? <ErrorBox error={error} /> : null}
-      <Table
-        loading={isLoading}
-        data={data}
-        keyFn={(p) => p.id}
-        empty="Abhi koi purchase nahi"
-        columns={[
-          {
-            key: "n",
-            header: "Package",
-            render: (p) => (
-              <span>
-                <span className="font-medium text-foreground">{p.name ?? p.id}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {fmtNumber(p.coins)} + {fmtNumber(p.bonusCoins)} bonus{p.budgetId ? " · promo budget" : ""}{p.active ? "" : " · hidden"}
-                </span>
-              </span>
-            ),
-          },
-          { key: "c", header: "Purchases", className: "text-right", render: (p) => fmtNumber(p.purchases) },
-          { key: "i", header: "₹ aaya", className: "text-right", render: (p) => <span>{inr(p.inr)}{p.refundedInr ? <span className="block text-xs text-red-600">−{inr(p.refundedInr)} refund</span> : null}</span> },
-          { key: "b", header: "💎 Diamond (paid)", className: "text-right", render: (p) => fmtNumber(p.baseCoins) },
-          { key: "x", header: "💎 Bonus Diamond", className: "text-right", render: (p) => <span>{fmtNumber(p.bonusCoinsGiven)}{p.promoBonusGiven ? <span className="block text-xs text-purple-600">{fmtNumber(p.promoBonusGiven)} budget se</span> : null}</span> },
-        ]}
-      />
-    </div>
-  );
-}
-
-// ─── User statement ──────────────────────────────────────────────────────────
 
 function UserStatementView() {
   const [q, setQ] = useState("");

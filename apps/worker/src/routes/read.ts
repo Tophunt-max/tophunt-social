@@ -58,6 +58,11 @@ import { recordBlogView } from "../lib/viewCounter";
 import { kickSettlementIfDue } from "../lib/settleDue";
 import { publicAppConfig } from "../lib/appControl";
 import { listPublicCoinPackages } from "../lib/coinCatalog";
+import { liveCampaigns } from "../lib/sponsored";
+import { cashFlowsRetired } from "../lib/cashRetirement";
+import { profileGiftSummary } from "../lib/gifts";
+import { adsAllowedIn, parseMonetizationConfig } from "../lib/monetizationConfig";
+import { contestPrizeCoins, economyConfig } from "../lib/economyLimits";
 
 const APP_CONFIG_EDGE_TTL_SEC = 30;
 import { getLiveTally, getViewerVote } from "../lib/voteCounter";
@@ -1112,11 +1117,19 @@ async function withPromoPrizeAvailability<T extends Record<string, any>>(env: En
     const target = isProduct ? Number(r.prizeCostCoins || 0) : Number(r.rewardCoins || 0);
     return { pot, isProduct, extra: Math.max(0, target - pot) };
   };
+  // Unlinked coin contests: show the prize a new match will actually snapshot
+  // (capped at the pot, minus the platform fee; lib/economyLimits.ts).
+  const feePct = economyConfig(await getAppConfig(env)).contestPlatformFeePercent;
+  const realPrize = (r: T): T => {
+    if (r.prizeType === "product") return r;
+    const prize = contestPrizeCoins(r, feePct);
+    return prize === Number(r.rewardCoins || 0) ? r : { ...r, rewardCoins: prize };
+  };
   const linked = rows.filter((r) => r.subsidyBudgetId && need(r).extra > 0);
-  if (!linked.length) return rows;
+  if (!linked.length) return rows.map((r) => (r.subsidyBudgetId ? r : realPrize(r)));
   const room = await budgetsWithRoom(env, linked.map((r) => String(r.subsidyBudgetId)));
   return rows.map((r) => {
-    if (!r.subsidyBudgetId) return r;
+    if (!r.subsidyBudgetId) return realPrize(r);
     const { pot, isProduct, extra } = need(r);
     if (extra <= 0) return r;
     // Coin prize above the pot, funded right now: the card can say so.
@@ -2366,9 +2379,59 @@ readRoute.get("/transactions", requireAuth, async (c) => {
 // browsers, phones or the edge: an admin's price edit must show at once (it is
 // also pushed live — lib/coinCatalog.ts).
 readRoute.get("/coin-packages", async (c) => {
-  const res = c.json(await listPublicCoinPackages(c.env));
+  // Coin purchases are retired (lib/cashRetirement.ts): nothing is for sale.
+  const res = c.json(cashFlowsRetired(c.env) ? [] : await listPublicCoinPackages(c.env));
   res.headers.set("Cache-Control", "no-store, max-age=0");
   return res;
+});
+
+// ================= MONETIZATION (lib/sponsored.ts, lib/gifts.ts) =================
+
+/** Caller's country from Cloudflare, upper-case, or null. */
+const callerCountry = (c: any): string | null => {
+  const cc = (c.req.raw as any)?.cf?.country ?? c.req.header("CF-IPCountry");
+  return typeof cc === "string" && /^[A-Z]{2}$/i.test(cc) ? cc.toUpperCase() : null;
+};
+
+/**
+ * Whether ads may be shown to this caller (regional switch). Uncached: the
+ * answer depends on the caller's country and costs one settings read.
+ */
+readRoute.get("/ad-eligibility", async (c) => {
+  const cfg = parseMonetizationConfig(await getAppConfig(c.env));
+  const country = callerCountry(c);
+  const res = c.json({ country, adsAllowed: adsAllowedIn(cfg, country) });
+  res.headers.set("Cache-Control", "private, max-age=300");
+  return res;
+});
+
+/**
+ * Live sponsored campaigns for a placement. Identical for every viewer except
+ * the regional switch, so it is cached per placement + allowed/blocked.
+ */
+readRoute.get("/sponsored", optionalAuth, guestReadLimit, async (c) => {
+  const placement = c.req.query("placement") === "feed" ? "feed" : null;
+  if (!placement) throw httpsError("invalid-argument", "placement must be 'feed'.");
+  const cfg = parseMonetizationConfig(await getAppConfig(c.env));
+  if (!cfg.sponsored.enabled || !adsAllowedIn(cfg, callerCountry(c))) return c.json({ campaigns: [] });
+  const data = await cachedJson(c, {
+    key: `sponsored:${placement}`,
+    edgeTtlSec: 60,
+    load: async () => ({ campaigns: await liveCampaigns(c.env, placement) }),
+  });
+  return c.json(data);
+});
+
+/** Public gift wall for a profile: totals only, no sender identities. */
+readRoute.get("/users/:id/gift-wall", optionalAuth, guestReadLimit, async (c) => {
+  const id = c.req.param("id");
+  if (!id || id.length > 128) throw httpsError("invalid-argument", "Invalid user id.");
+  const data = await cachedJson(c, {
+    key: `giftwall:${id}`,
+    edgeTtlSec: 60,
+    load: () => profileGiftSummary(c.env, id),
+  });
+  return c.json(data);
 });
 
 // ================= USERS =================

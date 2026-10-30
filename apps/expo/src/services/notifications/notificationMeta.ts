@@ -127,6 +127,15 @@ export function getNotificationDestination(
     case "achievement" as NotificationType:
       return "/rewards/achievements";
 
+    // Shop order updates (worker routes/adminMonetization.ts) open that order.
+    case "shop_order" as NotificationType:
+      return targetId ? `/shop/order/${encodeURIComponent(targetId)}` : "/shop/orders";
+    // A gift received opens the gift history; a verified ad reward opens the wallet.
+    case "gift" as NotificationType:
+      return "/wallet/gifts";
+    case "ad_reward" as NotificationType:
+      return "/wallet";
+
     case "admin":
       return null; // url already handled above; nothing else to open
 
@@ -275,6 +284,7 @@ export const CATEGORY_BY_TYPE: Record<string, NotificationCategory> = {
   daily_reward: "wallet",
   daily_task: "wallet",
   ad_reward: "wallet",
+  shop_order: "wallet",
   // admin
   admin: "admin",
   report_update: "admin",
@@ -324,8 +334,8 @@ export const NOTIFICATION_CATEGORIES: CategoryMeta[] = [
   },
   {
     key: "wallet",
-    title: "Diamond, DP coin & payouts",
-    description: "Top-ups, withdrawals, rewards and refunds",
+    title: "Diamond, DP coin & orders",
+    description: "Rewards, shop orders and refunds",
     icon: "wallet-outline",
   },
   {

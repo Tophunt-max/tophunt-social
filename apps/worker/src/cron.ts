@@ -30,7 +30,8 @@ import { reconcileReferrals } from "./lib/referralProgram";
 import { newId, now } from "./lib/ids";
 import { getSettings as getGamification } from "./lib/gamification";
 import { runSeoAudit } from "./lib/seoAudit";
-import { getSeoAudit, invalidateSetting } from "./lib/settings";
+import { getAppConfig, getSeoAudit, invalidateSetting } from "./lib/settings";
+import { freeRewardBudgetStatements, freeRewardsBudgetId, notifyBudgetExhausted } from "./lib/promoBudget";
 import { publish } from "./lib/publish";
 
 export type Match = typeof schema.contestMatches.$inferSelect;
@@ -703,6 +704,9 @@ export async function monthlyHallOfFame(env: Env, period = previousMonthPeriod()
   let skipped = 0;
   const failures: string[] = [];
   const progression = await getProgression(env);
+  // Hall of Fame Diamonds are a free reward, so they come out of the same
+  // free-rewards budget as check-in, tasks and ads (lib/promoBudget.ts).
+  const hofBudgetId = freeRewardsBudgetId(await getAppConfig(env));
 
   for (const winner of winners) {
     const { uid, rank, reward } = winner;
@@ -743,7 +747,20 @@ export async function monthlyHallOfFame(env: Env, period = previousMonthPeriod()
       // this arm the ledger insert would still apply while the balance update
       // matched no row — drift in the other direction.
       const payeeGate = `EXISTS (SELECT 1 FROM users WHERE uid = ?)`;
-      const gates = `${claimGate} AND ${notPaidGate} AND ${payeeGate}`;
+      const baseGates = `${claimGate} AND ${notPaidGate} AND ${payeeGate}`;
+      const baseArgs = [claimKey, nonce, ledgerId, uid];
+      const budget = freeRewardBudgetStatements(env, {
+        budgetId: hofBudgetId,
+        refId: ledgerId,
+        uid,
+        coins: reward,
+        ts,
+        label: `Hall of Fame #${rank} (${period})`,
+        gate: baseGates,
+        gateArgs: baseArgs,
+      });
+      const gates = `${baseGates} AND ${budget.heldGate}`;
+      const gateArgs = [...baseArgs, ...budget.heldArgs];
       // The reward is Diamonds (users.locked_coins, lib/diamonds.ts): a free
       // platform reward, so it pays entry fees and is never withdrawn. As DP
       // coins it was a monthly cash-out for anyone farming wins between their
@@ -752,11 +769,12 @@ export async function monthlyHallOfFame(env: Env, period = previousMonthPeriod()
         env.DB.prepare(
           `INSERT OR IGNORE INTO idempotency_keys (key, nonce, scope, created_at) VALUES (?, ?, ?, ?)`,
         ).bind(claimKey, nonce, "hall_of_fame", ts),
+        ...budget.reserve,
         env.DB.prepare(
           `UPDATE users
               SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, badges = ?, monthly_wins = 0, updated_at = ?
             WHERE uid = ? AND ${gates}`,
-        ).bind(reward, reward, JSON.stringify(currentBadges), ts, uid, claimKey, nonce, ledgerId, uid),
+        ).bind(reward, reward, JSON.stringify(currentBadges), ts, uid, ...gateArgs),
         // Hall of Fame XP (lib/xpService.ts), same gates, before the ledger insert.
         ...xpAwardStatements(env, progression, {
           uid,
@@ -766,7 +784,7 @@ export async function monthlyHallOfFame(env: Env, period = previousMonthPeriod()
           sourceId: period,
           ts,
           gate: gates,
-          gateArgs: [claimKey, nonce, ledgerId, uid],
+          gateArgs,
         }).statements,
         env.DB.prepare(
           `INSERT OR IGNORE INTO coin_transactions
@@ -780,14 +798,31 @@ export async function monthlyHallOfFame(env: Env, period = previousMonthPeriod()
           `Hall of Fame rank #${rank} (${period}) · Diamond`,
           ts,
           reward,
-          claimKey,
-          nonce,
-          ledgerId,
-          uid,
+          ...gateArgs,
         ),
+        ...budget.finalize,
+        // Budget had no room: free the claim so a re-run after the admin raises
+        // the budget can pay this winner.
+        ...(budget.reservationId
+          ? [env.DB.prepare(`DELETE FROM idempotency_keys WHERE key = ? AND nonce = ? AND NOT EXISTS (SELECT 1 FROM promo_reservations WHERE id = ?)`)
+              .bind(claimKey, nonce, budget.reservationId)]
+          : []),
       ]);
 
-      if (Number(results[1]?.meta?.changes || 0) > 0) {
+      const creditIndex = 1 + budget.reserve.length;
+      if (Number(results[creditIndex]?.meta?.changes || 0) === 0 && budget.reservationId) {
+        const held = await env.DB.prepare(`SELECT 1 AS x FROM promo_reservations WHERE id = ?`).bind(budget.reservationId).first();
+        const done = await env.DB.prepare(`SELECT 1 AS x FROM coin_transactions WHERE id = ?`).bind(ledgerId).first();
+        if (!held && !done) {
+          // Not paid and not owed-but-forgotten: the budget is out. Fail the run
+          // (cron alert) and keep the leaderboard so a re-run can settle it.
+          console.error("[monthlyHallOfFame] free-rewards budget exhausted", period, uid);
+          await notifyBudgetExhausted(env, hofBudgetId!, "Free rewards (Hall of Fame)").catch(() => {});
+          failures.push(uid);
+          continue;
+        }
+      }
+      if (Number(results[creditIndex]?.meta?.changes || 0) > 0) {
         paid++;
         await createNotification(env, uid, {
           title: "Monthly Hall of Fame! 🏆",

@@ -1064,6 +1064,13 @@ describe('deletion completeness across the whole schema', () => {
     withdrawals: 'financial record',
     promo_reservations: 'financial record (promo budget hold)',
     platform_ledger: 'financial record (platform side of promo coins and fees)',
+    // Coin spends (migration 0072): the other half of the coin ledger rows, and
+    // the refund replay guard. No personal data beyond the anonymised uid.
+    store_purchases: 'financial record (coin spend + refund guard)',
+    gift_transactions: 'financial record (coin spend; counterparty gift history)',
+    // Migration 0073. Orders keep the DP coin ledger counterpart; the address is scrubbed.
+    shop_orders: 'financial record (delivery address scrubbed)',
+    xp_conversions: 'financial record (Diamond ledger counterpart)',
     // Other people's contests depend on these. The participant SNAPSHOT inside
     // contest_matches is anonymised and its media destroyed (tested above).
     votes: "other users' contest integrity",

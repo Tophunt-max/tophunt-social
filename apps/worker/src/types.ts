@@ -142,6 +142,8 @@ export interface Env {
    * Leave unset in production until an ad-network SSV callback exists.
    */
   ALLOW_UNVERIFIED_AD_REWARDS?: string;
+  /** Anything but "false" = real-money deposits/withdrawals retired (lib/cashRetirement.ts). */
+  CASH_FLOWS_RETIRED?: string;
 
   // Capacity monitoring (admin dashboard "Database Capacity" widget). All
   // OPTIONAL and fail-open: without them the widget still shows table growth +

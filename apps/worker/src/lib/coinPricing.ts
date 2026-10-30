@@ -196,4 +196,39 @@ export function validateCoinPricingPatch(cp: any): void {
     if (Math.round(r * 10000) !== Number((r * 10000).toFixed(4))) throw httpsError("invalid-argument", "Buy rate: at most 4 decimal places.");
     cp.buyRate = r;
   }
+  for (const k of ["dpCoinInr", "diamondInr"] as const) {
+    if (cp[k] === undefined) continue;
+    const r = Number(cp[k]);
+    const label = k === "dpCoinInr" ? "DP coin value" : "Diamond value";
+    if (!Number.isFinite(r) || r <= 0 || r > MAX_RATE) throw httpsError("invalid-argument", `${label} must be more than ₹0 and at most ₹${MAX_RATE}.`);
+    if (Math.round(r * 10000) !== Number((r * 10000).toFixed(4))) throw httpsError("invalid-argument", `${label}: at most 4 decimal places.`);
+    cp[k] = r;
+  }
+}
+
+/**
+ * What one coin is worth in ₹, set by the admin (Coin Economy → Values).
+ *
+ *   dpCoinInr   prices physical products: coins = ceil(₹ price ÷ dpCoinInr),
+ *               and values DP coin liability.
+ *   diamondInr  values Diamonds given away as rewards (cost reporting only;
+ *               Diamonds are never sold or cashed out).
+ *
+ * Falls back to the legacy payout / buy rates so a config saved before this
+ * existed keeps its meaning. A changed value applies to NEW orders only: every
+ * order stores the rate it was priced at.
+ */
+export function coinValuesFromConfig(cfg: any): { dpCoinInr: number; diamondInr: number } {
+  const dp = validRate(cfg?.coinPricing?.dpCoinInr) ?? coinValueFromConfig(cfg) ?? 1;
+  const diamond = validRate(cfg?.coinPricing?.diamondInr) ?? validRate(cfg?.coinPricing?.buyRate) ?? dp;
+  return { dpCoinInr: dp, diamondInr: diamond };
+}
+
+/** DP coins for a ₹ amount given in paise, rounded UP (the platform never undercharges). */
+export function dpCoinsForPaise(paise: number, dpCoinInr: number): number {
+  if (!(paise > 0)) return 0;
+  // Both sides in 1/10000 ₹ (rates carry at most 4 decimals), integer ceil.
+  const unit = Math.max(1, Math.round(dpCoinInr * 10000));
+  const amount = Math.round(paise) * 100;
+  return Math.floor((amount + unit - 1) / unit);
 }

@@ -117,12 +117,17 @@ import { fetchExternalImage } from "../lib/safeFetch";
 import { enforceAdminIdempotency } from "../lib/idempotency";
 import { registerIntegrationRoutes } from "./integrations";
 import { registerGamificationRoutes } from "./adminGamification";
+import { registerMonetizationRoutes } from "./adminMonetization";
+import { CASH_RETIRED_REASON, cashFlowsRetired } from "../lib/cashRetirement";
 import { assertIdentifiersAvailable, recordUsernameTransition, validateUsername } from "../lib/userIdentifiers";
 import { revokeAllSessions } from "../lib/sessionRevocation";
 import {
   getVerificationRewardConfig,
   validateVerificationRewardConfig,
   verificationRewardStats,
+  listSignupBonusReviews,
+  reviewSignupBonus,
+  RISK_FLAG_LABELS as SIGNUP_BONUS_FLAG_LABELS,
 } from "../lib/verificationReward";
 import { computeDeepHealth } from "../lib/health";
 import { computeMoneyHealth } from "../lib/moneyHealth";
@@ -288,6 +293,8 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["POST", /^\/gamification\/users\/[^/]+\/achievements\/[^/]+$/],
   ["POST", /^\/gamification\/users\/[^/]+\/inventory\/[^/]+\/(revoke|restore)$/],
   ["PUT", /^\/gamification\/(achievements|catalog)\/[^/]+$/],
+  // Monetization writes: prices, refunds, revenue imports, campaign approval.
+  ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop)(\/.*)?$/],
 ];
 export function isSensitiveAdminRoute(method: string, path: string): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
@@ -357,6 +364,9 @@ registerIntegrationRoutes(adminRoute, requireFullAdmin);
 // ---- gamification (routes/adminGamification.ts) ----
 registerGamificationRoutes(adminRoute, requireFullAdmin, isFullAdmin, logAudit);
 
+// ---- monetization: ads, sponsorships, gifts, store (routes/adminMonetization.ts) ----
+registerMonetizationRoutes(adminRoute, requireFullAdmin, logAudit);
+
 // ---- app settings (settings/appConfig) ----
 
 /**
@@ -398,7 +408,7 @@ function mergeSettings(existing: any, patch: any): any {
  * invariant and a negative one would DEBIT a new user. Validated here at the point
  * of entry; getRewardSettings() floors again as a second line of defence.
  */
-const REWARD_SETTINGS_COIN_KEYS = ["referralBonus"] as const;
+const REWARD_SETTINGS_COIN_KEYS = ["referralBonus", "signupBonus"] as const;
 
 adminRoute.get("/app-settings", async (c) => c.json((await getAppConfig(c.env)) || {}));
 
@@ -464,12 +474,8 @@ adminRoute.post("/app-settings", async (c) => {
   const body = withoutApproval(rawBody);
   const rewardSettings = body?.rewardSettings;
   if (rewardSettings && typeof rewardSettings === "object") {
-    // The signup bonus no longer exists (coins for joining come only from a
-    // referral, lib/referralProgram.ts). A save that still sets one is refused, so
-    // an old admin client cannot believe it configured a bonus.
-    if (rewardSettings.signupBonus !== undefined && rewardSettings.signupBonus !== null && Number(rewardSettings.signupBonus) !== 0) {
-      throw httpsError("invalid-argument", "Signup bonus has been removed. Use the Referral program to reward new users.");
-    }
+    // The signup bonus is paid only after verification (lib/verificationReward.ts);
+    // its amount is mirrored into verificationReward below.
     for (const key of REWARD_SETTINGS_COIN_KEYS) {
       if (rewardSettings[key] === undefined || rewardSettings[key] === null) continue;
       const n = Number(rewardSettings[key]);
@@ -521,6 +527,21 @@ adminRoute.post("/app-settings", async (c) => {
     // Never client-supplied; stamped below.
     delete body._version;
     delete body.version;
+  }
+  // Signup bonus: `rewardSettings.signupBonus` (the admin's name for it) and
+  // `verificationReward.completionReward` (what the credit pays, snapshotted at
+  // signup) are the same number. Whichever one a save sets, the other follows,
+  // and the combined cap grows to fit.
+  if (body && typeof body === "object") {
+    const rs = body.rewardSettings;
+    const vr = body.verificationReward;
+    const reg = Number(vr?.registrationReward ?? existing.verificationReward?.registrationReward ?? 0) || 0;
+    if (rs && typeof rs === "object" && rs.signupBonus !== undefined && rs.signupBonus !== null) {
+      const bonus = Number(rs.signupBonus);
+      body.verificationReward = { ...(vr || {}), completionReward: bonus, maxTotalReward: Math.max(Number(vr?.maxTotalReward ?? 0) || 0, reg + bonus) };
+    } else if (vr && typeof vr === "object" && vr.completionReward !== undefined) {
+      body.rewardSettings = { ...(rs || {}), signupBonus: vr.completionReward };
+    }
   }
   if (body?.verificationReward !== undefined) {
     // Validated against the MERGED result, so a partial patch (one field) is
@@ -592,6 +613,28 @@ adminRoute.get("/verification-reward", async (c) => {
   requireFullAdmin(c);
   const [config, stats] = await Promise.all([getVerificationRewardConfig(c.env), verificationRewardStats(c.env)]);
   return c.json({ config, stats });
+});
+
+// ---- signup bonus anti-fraud: held bonuses and the admin decision ----
+adminRoute.get("/verification-reward/reviews", async (c) => {
+  requireFullAdmin(c);
+  const q = c.req.query("status");
+  const status = q === "approved" || q === "rejected" ? q : "pending";
+  return c.json({ status, flagLabels: SIGNUP_BONUS_FLAG_LABELS, items: await listSignupBonusReviews(c.env, status) });
+});
+
+adminRoute.post("/verification-reward/reviews/:uid", async (c) => {
+  requireFullAdmin(c);
+  const uid = c.req.param("uid");
+  if (!uid || uid.length > 128) throw httpsError("invalid-argument", "Invalid user id.");
+  const body = await c.req.json<any>().catch(() => ({}));
+  const decision = body?.decision;
+  if (decision !== "approve" && decision !== "reject") throw httpsError("invalid-argument", "decision must be 'approve' or 'reject'.");
+  const note = typeof body?.note === "string" ? body.note.trim() : "";
+  if (decision === "reject" && note.length < 3) throw httpsError("invalid-argument", "Reject karne ki wajah likho (kam se kam 3 akshar).");
+  const out = await reviewSignupBonus(c.env, uid, decision, c.get("user")?.uid ?? "server", note || null);
+  await logAudit(c, `signup-bonus.${decision}`, "user", uid, { note: note || null, result: out.result?.reason ?? out.status });
+  return c.json(out);
 });
 
 // ---- legal documents (settings/appConfig.legalContent) ----
@@ -2638,7 +2681,14 @@ adminRoute.get("/overview", async (c) => {
         .where(notInArray(schema.prizeClaims.status, ["delivered", "cancelled"]))
         .get()
     )?.v ?? 0;
-  const overview = { users, posts, reports, support, revenue, revenueInr, activeMatches, liveContests, pendingWithdrawals, pendingDeposits, pendingPrizeClaims };
+  // Shop orders waiting for the admin to pack / ship / answer a return (lib/shop.ts).
+  const pendingShopOrders = Number(
+    (await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM shop_orders WHERE status IN ('placed', 'packed', 'return_requested')`).first<{ n: number }>())?.n ?? 0,
+  );
+  const pendingShopReview = Number(
+    (await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM shop_orders WHERE review_status = 'pending'`).first<{ n: number }>())?.n ?? 0,
+  );
+  const overview = { users, posts, reports, support, revenue, revenueInr, activeMatches, liveContests, pendingWithdrawals, pendingDeposits, pendingPrizeClaims, pendingShopOrders, pendingShopReview };
   memoPut(OVERVIEW_MEMO_KEY, overview, 30);
   return c.json(withViewerRole(c, overview));
 });
@@ -4248,6 +4298,12 @@ adminRoute.patch("/withdrawals/:id", async (c) => {
 
   const status = action === "approve" ? "approved" : action === "paid" ? "paid" : "rejected";
   const fromStatus = w.status;
+  // Withdrawals are retired (lib/cashRetirement.ts): nothing new is approved.
+  // Rejecting (refunds the held DP coin) and marking an ALREADY approved payout
+  // as paid (the money may already have been sent) stay possible.
+  if (action === "approve" && cashFlowsRetired(c.env)) {
+    throw httpsError("failed-precondition", "Withdrawals are retired. Reject this request to return the DP coin.", CASH_RETIRED_REASON);
+  }
 
   if (!(WITHDRAWAL_TRANSITIONS[fromStatus] ?? []).includes(status))
     throw httpsError(

@@ -28,16 +28,17 @@ const FEATURES: { key: string; label: string }[] = [
   { key: "chat", label: "Chat" },
   { key: "stories", label: "Stories" },
   { key: "posts", label: "Posts" },
-  { key: "topups", label: "💎 Diamond store / top-up" },
-  { key: "withdrawals", label: "Withdrawals" },
+  { key: "earning", label: "💎 Earning (check-in, tasks, ads, XP → Diamond)" },
+  { key: "shopping", label: "🛍️ Shopping (shop orders, digital items, gifts)" },
 ];
 
 const PRESETS: { label: string; hint: string; features: Record<string, boolean> }[] = [
-  { label: "💸 Payments band", hint: "Top-up + withdrawal off", features: { topups: false, withdrawals: false } },
+  { label: "🛍️ Shopping band", hint: "New orders, digital items and gifts off", features: { shopping: false } },
+  { label: "💎 Earning band", hint: "Free Diamond claims off", features: { earning: false } },
   {
     label: "📖 Read-only mode",
     hint: "Sab dekh sakte hain, kuch naya post/join/chat nahi",
-    features: { contests: false, chat: false, stories: false, posts: false, topups: false, withdrawals: false },
+    features: { contests: false, chat: false, stories: false, posts: false, earning: false, shopping: false },
   },
   { label: "✅ Sab on", hint: "Saare features wapas on", features: Object.fromEntries(FEATURES.map((f) => [f.key, true])) },
 ];
@@ -103,9 +104,9 @@ export default function AppControl() {
         <FeaturesCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} confirm={confirm} />
         <Card icon={Coins} title="DP coin aur Diamond settings" tint="text-pink-500">
           <p className="text-sm text-muted-foreground">
-            Withdrawal rules (DP coin), emergency payout freeze, Diamond ka Buy rate aur free rewards ka "Diamond ya DP coin" switch ab{" "}
+            Coin ki ₹ value, earning ke rewards aur XP → Diamond{" "}
             <Link href="/coin-economy" className="font-semibold text-foreground underline">Coin Economy</Link> mein hain
-            (Cash out, Buy aur Earn tabs). Har DP coin aur Diamond setting ki ek hi jagah.
+            (Earning aur Coin value tabs). Products, orders aur fraud rules: <Link href="/shopping" className="font-semibold text-foreground underline">Shopping</Link>.
           </p>
         </Card>
       </div>

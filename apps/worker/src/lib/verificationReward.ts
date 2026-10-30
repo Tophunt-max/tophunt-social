@@ -30,6 +30,8 @@ import { httpsError } from "./http";
 import { getAppConfig } from "./settings";
 import { lockedPart } from "./rewardLocking";
 import { lookupAuthUser } from "./firebaseAdmin";
+import { isDisposableEmail } from "./disposableEmail";
+import { FREE_REWARDS_EXHAUSTED, freeRewardBudgetStatements, freeRewardsBudgetId, notifyBudgetExhausted } from "./promoBudget";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_COINS = 1_000_000;
@@ -46,6 +48,19 @@ export interface VerificationRewardConfig {
   maxReminders: number;
   emailResendCooldownSec: number;
   smsResendCooldownSec: number;
+  // ---- Signup bonus anti-fraud (see tryCreditVerificationReward) ----
+  /** Wait: the bonus is paid only once the account is this old (0 = at once). */
+  minAccountAgeHours: number;
+  /** Hard rule: one signup bonus per device, ever. */
+  oneBonusPerDevice: boolean;
+  /** Review hold: no device id reported by the app. */
+  requireDevice: boolean;
+  /** Review hold: this many bonuses already paid to one IP in 24 hours (0 = off). */
+  maxBonusesPerIpPerDay: number;
+  /** Review hold: more accounts than this on one device (0 = off). */
+  maxAccountsPerDevice: number;
+  /** Review hold: every bonus waits for an admin. */
+  reviewAll: boolean;
 }
 
 export const VERIFICATION_REWARD_DEFAULTS: VerificationRewardConfig = {
@@ -60,6 +75,13 @@ export const VERIFICATION_REWARD_DEFAULTS: VerificationRewardConfig = {
   maxReminders: 5,
   emailResendCooldownSec: 60,
   smsResendCooldownSec: 60,
+  // Code defaults keep older behaviour; production values are set in App Control.
+  minAccountAgeHours: 0,
+  oneBonusPerDevice: true,
+  requireDevice: false,
+  maxBonusesPerIpPerDay: 0,
+  maxAccountsPerDevice: 0,
+  reviewAll: false,
 };
 
 /** Bounds for every numeric setting: [min, max]. Shared by parse and admin validation. */
@@ -73,8 +95,11 @@ const NUMERIC_BOUNDS: Record<string, [number, number]> = {
   // Never below the OTP flow's built-in 60s: a config can slow resends, not speed them up.
   emailResendCooldownSec: [60, 3600],
   smsResendCooldownSec: [60, 3600],
+  minAccountAgeHours: [0, 720],
+  maxBonusesPerIpPerDay: [0, 1000],
+  maxAccountsPerDevice: [0, 50],
 };
-const BOOLEAN_KEYS = ["enabled", "requireEmail", "requirePhone"] as const;
+const BOOLEAN_KEYS = ["enabled", "requireEmail", "requirePhone", "oneBonusPerDevice", "requireDevice", "reviewAll"] as const;
 
 /** Stable ledger identifiers. The registration id is the historical signup_bonus id. */
 export const registrationLedgerId = (uid: string) => `signup_bonus:${uid}`;
@@ -203,24 +228,67 @@ export type CompletionReason =
   | "email_unverified"
   | "phone_unverified"
   | "account_restricted"
-  | "identifier_already_rewarded";
+  | "identifier_already_rewarded"
+  // Signup bonus anti-fraud:
+  | "device_already_rewarded"
+  | "disposable_email"
+  | "waiting"
+  | "under_review"
+  | "rejected"
+  | typeof FREE_REWARDS_EXHAUSTED;
 
 export interface CompletionResult {
   credited: boolean;
   reason: CompletionReason;
   coins: number;
+  /** For `waiting`: when the bonus becomes payable. */
+  availableAt?: number;
 }
 
+/** Signals from the request that triggered the attempt (never trusted as proof). */
+export interface ClaimContext {
+  deviceId?: string | null;
+  ip?: string | null;
+  /** Admin approval: skips the review holds and the waiting period, never the hard rules. */
+  force?: boolean;
+}
+
+export const RISK_FLAG_LABELS: Record<string, string> = {
+  no_device: "App ne device id nahi bheja",
+  ip_burst: "Ek hi IP se 24 ghante mein kai signup bonus",
+  shared_device: "Ek device par kai accounts",
+  manual_review: "Har signup bonus admin check karta hai",
+};
+
+async function sha256(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+const cleanDevice = (v: unknown) => (typeof v === "string" && v.trim() && v.length <= 128 ? v.trim() : null);
+const cleanIp = (v: unknown) => (typeof v === "string" && v.trim() && v !== "unknown" && v.length <= 64 ? v.trim() : null);
+
 /**
- * Credit the completion bonus if — and only if — the account is eligible right
- * now. Safe to call from anywhere, any number of times, concurrently.
+ * Credit the signup bonus if, and only if, the account is eligible right now.
+ * Safe to call from anywhere, any number of times, concurrently.
+ *
+ * Paid only after email AND mobile are verified by server-side proof, and only
+ * when the anti-fraud rules pass:
+ *   hard rules (never paid): the email / mobile / device already earned a bonus on
+ *     another account; a disposable email; a blocked or inactive account;
+ *   wait: the account is younger than `minAccountAgeHours` (the hourly cron pays it);
+ *   review hold (admin approves or rejects): no device id, too many bonuses to one
+ *     IP in 24h, a device shared by many accounts, or `reviewAll`.
+ * The bonus is Diamonds and is charged to the free-rewards budget when one is set.
  */
-export async function tryCreditVerificationReward(env: Env, uid: string): Promise<CompletionResult> {
+export async function tryCreditVerificationReward(env: Env, uid: string, ctx: ClaimContext = {}): Promise<CompletionResult> {
   const db = getDb(env);
+  const appCfg = await getAppConfig(env);
   const cfg = await getVerificationRewardConfig(env);
   const enrolment = await db.select().from(schema.verificationRewards).where(eq(schema.verificationRewards.uid, uid)).get();
   if (!enrolment) return { credited: false, reason: "not_enrolled", coins: 0 };
-  if (enrolment.completedAt) return { credited: false, reason: "already_completed", coins: 0 };
+  if (enrolment.completedAt) {
+    return { credited: false, reason: enrolment.reviewStatus === "rejected" ? "rejected" : "already_completed", coins: 0 };
+  }
   // Disabling the feature PAUSES completion credits (e.g. during a fraud
   // incident); the snapshot promise is kept and honoured once re-enabled.
   if (!cfg.enabled) return { credited: false, reason: "disabled", coins: 0 };
@@ -233,6 +301,8 @@ export async function tryCreditVerificationReward(env: Env, uid: string): Promis
       phoneVerified: schema.users.phoneVerified,
       status: schema.users.status,
       isBlocked: schema.users.isBlocked,
+      createdAt: schema.users.createdAt,
+      deviceId: schema.users.deviceId,
     })
     .from(schema.users)
     .where(eq(schema.users.uid, uid))
@@ -244,17 +314,81 @@ export async function tryCreditVerificationReward(env: Env, uid: string): Promis
   if (cfg.requireEmail && !(user.emailVerified && user.email)) return { credited: false, reason: "email_unverified", coins: 0 };
   if (cfg.requirePhone && !(user.phoneVerified && user.phone)) return { credited: false, reason: "phone_unverified", coins: 0 };
 
-  const amount = Math.max(0, Math.floor(Number(enrolment.completionReward) || 0));
   const ts = Date.now();
-  const ledgerId = completionLedgerId(uid);
-  // Free reward: play-only unless App Control says otherwise (lib/rewardLocking.ts).
-  const lockedAmount = lockedPart(await getAppConfig(env), "verification", amount);
 
-  // Identifier hashes for the one-bonus-per-identifier rule, computed from the
+  // ---- Fraud signals. Remember the device and IP the app reported (hashed). ----
+  const rawDevice = cleanDevice(ctx.deviceId);
+  if (rawDevice && !user.deviceId) {
+    await env.DB.prepare(`UPDATE users SET device_id = ? WHERE uid = ? AND (device_id IS NULL OR device_id = '')`).bind(rawDevice, uid).run();
+    user.deviceId = rawDevice;
+  }
+  const deviceForHash = rawDevice ?? cleanDevice(user.deviceId);
+  const deviceHash = deviceForHash ? await sha256(`device:${deviceForHash}`) : enrolment.deviceHash ?? null;
+  const rawIp = cleanIp(ctx.ip);
+  const ipHash = rawIp ? await sha256(`ip:${rawIp}`) : enrolment.ipHash ?? null;
+  if (deviceHash !== (enrolment.deviceHash ?? null) || ipHash !== (enrolment.ipHash ?? null)) {
+    await env.DB.prepare(`UPDATE verification_rewards SET device_hash = ?, ip_hash = ?, updated_at = ? WHERE uid = ? AND completed_at IS NULL`)
+      .bind(deviceHash, ipHash, ts, uid).run();
+  }
+
+  // Hard rules: never paid.
+  if (user.email && isDisposableEmail(user.email)) return { credited: false, reason: "disposable_email", coins: 0 };
+  if (cfg.oneBonusPerDevice && deviceHash) {
+    const used = await env.DB.prepare(`SELECT 1 AS x FROM verification_reward_claims WHERE identifier_hash = ? AND uid != ?`).bind(deviceHash, uid).first();
+    if (used) return { credited: false, reason: "device_already_rewarded", coins: 0 };
+  }
+
+  const review = enrolment.reviewStatus ?? "none";
+  if (review === "rejected") return { credited: false, reason: "rejected", coins: 0 };
+  const approved = ctx.force === true || review === "approved";
+  if (!approved) {
+    // Only an admin clears a hold.
+    if (review === "pending") return { credited: false, reason: "under_review", coins: 0 };
+    // Wait: the hourly cron (sweepSignupBonuses) pays it once the account is old enough.
+    const availableAt = Number(user.createdAt || 0) + cfg.minAccountAgeHours * 3_600_000;
+    if (cfg.minAccountAgeHours > 0 && ts < availableAt) return { credited: false, reason: "waiting", coins: 0, availableAt };
+    const flags: string[] = [];
+    if (cfg.reviewAll) flags.push("manual_review");
+    if (cfg.requireDevice && !deviceHash) flags.push("no_device");
+    if (cfg.maxBonusesPerIpPerDay > 0 && ipHash) {
+      const r = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM verification_rewards
+          WHERE ip_hash = ? AND uid != ? AND completed_at >= ? AND completion_ledger_id IS NOT NULL`,
+      ).bind(ipHash, uid, ts - DAY_MS).first<{ n: number }>();
+      if (Number(r?.n ?? 0) >= cfg.maxBonusesPerIpPerDay) flags.push("ip_burst");
+    }
+    if (cfg.maxAccountsPerDevice > 0 && user.deviceId) {
+      const r = await env.DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE device_id = ?`).bind(user.deviceId).first<{ n: number }>();
+      if (Number(r?.n ?? 0) > cfg.maxAccountsPerDevice) flags.push("shared_device");
+    }
+    if (flags.length) {
+      const held = await env.DB.prepare(
+        `UPDATE verification_rewards SET review_status = 'pending', risk_flags = ?, updated_at = ?
+          WHERE uid = ? AND completed_at IS NULL AND review_status = 'none'`,
+      ).bind(JSON.stringify(flags), ts, uid).run();
+      if (Number(held.meta?.changes || 0) > 0) {
+        console.warn(JSON.stringify({ event: "signup_bonus.review_hold", uid, flags }));
+        await env.DB.prepare(
+          `INSERT INTO admin_notifications (id, title, message, link, created_at)
+           SELECT ?, 'Signup bonus review', ?, '/coin-economy?tab=diamond', ?
+            WHERE NOT EXISTS (SELECT 1 FROM admin_notifications WHERE title = 'Signup bonus review' AND created_at >= ?)`,
+        ).bind(crypto.randomUUID(), `Signup bonus held for review (${flags.join(", ")}).`, ts, ts - 3_600_000).run().catch(() => {});
+      }
+      return { credited: false, reason: "under_review", coins: 0 };
+    }
+  }
+
+  const amount = Math.max(0, Math.floor(Number(enrolment.completionReward) || 0));
+  const ledgerId = completionLedgerId(uid);
+  // Free reward: always Diamonds (lib/rewardLocking.ts).
+  const lockedAmount = lockedPart(appCfg, "verification", amount);
+
+  // One bonus per email, per mobile and per device: hashes computed from the
   // values just read; the batch re-checks that the row still holds exactly these.
-  const hashes: Array<{ hash: string; kind: "email" | "phone" }> = [];
+  const hashes: Array<{ hash: string; kind: "email" | "phone" | "device" }> = [];
   if (cfg.requireEmail) hashes.push({ hash: await identifierHash("email", user.email!), kind: "email" });
   if (cfg.requirePhone) hashes.push({ hash: await identifierHash("phone", user.phone!), kind: "phone" });
+  if (cfg.oneBonusPerDevice && deviceHash) hashes.push({ hash: deviceHash, kind: "device" });
 
   const userConds: string[] = ["uid = ?", "COALESCE(status, 'active') = 'active'", "COALESCE(is_blocked, 0) = 0"];
   const userBinds: unknown[] = [uid];
@@ -269,37 +403,42 @@ export async function tryCreditVerificationReward(env: Env, uid: string): Promis
   const hashPlaceholders = hashes.map(() => "?").join(", ");
   const gate =
     `EXISTS (SELECT 1 FROM users WHERE ${userConds.join(" AND ")})` +
-    ` AND EXISTS (SELECT 1 FROM verification_rewards WHERE uid = ? AND completed_at IS NULL)` +
+    ` AND EXISTS (SELECT 1 FROM verification_rewards WHERE uid = ? AND completed_at IS NULL AND review_status IN ('none', 'approved'))` +
     (hashes.length
       ? ` AND NOT EXISTS (SELECT 1 FROM verification_reward_claims WHERE identifier_hash IN (${hashPlaceholders}) AND uid != ?)`
       : "");
   const gateBinds = [...userBinds, uid, ...(hashes.length ? [...hashes.map((h) => h.hash), uid] : [])];
   const credited = `EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)`;
+  // Charged to the free-rewards budget like every other free Diamond.
+  const budget = freeRewardBudgetStatements(env, {
+    budgetId: freeRewardsBudgetId(appCfg),
+    refId: ledgerId,
+    uid,
+    coins: amount,
+    ts,
+    label: "Signup bonus",
+    gate: `${gate} AND NOT ${credited}`,
+    gateArgs: [...gateBinds, ledgerId],
+  });
+  const payGate = `${gate} AND ${budget.heldGate}`;
+  const payBinds = [...gateBinds, ...budget.heldArgs];
 
   const statements: D1PreparedStatement[] = [];
   if (amount > 0) {
     statements.push(
+      ...budget.reserve,
       // Balance first, gated on the ledger row being absent; the ledger insert
       // shares the gate, so both apply or neither does.
       env.DB.prepare(
         `UPDATE users SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, updated_at = ?
-          WHERE uid = ? AND ${gate} AND NOT ${credited}`,
-      ).bind(amount, lockedAmount, ts, uid, ...gateBinds, ledgerId),
+          WHERE uid = ? AND ${payGate} AND NOT ${credited}`,
+      ).bind(amount, lockedAmount, ts, uid, ...payBinds, ledgerId),
       env.DB.prepare(
         `INSERT OR IGNORE INTO coin_transactions (id, uid, amount, type, description, created_at, locked_delta)
          SELECT ?, ?, ?, '${COMPLETION_LEDGER_TYPE}', ?, ?, ?
-          WHERE ${gate}`,
-      ).bind(
-        ledgerId,
-        uid,
-        amount,
-        lockedAmount > 0
-          ? "Bonus for verifying your email and mobile number (Diamond)"
-          : "Bonus for verifying your email and mobile number",
-        ts,
-        lockedAmount,
-        ...gateBinds,
-      ),
+          WHERE ${payGate}`,
+      ).bind(ledgerId, uid, amount, "Signup bonus: email and mobile verified (Diamond)", ts, lockedAmount, ...payBinds),
+      ...budget.finalize,
     );
   }
   // From here on, "done" is: ledger row present (or nothing to pay) AND still open.
@@ -324,7 +463,7 @@ export async function tryCreditVerificationReward(env: Env, uid: string): Promis
 
   const results = await env.DB.batch(statements);
   const completedNow = Number(results[results.length - 1]?.meta?.changes || 0) > 0;
-  const paid = amount > 0 ? Number(results[0]?.meta?.changes || 0) > 0 : false;
+  const paid = amount > 0 ? Number(results[budget.reserve.length]?.meta?.changes || 0) > 0 : false;
 
   if (completedNow) {
     console.log(JSON.stringify({ event: "verification_reward.completed", uid, coins: paid ? amount : 0 }));
@@ -340,15 +479,118 @@ export async function tryCreditVerificationReward(env: Env, uid: string): Promis
   }
   if (hashes.length) {
     const taken = await env.DB.prepare(
-      `SELECT 1 AS x FROM verification_reward_claims WHERE identifier_hash IN (${hashPlaceholders}) AND uid != ? LIMIT 1`,
-    ).bind(...hashes.map((h) => h.hash), uid).first();
+      `SELECT kind FROM verification_reward_claims WHERE identifier_hash IN (${hashPlaceholders}) AND uid != ? LIMIT 1`,
+    ).bind(...hashes.map((h) => h.hash), uid).first<{ kind: string }>();
     if (taken) {
-      console.warn(JSON.stringify({ event: "verification_reward.identifier_reused", uid }));
-      return { credited: false, reason: "identifier_already_rewarded", coins: 0 };
+      console.warn(JSON.stringify({ event: "verification_reward.identifier_reused", uid, kind: taken.kind }));
+      return { credited: false, reason: taken.kind === "device" ? "device_already_rewarded" : "identifier_already_rewarded", coins: 0 };
+    }
+  }
+  if (budget.reservationId) {
+    const r = await env.DB.prepare(`SELECT 1 AS x FROM promo_reservations WHERE id = ?`).bind(budget.reservationId).first();
+    if (!r) {
+      await notifyBudgetExhausted(env, String(freeRewardsBudgetId(appCfg)), "Free rewards (signup bonus)").catch(() => {});
+      return { credited: false, reason: FREE_REWARDS_EXHAUSTED, coins: 0 };
     }
   }
   // The row changed between the read and the batch (e.g. an identifier changed).
   return { credited: false, reason: cfg.requireEmail ? "email_unverified" : "phone_unverified", coins: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Admin review + cron sweep
+// ---------------------------------------------------------------------------
+
+/** Held signup bonuses (or recent decisions), newest first. */
+export async function listSignupBonusReviews(env: Env, status: "pending" | "approved" | "rejected" = "pending", limit = 100) {
+  const rows = await env.DB.prepare(
+    `SELECT vr.uid, vr.completion_reward AS coins, vr.review_status AS status, vr.risk_flags, vr.created_at,
+            vr.reviewed_by, vr.reviewed_at, vr.review_note, vr.completed_at,
+            u.username, u.full_name, u.email, u.phone, u.device_id, u.created_at AS account_created_at,
+            (SELECT COUNT(*) FROM users d WHERE d.device_id = u.device_id AND u.device_id IS NOT NULL AND u.device_id <> '') AS device_accounts,
+            (SELECT COUNT(*) FROM verification_rewards i WHERE i.ip_hash = vr.ip_hash AND vr.ip_hash IS NOT NULL) AS ip_accounts
+       FROM verification_rewards vr LEFT JOIN users u ON u.uid = vr.uid
+      WHERE vr.review_status = ?
+      ORDER BY COALESCE(vr.reviewed_at, vr.updated_at) DESC LIMIT ?`,
+  ).bind(status, Math.min(Math.max(limit, 1), 500)).all<any>();
+  return (rows.results ?? []).map((r) => ({
+    uid: r.uid,
+    username: r.username,
+    fullName: r.full_name,
+    email: maskEmail(r.email),
+    phone: maskPhone(r.phone),
+    coins: Number(r.coins || 0),
+    status: r.status,
+    flags: (() => {
+      try {
+        return JSON.parse(r.risk_flags || "[]") as string[];
+      } catch {
+        return [];
+      }
+    })(),
+    deviceAccounts: Number(r.device_accounts || 0),
+    ipAccounts: Number(r.ip_accounts || 0),
+    accountCreatedAt: r.account_created_at,
+    reviewedBy: r.reviewed_by,
+    reviewedAt: r.reviewed_at,
+    note: r.review_note,
+    paid: !!r.completed_at && r.status === "approved",
+  }));
+}
+
+/**
+ * Admin decision on a held bonus. Approve clears the hold and pays at once (the
+ * hard rules still apply); reject closes the enrolment without paying.
+ */
+export async function reviewSignupBonus(
+  env: Env,
+  uid: string,
+  decision: "approve" | "reject",
+  adminUid: string,
+  note: string | null,
+): Promise<{ status: string; result?: CompletionResult }> {
+  const ts = Date.now();
+  const cleanNote = note ? String(note).slice(0, 500) : null;
+  if (decision === "reject") {
+    const r = await env.DB.prepare(
+      `UPDATE verification_rewards SET review_status = 'rejected', reviewed_by = ?, reviewed_at = ?, review_note = ?, completed_at = ?, updated_at = ?
+        WHERE uid = ? AND completed_at IS NULL`,
+    ).bind(adminUid, ts, cleanNote, ts, ts, uid).run();
+    if (Number(r.meta?.changes || 0) === 0) throw httpsError("failed-precondition", "Yeh signup bonus pehle hi band / paid hai.");
+    return { status: "rejected" };
+  }
+  const r = await env.DB.prepare(
+    `UPDATE verification_rewards SET review_status = 'approved', reviewed_by = ?, reviewed_at = ?, review_note = ?, updated_at = ?
+      WHERE uid = ? AND completed_at IS NULL AND review_status IN ('none', 'pending')`,
+  ).bind(adminUid, ts, cleanNote, ts, uid).run();
+  if (Number(r.meta?.changes || 0) === 0) throw httpsError("failed-precondition", "Yeh signup bonus pehle hi band / paid hai.");
+  return { status: "approved", result: await tryCreditVerificationReward(env, uid, { force: true }) };
+}
+
+/**
+ * Hourly: pay bonuses that were only waiting for the account to age (or whose
+ * credit was interrupted). Bounded; each attempt is the same exactly-once credit.
+ */
+export async function sweepSignupBonuses(env: Env, limit = 50): Promise<{ checked: number; paid: number }> {
+  const cfg = await getVerificationRewardConfig(env);
+  if (!cfg.enabled) return { checked: 0, paid: 0 };
+  const cutoff = Date.now() - cfg.minAccountAgeHours * 3_600_000;
+  const rows = await env.DB.prepare(
+    `SELECT vr.uid FROM verification_rewards vr JOIN users u ON u.uid = vr.uid
+      WHERE vr.completed_at IS NULL AND vr.review_status IN ('none', 'approved')
+        AND u.created_at <= ? AND COALESCE(u.is_blocked, 0) = 0
+        AND (? = 0 OR u.email_verified = 1) AND (? = 0 OR u.phone_verified = 1)
+      ORDER BY vr.created_at LIMIT ?`,
+  ).bind(cutoff, cfg.requireEmail ? 1 : 0, cfg.requirePhone ? 1 : 0, limit).all<{ uid: string }>();
+  let paid = 0;
+  for (const r of rows.results ?? []) {
+    const out = await tryCreditVerificationReward(env, r.uid).catch((e) => {
+      console.error("[sweepSignupBonuses]", r.uid, e);
+      return null;
+    });
+    if (out?.credited) paid++;
+  }
+  return { checked: rows.results?.length ?? 0, paid };
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +703,8 @@ export async function getVerificationStatus(env: Env, uid: string, now = Date.no
   const registrationReward = row ? Number(row.registrationReward) || 0 : 0;
   const completionReward = row ? Number(row.completionReward) || 0 : 0;
   const completed = !!row?.completedAt;
+  const reviewStatus = (row?.reviewStatus ?? "none") as string;
+  const availableAt = row && cfg.minAccountAgeHours > 0 ? Number(row.createdAt) + cfg.minAccountAgeHours * 3_600_000 : null;
   const due = (user.status ?? "active") === "active" ? nextPromptAt(row ?? null, cfg) : null;
 
   return {
@@ -481,6 +725,9 @@ export async function getVerificationStatus(env: Env, uid: string, now = Date.no
     earnedReward: registrationReward + (completed ? completionReward : 0),
     completed,
     completedAt: row?.completedAt ?? null,
+    // Signup bonus anti-fraud: "pending" = an admin is checking it; "rejected" = not paid.
+    reviewStatus,
+    bonusAvailableAt: availableAt,
     promptDue: due !== null && now >= due,
     nextPromptAt: due,
     emailResendCooldownSec: cfg.emailResendCooldownSec,
@@ -516,7 +763,9 @@ export async function verificationRewardStats(env: Env) {
        SUM(CASE WHEN vr.completed_at IS NULL AND u.email_verified = 1 AND u.phone_verified = 0 THEN 1 ELSE 0 END) AS emailOnly,
        SUM(CASE WHEN vr.completed_at IS NULL AND u.email_verified = 0 AND u.phone_verified = 1 THEN 1 ELSE 0 END) AS phoneOnly,
        SUM(CASE WHEN vr.completed_at IS NULL AND COALESCE(u.email_verified,0) = 0 AND COALESCE(u.phone_verified,0) = 0 THEN 1 ELSE 0 END) AS neither,
-       SUM(vr.registration_reward) AS registrationCoins
+       SUM(vr.registration_reward) AS registrationCoins,
+       SUM(CASE WHEN vr.review_status = 'pending' AND vr.completed_at IS NULL THEN 1 ELSE 0 END) AS pendingReview,
+       SUM(CASE WHEN vr.review_status = 'rejected' THEN 1 ELSE 0 END) AS rejected
      FROM verification_rewards vr LEFT JOIN users u ON u.uid = vr.uid`,
   ).first<Record<string, number | null>>();
   const coins = await env.DB.prepare(
@@ -529,6 +778,8 @@ export async function verificationRewardStats(env: Env) {
     pendingPhoneOnly: Number(row?.phoneOnly ?? 0),
     pendingNeither: Number(row?.neither ?? 0),
     registrationCoinsCredited: Number(row?.registrationCoins ?? 0),
+    pendingReview: Number(row?.pendingReview ?? 0),
+    rejected: Number(row?.rejected ?? 0),
     completionCoinsCredited: Number(coins?.c ?? 0),
     completionCredits: Number(coins?.n ?? 0),
   };

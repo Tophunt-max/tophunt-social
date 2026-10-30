@@ -43,6 +43,8 @@ import {
   X,
   ChevronRight,
   Search,
+  CircleDollarSign,
+  ShoppingBag,
 } from "lucide-react";
 
 /** Short beep via Web Audio API — no asset needed. */
@@ -78,11 +80,12 @@ const nav = [
   { href: "/matches", label: "Matches", icon: Swords, section: "contests" },
   { href: "/prize-claims", label: "Prize Claims", icon: Package, section: "contests", badgeKey: "pendingPrizeClaims" },
   { href: "/leaderboard", label: "Leaderboard", icon: Crown, section: "contests" },
-  { href: "/deposits", label: "Deposits", icon: ArrowDownToLine, section: "finance", badgeKey: "pendingDeposits" },
-  { href: "/withdrawals", label: "Withdrawals", icon: Banknote, section: "finance", badgeKey: "pendingWithdrawals" },
-  // Coin hub: settings, packages, ledger, budgets and reports in one place.
-  // (/coin-packages and /transactions still open directly; they live inside it.)
+  // Closed loop: Earning (Diamond) → contests → DP coin → Shopping.
+  { href: "/coin-economy?tab=diamond", label: "Earning (💎 Diamond)", icon: Sparkles, section: "finance" },
+  { href: "/shopping", label: "Shopping", icon: ShoppingBag, section: "finance", badgeKey: "pendingShopOrders" },
+  // Coin hub: coin values, earning, ledger, budgets and reports in one place.
   { href: "/coin-economy", label: "Coin Economy", icon: Scale, section: "finance" },
+  { href: "/monetization", label: "Monetization", icon: CircleDollarSign, section: "finance" },
   { href: "/posts", label: "Posts", icon: Image, section: "content" },
   { href: "/stories", label: "Stories", icon: Clapperboard, section: "content" },
   { href: "/comments", label: "Comments", icon: MessageCircle, section: "content" },
@@ -167,7 +170,7 @@ function NavItem({ href, label, icon: Icon, active, onClick, badge }: any) {
 function Sidebar({ onClose }: { onClose?: () => void }) {
   const [loc] = useLocation();
   const { user, logout } = useAuth();
-  // Live pending counts for sidebar badges (deposits / withdrawals).
+  // Live pending counts for sidebar badges (shop orders, prize claims).
   const { data: overview } = useQuery({
     queryKey: ["overview"],
     queryFn: api.overview,

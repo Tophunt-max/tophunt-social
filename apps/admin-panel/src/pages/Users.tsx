@@ -260,7 +260,7 @@ function UserDetail({ id, onClose, onDone }: { id: string; onClose: () => void; 
   const user = useQuery({ queryKey: ["user", id], queryFn: () => api.user(id) });
   const followers = useQuery({ queryKey: ["user-followers", id], queryFn: () => api.userFollowers(id) });
   const txns = useQuery({ queryKey: ["user-txns", id], queryFn: () => api.transactions({ uid: id, limit: 50 }) });
-  const [tab, setTab] = useState<"profile" | "followers" | "transactions" | "rewards">("profile");
+  const [tab, setTab] = useState<"profile" | "followers" | "transactions" | "rewards" | "shopping">("profile");
   const u = user.data;
 
   const [form, setForm] = useState({ fullName: "", username: "", bio: "" });
@@ -314,7 +314,7 @@ function UserDetail({ id, onClose, onDone }: { id: string; onClose: () => void; 
             </div>
 
             <div className="flex gap-1 mb-4 bg-secondary/50 p-1 rounded-xl w-fit">
-              {(["profile", "followers", "transactions", "rewards"] as const).map((t) => (
+              {(["profile", "followers", "transactions", "rewards", "shopping"] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)} className={`px-4 py-1.5 rounded-lg text-sm font-medium capitalize ${tab === t ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"}`}>{t}</button>
               ))}
             </div>
@@ -349,6 +349,7 @@ function UserDetail({ id, onClose, onDone }: { id: string; onClose: () => void; 
             )}
 
             {tab === "rewards" && <UserRewards uid={id} />}
+            {tab === "shopping" && <UserShopping uid={id} />}
 
             {tab === "transactions" && (
               <div className="space-y-1 max-h-72 overflow-auto">
@@ -389,6 +390,56 @@ function UserDetail({ id, onClose, onDone }: { id: string; onClose: () => void; 
  * Daily check-in streak, recent check-ins, task claims and referral rows for one
  * user, plus the support streak fix (PATCH /admin/users/:id/streak, audited).
  */
+/** Shop orders, digital items, gifts and XP conversions of one user (worker adminMonetization.ts). */
+function UserShopping({ uid }: { uid: string }) {
+  const q = useQuery({ queryKey: ["user-shopping", uid], queryFn: () => api.monetization.userSummary(uid) });
+  const d = q.data;
+  if (q.isLoading || !d) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  const stat = (label: string, value: string) => (
+    <div className="rounded-xl bg-secondary/50 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="font-semibold text-foreground">{value}</p>
+    </div>
+  );
+  return (
+    <div className="space-y-4 text-sm">
+      <div className="grid grid-cols-2 gap-2">
+        {stat("Shop orders (30 days)", `${d.limits.orders30} / ${d.limits.maxOrders30}`)}
+        {stat("DP coin in shop (30 days)", `${fmtNumber(d.limits.coins30)} / ${fmtNumber(d.limits.maxCoins30)}`)}
+        {stat("Gifts sent", `${fmtNumber(d.gifts.sent)} (${fmtNumber(d.gifts.sentCoins)} DP coin)`)}
+        {stat("Gifts received", `${fmtNumber(d.gifts.received)} from ${fmtNumber(d.gifts.supporters)} supporter(s)`)}
+        {stat("XP → Diamond", `${fmtNumber(d.xpConversions.xpSpent)} XP → ${fmtNumber(d.xpConversions.diamonds)} 💎`)}
+        {stat("Digital items bought", fmtNumber(d.digital.length))}
+      </div>
+      <div>
+        <p className="font-semibold mb-2">Shop orders</p>
+        {d.orders.length === 0 ? (
+          <p className="text-muted-foreground">No orders.</p>
+        ) : (
+          <div className="space-y-1">
+            {d.orders.map((o: any) => (
+              <a key={o.id} href={`/shopping?tab=orders`} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 hover:bg-secondary/40">
+                <span className="truncate">{o.title ?? o.id} · {fmtNumber(o.totalCoins)} DP coin</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                  {o.status}{o.reviewStatus === "pending" ? " · needs review" : ""}{o.riskFlags.length ? ` · ${o.riskFlags.map((f: string) => d.riskLabels[f] ?? f).join(", ")}` : ""}
+                </span>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+      {d.digital.length > 0 && (
+        <div>
+          <p className="font-semibold mb-2">Digital items</p>
+          {d.digital.map((p: any) => (
+            <p key={p.id} className="text-xs">{fmtDateTime(p.createdAt)} · {p.name ?? p.itemId} · {fmtNumber(p.priceCoins)} DP coin · {p.status}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UserRewards({ uid }: { uid: string }) {
   const q = useQuery({ queryKey: ["user-rewards", uid], queryFn: () => api.userRewards(uid) });
   const [streak, setStreak] = useState("");
@@ -575,8 +626,8 @@ function WalletDialog({
           onChange={(e) => setLocked(e.target.value === "diamond")}
           className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-ring"
         >
-          <option value="dpcoin">DP coin (withdraw ho sakta hai)</option>
-          <option value="diamond">Diamond (sirf contest entry, withdraw nahi)</option>
+          <option value="dpcoin">DP coin (shopping ke liye)</option>
+          <option value="diamond">Diamond (sirf contest entry)</option>
         </select>
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl bg-secondary text-foreground text-sm font-medium">

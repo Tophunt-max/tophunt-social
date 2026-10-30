@@ -1587,6 +1587,14 @@ export const verificationRewards = sqliteTable(
     lastPromptAt: integer("last_prompt_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
+    // Signup bonus anti-fraud (migration 0074): none | pending | approved | rejected.
+    reviewStatus: text("review_status").notNull().default("none"),
+    riskFlags: text("risk_flags", { mode: "json" }),
+    deviceHash: text("device_hash"),
+    ipHash: text("ip_hash"),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: integer("reviewed_at"),
+    reviewNote: text("review_note"),
   },
   (t) => ({
     completedIdx: index("idx_verification_rewards_completed").on(t.completedAt),

@@ -29,11 +29,13 @@ import { useProfile } from '@/src/hooks/useProfileData';
 import { useAppConfig } from '@/src/services/appSettings';
 import { coinRate, coinsInInr } from '@/src/lib/coinValue';
 import { walletService } from '@/src/services/wallet/walletService';
-import { useFeature } from '@/src/services/appSettings';
 import { readApi } from '@/src/services/api';
 import { useQuery } from '@tanstack/react-query';
 import { useDesignWindow } from '@/src/lib/layout';
 import { StreakMilestoneBanner } from '@/src/components/gamification/MotionBits';
+import { WalletShortcuts } from '@/src/components/gifts/WalletShortcuts';
+import { XpStrip } from '@/src/components/gifts/XpStrip';
+import { ledgerLabel } from '@/src/lib/ledgerLabels';
 
 
 const FILTERS = ['All', 'Income', 'Expense'];
@@ -42,6 +44,9 @@ const FILTERS = ['All', 'Income', 'Expense'];
 // budget runs out (worker FREE_REWARDS_EXHAUSTED); its message says so.
 const freeRewardsOut = (e: any) => typeof e?.message === 'string' && e.message.toLowerCase().includes('free rewards khatam');
 const FREE_REWARDS_OUT_MSG = 'Aaj ke free rewards khatam ho gaye hain. Thodi der baad try karo.';
+// Per-user daily free Diamond cap (worker lib/economyLimits.ts); the server's message names the cap.
+const dailyFreeLimit = (e: any): string | null =>
+  e?.reason === 'daily_free_limit' && typeof e?.message === 'string' ? e.message : null;
 
 const taskIcon = (type: string) =>
   type === 'vote' ? 'stats-chart' : type === 'share' ? 'share-social' : type === 'contest' ? 'trophy' : 'videocam';
@@ -53,7 +58,7 @@ type DailySlot = { day: number; amount: number; status: 'claimed' | 'ready' | 'u
 // A reward credited as Diamonds (play-only) or as DP coins (withdrawable).
 const rewardUnit = (res: any) => (Number(res?.lockedCoins || 0) > 0 ? 'Diamond' : 'DP coin');
 const playOnly = (res: any) =>
-  Number(res?.lockedCoins || 0) > 0 ? '\nDiamond se contest khelo. Jeet kar DP coin milenge, jo withdraw hote hain.' : '';
+  Number(res?.lockedCoins || 0) > 0 ? '\nDiamond se contest khelo. Jeet kar DP coin milenge, jinse Shopping kar sakte ho.' : '';
 
 export default function WalletScreen() {
   // Seven day slots across the design width (the phone column on desktop).
@@ -64,8 +69,6 @@ export default function WalletScreen() {
   const { data: profile, refetch: refetchProfile, isLoading: profileLoading } = useProfile(user?.uid || '');
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const topupsEnabled = useFeature('topups'); // admin feature flag
-  const withdrawalsEnabled = useFeature('withdrawals'); // admin feature flag
   // Top-up always starts at the store, whatever the gateway mode. This used to
   // jump straight to /wallet/deposit for manual/both, which skipped the package
   // list — the user never got to see what they were buying. The store is now
@@ -179,7 +182,9 @@ export default function WalletScreen() {
           "Error",
           alreadyClaimed
             ? "You have already claimed your daily reward today."
-            : freeRewardsOut(error)
+            : dailyFreeLimit(error)
+              ? dailyFreeLimit(error)!
+              : freeRewardsOut(error)
               ? FREE_REWARDS_OUT_MSG
               : "Could not claim bonus.",
         );
@@ -224,7 +229,9 @@ export default function WalletScreen() {
       const limitHit = typeof error?.message === 'string' && error.message.toLowerCase().includes('limit');
       Alert.alert(
         'Reward',
-        freeRewardsOut(error)
+        dailyFreeLimit(error)
+          ? dailyFreeLimit(error)!
+          : freeRewardsOut(error)
           ? FREE_REWARDS_OUT_MSG
           : limitHit
             ? "You've reached today's ad reward limit. Come back tomorrow!"
@@ -367,7 +374,7 @@ export default function WalletScreen() {
         </View>
         <View style={{ flex: 1, marginLeft: 14 }}>
             <Text style={[styles.transTitle, { color: textColor }]}>{item.description}</Text>
-            <Text style={[styles.transDate, { color: subTextColor }]}>{item.date} • {item.type.replace('_', ' ').toUpperCase()}</Text>
+            <Text style={[styles.transDate, { color: subTextColor }]}>{item.date} • {ledgerLabel(item.type)}</Text>
         </View>
         {/* Each row split into its Diamond and DP coin parts (src/lib/balances.ts). */}
         <View style={styles.transAmounts}>
@@ -398,8 +405,8 @@ export default function WalletScreen() {
     <View style={styles.header}>
       <BackButton size={26} color={textColor} style={styles.backButton} />
       <Text style={[styles.title, { color: textColor }]}>My Wallet</Text>
-      <TouchableOpacity onPress={() => router.push('/wallet/store')}>
-        <Ionicons name="scan-outline" size={24} color={textColor} />
+      <TouchableOpacity onPress={() => router.push('/shop' as any)} accessibilityLabel="Shop">
+        <Ionicons name="bag-handle-outline" size={24} color={textColor} />
       </TouchableOpacity>
     </View>
   );
@@ -452,7 +459,7 @@ export default function WalletScreen() {
                                             <Text style={styles.coinBadgeText}>DP coin</Text>
                                         </View>
                                         <Text style={styles.balanceValue}>{bal.dpcoin}</Text>
-                                        <Text style={[styles.balanceLabel, { fontSize: 12 }]}>{value ? `Withdraw · ${value}` : 'Withdraw ho sakte'}</Text>
+                                        <Text style={[styles.balanceLabel, { fontSize: 12 }]}>{value ? `Shopping ke liye · ${value}` : 'Shopping ke liye'}</Text>
                                     </View>
                                     <View style={{ flex: 1 }}>
                                         <View style={[styles.coinBadge, styles.balancePill]}>
@@ -466,34 +473,37 @@ export default function WalletScreen() {
                             );
                         })()}
                         
-                        {topupsEnabled && (
-                        <TouchableOpacity 
+                        {/* Real-money top-ups and withdrawals are retired: Diamonds are
+                            earned, DP coin is spent in the shop. */}
+                        <TouchableOpacity
                             style={styles.topUpButton}
                             onPress={() => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                router.push('/wallet/store');
+                                router.push('/earn' as any);
                             }}
                             activeOpacity={0.9}
+                            accessibilityRole="button"
                         >
-                            <Ionicons name="add" size={20} color="#FF4D67" />
-                            <Text style={styles.topUpText}>Diamond lo</Text>
+                            <Ionicons name="sparkles" size={18} color="#FF4D67" />
+                            <Text style={styles.topUpText}>Diamond kamao</Text>
                         </TouchableOpacity>
-                        )}
-                        {withdrawalsEnabled && (
                         <TouchableOpacity
                             style={styles.withdrawButton}
                             onPress={() => {
                                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                                router.push('/wallet/withdraw');
+                                router.push('/shop' as any);
                             }}
                             activeOpacity={0.9}
+                            accessibilityRole="button"
                         >
-                            <Ionicons name="cash-outline" size={18} color="#FFF" />
-                            <Text style={styles.withdrawText}>Withdraw</Text>
+                            <Ionicons name="bag-handle-outline" size={18} color="#FFF" />
+                            <Text style={styles.withdrawText}>Shop</Text>
                         </TouchableOpacity>
-                        )}
                     </LinearGradient>
                 </Animated.View>
+
+                <XpStrip isDark={isDark} />
+                <WalletShortcuts isDark={isDark} />
 
                 {/* Daily Bonus Section (hidden while an admin has it switched off) */}
                 {dailyEnabled && dailyTrack.length > 0 && (

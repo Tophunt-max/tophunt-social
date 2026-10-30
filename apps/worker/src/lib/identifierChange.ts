@@ -21,6 +21,7 @@ import { assertRecentAuth, clearReauthGrant, hasFreshSession } from "./reauth";
 import { revokeAllSessions, revokeOtherSessions } from "./sessionRevocation";
 import { verificationCodeEmail, identifierChangedEmail } from "./emailTemplates";
 import { now } from "./ids";
+import { DISPOSABLE_DOMAINS } from "./disposableEmail";
 
 /**
  * Changing the email address or phone number on an account.
@@ -80,18 +81,10 @@ import { now } from "./ids";
 export const OTP_SEND_COOLDOWN = 60;
 
 /**
- * Disposable domains. Intentionally the same list the signup path uses; a
+ * Disposable domains (lib/disposableEmail.ts): the same list the signup path uses; a
  * throwaway address is a support liability either way, and a policy that applies
  * only at signup is trivially sidestepped by changing the address afterwards.
  */
-const DISPOSABLE_DOMAINS = new Set([
-  "yopmail.com", "mailinator.com", "temp-mail.org", "10minutemail.com",
-  "guerrillamail.com", "sharklasers.com", "maildrop.cc", "getnada.com",
-  "dispostable.com", "tempmail.com", "throwawaymail.com", "mail.tm",
-  "temp-mail.io", "yopmail.net", "cool.fr.nf", "jetable.org", "temporarily.de",
-  "tempmailo.com", "smailpro.com", "trashmail.com", "luxusmail.org",
-]);
-
 /**
  * Deliberately conservative, and NOT trying to implement RFC 5322.
  *

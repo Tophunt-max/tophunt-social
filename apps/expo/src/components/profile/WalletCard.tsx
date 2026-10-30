@@ -6,10 +6,11 @@ import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
 import { useCoinRate } from '@/src/hooks/useCoinPackages';
 import { coinsInInr } from '@/src/lib/coinValue';
+import { useRouter } from 'expo-router';
 
 interface WalletCardProps {
   Dpcoin: number;
-  /** The Diamond part of `Dpcoin` (users.locked_coins): play-only, never withdrawable. */
+  /** The Diamond part of `Dpcoin` (users.locked_coins): earned, pays contest entry only. */
   lockedCoins?: number;
   stats: UserProfile['stats'];
   onPress?: () => void;
@@ -18,11 +19,12 @@ interface WalletCardProps {
 }
 
 export const WalletCard = ({ Dpcoin, lockedCoins, stats, onPress, onPressWins }: WalletCardProps) => {
-  // Two balances (src/lib/balances.ts): DP coins are withdrawable and carry a
+  // Two balances (src/lib/balances.ts): DP coins buy things in the shop and carry a
   // ₹ value; Diamonds only pay entry fees, so they have none.
   const diamonds = Math.min(Math.max(0, Number(lockedCoins) || 0), Math.max(0, Dpcoin || 0));
   const dpcoin = Math.max(0, (Dpcoin || 0) - diamonds);
   const value = coinsInInr(dpcoin, useCoinRate());
+  const router = useRouter();
   return (
     <LinearGradient
       colors={['#FF4D67', '#FF8A9B']}
@@ -33,13 +35,13 @@ export const WalletCard = ({ Dpcoin, lockedCoins, stats, onPress, onPressWins }:
       {/* Wallet balance → wallet screen */}
       <TouchableOpacity onPress={onPress} activeOpacity={0.9} style={styles.header}>
         <View style={styles.balances}>
-          <View accessible accessibilityLabel={`${dpcoin} DP coins, withdrawable`}>
+          <View accessible accessibilityLabel={`${dpcoin} DP coins, for shopping`}>
             <Text style={styles.label}>DP coin</Text>
             <View style={styles.coinRow}>
               <CoinIcon size={24} color="#FFFFFF" style={{ marginRight: 6 }} />
               <Text style={styles.coinValue}>{dpcoin}</Text>
             </View>
-            <Text style={styles.split}>{value ? `Withdraw · ${value}` : 'Withdraw ho sakte'}</Text>
+            <Text style={styles.split}>{value ? `Shopping · ${value}` : 'Shopping ke liye'}</Text>
           </View>
           <View style={styles.balanceDivider} />
           <View accessible accessibilityLabel={`${diamonds} Diamonds, for contest entry only`}>
@@ -55,6 +57,16 @@ export const WalletCard = ({ Dpcoin, lockedCoins, stats, onPress, onPressWins }:
           <Text style={styles.badgeText}>Active</Text>
         </View>
       </TouchableOpacity>
+
+      {/* Closed loop: earn Diamonds, spend DP coin. */}
+      <View style={styles.actions}>
+        <TouchableOpacity style={styles.action} onPress={() => router.push('/earn' as any)} accessibilityRole="button">
+          <Text style={styles.actionText}>💎 Diamond kamao</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.action} onPress={() => router.push('/shop' as any)} accessibilityRole="button">
+          <Text style={styles.actionText}>🛍️ Shop</Text>
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.divider} />
 
@@ -78,6 +90,9 @@ export const WalletCard = ({ Dpcoin, lockedCoins, stats, onPress, onPressWins }:
 };
 
 const styles = StyleSheet.create({
+  actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  action: { flex: 1, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 12, paddingVertical: 9, alignItems: 'center' },
+  actionText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 13 },
   container: {
     margin: 16,
     padding: 24,

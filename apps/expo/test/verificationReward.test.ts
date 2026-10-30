@@ -39,9 +39,9 @@ describe('copy', () => {
     );
   });
 
-  it('a new account (no signup bonus) is only told about the verification reward', () => {
+  it('a new account is told the signup bonus comes after verification', () => {
     expect(rewardExplainer({ registrationReward: 0, completionReward: 90, totalReward: 90 })).toBe(
-      'Email aur mobile number dono verify karne par 90 Diamond milenge.',
+      'Signup bonus: email aur mobile number dono verify karne par 90 Diamond milenge.',
     );
     expect(progressLabel({ earnedReward: 0, totalReward: 90 })).toBe('0/90 Diamond');
   });

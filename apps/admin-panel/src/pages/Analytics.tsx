@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import { api } from "@/lib/api";
 import { StatCard } from "@/components/ui/StatCard";
+import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
 import { PageHeader, fmtNumber } from "@/lib/format";
 import { useAuth, isFullAdminRole } from "@/lib/auth";
 import { toast } from "@/lib/toast";
@@ -13,7 +13,6 @@ export default function Analytics() {
   const { confirm } = useConfirm();
   const { data, isLoading } = useQuery({ queryKey: ["analytics"], queryFn: api.analytics });
 
-  const trends = useQuery({ queryKey: ["finance-trends"], queryFn: api.financeTrends });
   const { user } = useAuth();
   const isFullAdmin = isFullAdminRole(user?.role);
   const [usageDays, setUsageDays] = useState(7);
@@ -56,24 +55,8 @@ export default function Analytics() {
             <StatCard icon={Trophy} label="Completed Battles" value={fmtNumber(d?.completedMatches ?? 0)} gradient="gradient-blue" />
           </div>
 
-          {/* Deposits vs withdrawals chart */}
-          <div className="bg-card border border-border rounded-2xl p-5 mb-6">
-            <h3 className="font-bold text-foreground mb-1">Deposits vs Withdrawals</h3>
-            <p className="text-xs text-muted-foreground mb-4">Rupees in (approved deposits) vs out (paid withdrawals) — last 14 days</p>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trends.data ?? []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(220 13% 91%)" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }} stroke="hsl(220 9% 46%)" tickFormatter={(d) => String(d).slice(5)} />
-                  <YAxis tick={{ fontSize: 12 }} stroke="hsl(220 9% 46%)" allowDecimals={false} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="deposits" name="Deposits" fill="#22C55E" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="withdrawals" name="Withdrawals" fill="#FF4D67" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          {/* Closed loop: earning vs shopping (replaces deposits vs withdrawals). */}
+          <div className="mb-6"><ClosedLoopTrend days={14} /></div>
 
           {isFullAdmin && <UsageCard days={usageDays} setDays={setUsageDays} q={usage} />}
 

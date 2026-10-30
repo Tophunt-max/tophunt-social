@@ -22,7 +22,7 @@
  * failure instead of failing the whole report.
  */
 import type { Env } from "../types";
-import { coinValueFromConfig } from "./coinPricing";
+import { coinValuesFromConfig } from "./coinPricing";
 import { getAppConfig } from "./settings";
 
 /** How each ledger type is grouped in the report. Unknown types land in "other". */
@@ -54,6 +54,17 @@ export const LEDGER_CATEGORIES: Record<string, string> = {
   chargeback_clawback: "reversals",
   account_deletion_forfeit: "reversals",
   balance_rounding: "reversals",
+  // Coins spent on in-app goods (lib/gifts.ts, lib/store.ts). Burned from the
+  // user's side; nothing is credited to the gift recipient.
+  gift_send: "spend",
+  store_purchase: "spend",
+  store_refund: "spend",
+  shop_order: "spend",
+  shop_refund: "spend",
+  // Earning: XP turned into Diamonds (lib/xpConversion.ts), paid from free-rewards budget.
+  xp_conversion: "rewards",
+  // One-off fresh start run by the operator (MONETIZATION.md): removed balances, kept in the ledger.
+  economy_reset: "reversals",
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -64,6 +75,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   contests: "Contests (entry Diamond, prize DP coin, refund)",
   cash_out: "Withdrawals",
   reversals: "Refund clawback / account deletion",
+  spend: "DP coin spent: gifts, digital store, shop orders (and refunds)",
   other: "Other",
 };
 
@@ -148,7 +160,9 @@ function rangeSql(col: string, r: Range, extra: string[] = []): { sql: string; b
 
 export async function coinEconomyOverview(env: Env, range: Range = {}) {
   const cfg = await getAppConfig(env);
-  const payoutRate = coinValueFromConfig(cfg) ?? 0;
+  // ₹ per coin from Coin Economy → Values. DP coin is valued at what it buys in the shop.
+  const { dpCoinInr, diamondInr } = coinValuesFromConfig(cfg);
+  const payoutRate = dpCoinInr;
   const txRange = rangeSql("created_at", range);
   const userTxRange = rangeSql("created_at", range, [NOT_HOUSE_UID()]);
 
@@ -274,13 +288,15 @@ export async function coinEconomyOverview(env: Env, range: Range = {}) {
     ts: Date.now(),
     range: { from: range.from ?? null, to: range.to ?? null },
     payoutRate,
+    coinValues: { dpCoinInr, diamondInr },
     supply: {
       total,
       withdrawable,
       locked,
       holders: num(supply?.holders),
-      // What the platform would owe if every withdrawable coin were cashed out now.
+      // DP coin users hold, at ₹ per DP coin: what the shop owes in goods if all of it is spent.
       liabilityInr: Math.round(withdrawable * payoutRate * 100) / 100,
+      diamondValueInr: Math.round(locked * diamondInr * 100) / 100,
     },
     cash: {
       paidInInr: num(cash?.paid_in_paise) / 100,

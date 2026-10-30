@@ -31,6 +31,7 @@ import { intentFor, type FollowState } from '@/src/lib/followState';
 import { Alert } from '@/src/lib/appAlert';
 import { useListPlayback } from '@/src/hooks/useListPlayback';
 import { LevelUpCelebration } from '@/src/components/gamification/LevelUpCelebration';
+import { ProfileGiftBar } from '@/src/components/gifts/ProfileGiftBar';
 
 interface ProfileScreenProps {
   /**
@@ -461,6 +462,9 @@ const ProfileContent = ({
               <PrivateAccountNotice isDark={isDark} followState={followState} isGuest={isGuest} />
             ) : (
             <>
+            {!isOwnProfile && (
+              <ProfileGiftBar uid={targetUserId} name={profile?.username ? `@${profile.username}` : 'this creator'} isDark={isDark} />
+            )}
             {isOwnProfile && (
               <>
                 {/* A profile restored from the offline copy has no balance (never
