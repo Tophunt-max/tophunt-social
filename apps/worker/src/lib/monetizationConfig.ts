@@ -55,6 +55,19 @@ export interface MonetizationConfig {
   shop: { enabled: boolean; monthlyBudgetInr: number; fraud: ShopFraudConfig };
   /** Ways to earn Diamonds that live here (others: Coin Economy → Earn). */
   earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
+  /** Economy guardrails (lib/economyLimits.ts). Every knob: 0 = off. */
+  economy: EconomyConfig;
+}
+
+export interface EconomyConfig {
+  /** Share of a paid contest's entry pot the platform keeps (promo contests exempt). */
+  contestPlatformFeePercent: number;
+  /** Free Diamonds one account may receive per UTC day across check-in, tasks, ads and XP conversion. */
+  dailyFreeDiamondCap: number;
+  /** DP coin one account may win from contests per UTC month; the excess is paid as Diamonds. */
+  monthlyDpCoinWinCap: number;
+  /** Rewarding (XP + monthly win) matches between the same two players per UTC day. */
+  sameOpponentRewardsPerDay: number;
 }
 
 export interface ShopFraudConfig {
@@ -107,6 +120,7 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
     },
   },
   earning: { xpConversion: { enabled: false, xpPerDiamond: 100, maxDiamondsPerDay: 20 } },
+  economy: { contestPlatformFeePercent: 0, dailyFreeDiamondCap: 0, monthlyDpCoinWinCap: 0, sameOpponentRewardsPerDay: 0 },
 };
 
 /** Bounds for every numeric knob: [min, max]. */
@@ -130,7 +144,13 @@ const BOUNDS = {
   maxAccountsPerAddress: [1, 20],
   reviewAboveCoins: [0, 100_000_000],
   monthlyBudgetInr: [0, 100_000_000],
+  contestPlatformFeePercent: [0, 90],
+  dailyFreeDiamondCap: [0, 1_000_000],
+  monthlyDpCoinWinCap: [0, 100_000_000],
+  sameOpponentRewardsPerDay: [0, 100],
 } as const;
+
+const ECONOMY_KEYS = ["contestPlatformFeePercent", "dailyFreeDiamondCap", "monthlyDpCoinWinCap", "sameOpponentRewardsPerDay"] as const;
 
 const AD_UNIT_RE = /^ca-app-pub-\d{16}\/\d{10}$/;
 const APP_ID_RE = /^ca-app-pub-\d{16}~\d{10}$/;
@@ -234,6 +254,9 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
         maxDiamondsPerDay: int(m.earning?.xpConversion?.maxDiamondsPerDay, d.earning.xpConversion.maxDiamondsPerDay, BOUNDS.maxDiamondsPerDay),
       },
     },
+    economy: Object.fromEntries(
+      ECONOMY_KEYS.map((k) => [k, int(m.economy?.[k], d.economy[k], BOUNDS[k])]),
+    ) as unknown as EconomyConfig,
   };
 }
 
@@ -272,6 +295,7 @@ export function publicMonetizationConfig(cfg: any) {
     // Fraud thresholds stay server-side; the app only needs to know the shop is open.
     shop: { enabled: m.shop.enabled, requireVerifiedPhone: m.shop.fraud.requireVerifiedPhone },
     earning: m.earning,
+    economy: m.economy,
   };
 }
 
@@ -312,7 +336,7 @@ export function validateMonetizationPatch(patch: any): void {
   };
 
   if (!obj(patch, "monetization")) return;
-  only(patch, ["ads", "sponsored", "gifts", "store", "shop", "earning"], "monetization");
+  only(patch, ["ads", "sponsored", "gifts", "store", "shop", "earning", "economy"], "monetization");
 
   const a = patch.ads;
   if (obj(a, "ads")) {
@@ -419,5 +443,11 @@ export function validateMonetizationPatch(patch: any): void {
       isInt(e.xpConversion.xpPerDiamond, "earning.xpConversion.xpPerDiamond", BOUNDS.xpPerDiamond);
       isInt(e.xpConversion.maxDiamondsPerDay, "earning.xpConversion.maxDiamondsPerDay", BOUNDS.maxDiamondsPerDay);
     }
+  }
+
+  const ec = patch.economy;
+  if (obj(ec, "economy")) {
+    only(ec, [...ECONOMY_KEYS], "economy");
+    for (const k of ECONOMY_KEYS) isInt(ec[k], `economy.${k}`, BOUNDS[k]);
   }
 }

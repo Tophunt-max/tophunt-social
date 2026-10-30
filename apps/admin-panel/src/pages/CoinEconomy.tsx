@@ -36,6 +36,7 @@ import { ProgramSettings } from "@/pages/Referrals";
 import Transactions from "@/pages/Transactions";
 import { CoinValuesCard, ShoppingSummaryCard } from "@/components/coin/ClosedLoopCards";
 import { CoinsLoop, DiamondTab, DpCoinTab, XpTab } from "@/components/coin/ThreeCoins";
+import { EconomyGuardrailsCard, EconomyHealthCard } from "@/components/coin/EconomyGuardrails";
 import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
 
 /**
@@ -120,6 +121,10 @@ export default function CoinEconomy() {
       {tab === "overview" && (
         <div className="space-y-6">
           <CoinsLoop />
+          <div className="grid gap-6 lg:grid-cols-2 items-start">
+            <EconomyHealthCard />
+            <EconomyGuardrailsCard />
+          </div>
           <PendingQueues />
           <Overview />
         </div>

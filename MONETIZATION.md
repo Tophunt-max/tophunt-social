@@ -73,6 +73,12 @@ Gifts, digital items and shop orders are paid in **DP coin only** (`lib/coinSpen
 `locked_delta = 0`). Diamonds pay contest entry fees only. The "Diamonds first" rule described further down was the
 first version and no longer applies.
 
+### Economy limits
+
+Contest platform fee, daily free Diamond cap, monthly DP coin win cap and the same-opponent limit live in
+`monetization.economy` (`lib/economyLimits.ts`); the economy health report compares ad and sponsorship revenue with
+the ₹ cost of shop orders. Details: `COIN_ECONOMY.md` → "Economy limits".
+
 Ads, direct brand sponsorships, virtual gifts and the digital store. Admin: **Finance → Monetization**
 (`apps/admin-panel/src/pages/Monetization.tsx`). Coin balances, packages, budgets and ledger health stay in
 **Coin Economy** (`COIN_ECONOMY.md`).

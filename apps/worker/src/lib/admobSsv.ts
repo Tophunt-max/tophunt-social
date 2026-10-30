@@ -18,7 +18,8 @@
 import type { Env } from "../types";
 import { getAppConfig } from "./settings";
 import { parseMonetizationConfig } from "./monetizationConfig";
-import { getSettings, rewardDayNumber } from "./gamification";
+import { getSettings, rewardDayNumber, rewardDayStart } from "./gamification";
+import { economyConfig, freeDiamondCapGate } from "./economyLimits";
 import { freeRewardBudgetStatements, freeRewardsBudgetId } from "./promoBudget";
 import { memoGet, memoPut } from "./memo";
 
@@ -145,7 +146,10 @@ export async function creditVerifiedAdReward(env: Env, p: SsvParams, ts = Date.n
   if (prior) return "duplicate";
 
   const reward = m.ads.rewarded.rewardDiamonds;
-  const day = rewardDayNumber(ts, (await getSettings(env)).dayResetOffsetMinutes);
+  const offset = (await getSettings(env)).dayResetOffsetMinutes;
+  const day = rewardDayNumber(ts, offset);
+  // Shared daily free Diamond cap (lib/economyLimits.ts); a capped view is not paid.
+  const capGate = freeDiamondCapGate(economyConfig(cfg).dailyFreeDiamondCap, p.userId, rewardDayStart(ts, offset), reward);
   const claimGate = `EXISTS (SELECT 1 FROM ad_reward_claims WHERE id = ?)`;
   const budget = freeRewardBudgetStatements(env, {
     budgetId: freeRewardsBudgetId(cfg),
@@ -162,8 +166,8 @@ export async function creditVerifiedAdReward(env: Env, p: SsvParams, ts = Date.n
     env.DB.prepare(
       `INSERT OR IGNORE INTO ad_reward_claims (id, uid, day, provider, reward, created_at)
        SELECT ?, ?, ?, 'admob', ?, ?
-        WHERE (SELECT COUNT(*) FROM ad_reward_claims WHERE uid = ? AND day = ?) < ?`,
-    ).bind(claimId, p.userId, day, reward, ts, p.userId, day, m.ads.rewarded.dailyCap),
+        WHERE (SELECT COUNT(*) FROM ad_reward_claims WHERE uid = ? AND day = ?) < ? AND ${capGate.sql}`,
+    ).bind(claimId, p.userId, day, reward, ts, p.userId, day, m.ads.rewarded.dailyCap, ...capGate.args),
     ...budget.reserve,
     env.DB.prepare(
       `INSERT OR IGNORE INTO coin_transactions (id, uid, amount, type, description, created_at, locked_delta)

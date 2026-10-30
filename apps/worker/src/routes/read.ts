@@ -62,6 +62,7 @@ import { liveCampaigns } from "../lib/sponsored";
 import { cashFlowsRetired } from "../lib/cashRetirement";
 import { profileGiftSummary } from "../lib/gifts";
 import { adsAllowedIn, parseMonetizationConfig } from "../lib/monetizationConfig";
+import { contestPrizeCoins, economyConfig } from "../lib/economyLimits";
 
 const APP_CONFIG_EDGE_TTL_SEC = 30;
 import { getLiveTally, getViewerVote } from "../lib/voteCounter";
@@ -1116,11 +1117,19 @@ async function withPromoPrizeAvailability<T extends Record<string, any>>(env: En
     const target = isProduct ? Number(r.prizeCostCoins || 0) : Number(r.rewardCoins || 0);
     return { pot, isProduct, extra: Math.max(0, target - pot) };
   };
+  // Unlinked coin contests: show the prize a new match will actually snapshot
+  // (capped at the pot, minus the platform fee; lib/economyLimits.ts).
+  const feePct = economyConfig(await getAppConfig(env)).contestPlatformFeePercent;
+  const realPrize = (r: T): T => {
+    if (r.prizeType === "product") return r;
+    const prize = contestPrizeCoins(r, feePct);
+    return prize === Number(r.rewardCoins || 0) ? r : { ...r, rewardCoins: prize };
+  };
   const linked = rows.filter((r) => r.subsidyBudgetId && need(r).extra > 0);
-  if (!linked.length) return rows;
+  if (!linked.length) return rows.map((r) => (r.subsidyBudgetId ? r : realPrize(r)));
   const room = await budgetsWithRoom(env, linked.map((r) => String(r.subsidyBudgetId)));
   return rows.map((r) => {
-    if (!r.subsidyBudgetId) return r;
+    if (!r.subsidyBudgetId) return realPrize(r);
     const { pot, isProduct, extra } = need(r);
     if (extra <= 0) return r;
     // Coin prize above the pot, funded right now: the card can say so.

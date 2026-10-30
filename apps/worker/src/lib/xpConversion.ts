@@ -17,7 +17,8 @@ import type { Env } from "../types";
 import { httpsError } from "./http";
 import { getAppConfig } from "./settings";
 import { parseMonetizationConfig } from "./monetizationConfig";
-import { getSettings, rewardDayNumber } from "./gamification";
+import { getSettings, rewardDayNumber, rewardDayStart } from "./gamification";
+import { assertUnderFreeDiamondCap, dailyFreeLimitError, economyConfig, freeDiamondCapGate, overFreeDiamondCap } from "./economyLimits";
 import { FREE_REWARDS_EXHAUSTED, freeRewardBudgetStatements, freeRewardsBudgetId } from "./promoBudget";
 import { validRequestId } from "./coinSpend";
 
@@ -65,7 +66,13 @@ export async function convertXp(
     throw httpsError("invalid-argument", `diamonds must be a whole number from 1 to ${cfg.maxDiamondsPerDay}.`);
   }
   const xpSpent = diamonds * cfg.xpPerDiamond;
-  const day = rewardDayNumber(ts, (await getSettings(env)).dayResetOffsetMinutes);
+  const offset = (await getSettings(env)).dayResetOffsetMinutes;
+  const day = rewardDayNumber(ts, offset);
+  // Shared daily free Diamond cap (lib/economyLimits.ts).
+  const freeCap = economyConfig(appCfg).dailyFreeDiamondCap;
+  const dayStart = rewardDayStart(ts, offset);
+  await assertUnderFreeDiamondCap(env, freeCap, uid, dayStart, diamonds);
+  const capGate = freeDiamondCapGate(freeCap, uid, dayStart, diamonds);
   const nonce = crypto.randomUUID();
   const claimGate = `EXISTS (SELECT 1 FROM xp_conversions WHERE id = ? AND nonce = ?)`;
   const budget = freeRewardBudgetStatements(env, {
@@ -84,8 +91,9 @@ export async function convertXp(
       `INSERT OR IGNORE INTO xp_conversions (id, uid, day, xp_spent, diamonds, nonce, created_at)
        SELECT ?, ?, ?, ?, ?, ?, ?
         WHERE EXISTS (SELECT 1 FROM users WHERE uid = ? AND COALESCE(xp, 0) - COALESCE(xp_converted, 0) >= ?)
-          AND (SELECT COALESCE(SUM(diamonds), 0) FROM xp_conversions WHERE uid = ? AND day = ?) + ? <= ?`,
-    ).bind(id, uid, day, xpSpent, diamonds, nonce, ts, uid, xpSpent, uid, day, diamonds, cfg.maxDiamondsPerDay),
+          AND (SELECT COALESCE(SUM(diamonds), 0) FROM xp_conversions WHERE uid = ? AND day = ?) + ? <= ?
+          AND ${capGate.sql}`,
+    ).bind(id, uid, day, xpSpent, diamonds, nonce, ts, uid, xpSpent, uid, day, diamonds, cfg.maxDiamondsPerDay, ...capGate.args),
     ...budget.reserve,
     env.DB.prepare(
       `INSERT OR IGNORE INTO coin_transactions (id, uid, amount, type, description, created_at, locked_delta)
@@ -106,6 +114,7 @@ export async function convertXp(
     if (raced) return { diamonds: Number(raced.diamonds), xpSpent: Number(raced.xp_spent), replayed: true };
     const st = await xpConversionStatus(env, uid, ts);
     if (st.convertibleXp < xpSpent) throw httpsError("failed-precondition", `Itne Diamond ke liye ${xpSpent} XP chahiye; aapke paas ${st.convertibleXp} XP hai.`, "not_enough_xp");
+    if (await overFreeDiamondCap(env, freeCap, uid, dayStart, diamonds)) throw dailyFreeLimitError(freeCap);
     throw httpsError("resource-exhausted", `Aaj ki limit: ${cfg.maxDiamondsPerDay} Diamond. Kal phir try karo.`, "daily_limit");
   }
   if (Number(results[budget.reserve.length + 2]?.meta?.changes || 0) === 0) {

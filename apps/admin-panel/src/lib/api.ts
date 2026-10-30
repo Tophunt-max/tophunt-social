@@ -989,6 +989,7 @@ export const api = {
     shopOrder: (id: string) => get<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}`),
     setOrderStatus: (id: string, payload: any) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/status`, payload),
     coins: (days = 30) => get<any>(`/admin/monetization/coins?days=${days}`),
+    economyHealth: (days = 30) => get<any>(`/admin/monetization/economy-health?days=${days}`),
     daily: (days = 14) => get<any[]>(`/admin/monetization/daily?days=${days}`),
     userSummary: (uid: string) => get<any>(`/admin/monetization/users/${encodeURIComponent(uid)}/summary`),
     reviewOrder: (id: string, decision: "approve" | "reject", note?: string) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/review`, { decision, note }),

@@ -118,6 +118,7 @@ import { syncProgressionSafe } from "../lib/achievements";
 import { handleGamificationAction } from "../lib/gamificationApi";
 import { handleMonetizationAction } from "../lib/monetizationApi";
 import { assertCashActionAllowed } from "../lib/cashRetirement";
+import { assertUnderFreeDiamondCap, contestPrizeCoins, dailyFreeLimitError, economyConfig, freeDiamondCapGate, overFreeDiamondCap } from "../lib/economyLimits";
 import { activeDailyTasks, dailyRewardFor, dailyRewardState, getDailyTaskDefs, getSettings, levelForXp, rewardDayNumber, rewardDayStart, type DailyTaskDef } from "../lib/gamification";
 import { sendEmail, sendUserEmail } from "../lib/email";
 import { passwordChangedEmail, dataExportEmail } from "../lib/emailTemplates";
@@ -637,8 +638,10 @@ apiRoute.post("/", async (c) => {
       const fee = perPlayerEntryFee(totalFee);
       // Snapshot the prize now. Settlement pays the snapshot, so a later edit to
       // the contest template cannot change what this match pays out, and the
-      // prize can never exceed the pot these two players fund.
-      const prizeCoins = Math.min(Number(contest.rewardCoins || 0), matchPot(totalFee));
+      // prize can never exceed the pot these two players fund. A paid contest
+      // also keeps the platform's share of the pot (economy.contestPlatformFeePercent,
+      // lib/economyLimits.ts); promo contests and product prizes are exempt.
+      const prizeCoins = contestPrizeCoins(contest, economyConfig(await getAppConfig(env)).contestPlatformFeePercent);
       /**
        * The PRODUCT half of that same snapshot, and for exactly the same reason.
        *
@@ -1932,6 +1935,11 @@ apiRoute.post("/", async (c) => {
       const dailyCfg = await getAppConfig(env);
       const dailyLocked = lockedPart(dailyCfg, "daily", coinReward);
       const dailyLedgerId = `daily_reward:${uid}:${startOfToday}`;
+      // Daily free Diamond cap across check-in, tasks, ads and XP conversion
+      // (lib/economyLimits.ts): checked up front for the message, gated in SQL.
+      const freeCap = economyConfig(dailyCfg).dailyFreeDiamondCap;
+      await assertUnderFreeDiamondCap(env, freeCap, uid, startOfToday, dailyLocked);
+      const dailyCapGate = freeDiamondCapGate(freeCap, uid, startOfToday, dailyLocked);
       // Capped by the free-rewards budget when one is set (lib/promoBudget.ts).
       const dailyBudget = freeRewardBudgetStatements(env, {
         budgetId: freeRewardsBudgetId(dailyCfg),
@@ -1940,8 +1948,8 @@ apiRoute.post("/", async (c) => {
         coins: coinReward,
         ts,
         label: "Daily login reward",
-        gate: `EXISTS (SELECT 1 FROM users WHERE uid = ? AND (last_daily_claim IS NULL OR last_daily_claim < ?))`,
-        gateArgs: [uid, startOfToday],
+        gate: `EXISTS (SELECT 1 FROM users WHERE uid = ? AND (last_daily_claim IS NULL OR last_daily_claim < ?)) AND ${dailyCapGate.sql}`,
+        gateArgs: [uid, startOfToday, ...dailyCapGate.args],
       });
       // Atomic guard: the conditional WHERE + affected-row check guarantees only
       // ONE claim per UTC day even if two requests race.
@@ -1968,7 +1976,7 @@ apiRoute.post("/", async (c) => {
           `INSERT OR IGNORE INTO coin_transactions
              (id, uid, amount, type, description, created_at, locked_delta)
            SELECT ?, ?, ?, 'daily_reward', ?, ?, ?
-            WHERE EXISTS (SELECT 1 FROM users WHERE uid = ? AND ${eligible}) AND ${dailyBudget.heldGate}`,
+            WHERE EXISTS (SELECT 1 FROM users WHERE uid = ? AND ${eligible}) AND ${dailyBudget.heldGate} AND ${dailyCapGate.sql}`,
         ).bind(
           dailyLedgerId,
           uid,
@@ -1979,6 +1987,7 @@ apiRoute.post("/", async (c) => {
           uid,
           startOfToday,
           ...dailyBudget.heldArgs,
+          ...dailyCapGate.args,
         ),
         // Also requires THIS request's ledger row. The ledger insert is OR IGNORE on
         // a per-day id, so if `last_daily_claim` were ever moved back within the day
@@ -1994,6 +2003,10 @@ apiRoute.post("/", async (c) => {
         ...dailyXp.statements,
       ]);
       if (Number(dailyResults[dailyBudget.reserve.length + 1]?.meta?.changes || 0) === 0) {
+        const fresh = await db.select({ last: schema.users.lastDailyClaim }).from(schema.users).where(eq(schema.users.uid, uid)).get();
+        if (!(Number(fresh?.last || 0) >= startOfToday) && (await overFreeDiamondCap(env, freeCap, uid, startOfToday, dailyLocked))) {
+          throw dailyFreeLimitError(freeCap);
+        }
         if (dailyBudget.reservationId) {
           const r = await env.DB.prepare(`SELECT 1 AS x FROM promo_reservations WHERE id = ?`).bind(dailyBudget.reservationId).first();
           if (!r) {
@@ -2077,6 +2090,10 @@ apiRoute.post("/", async (c) => {
       const claimId = newId();
       const adCfg = await getAppConfig(env);
       const adLocked = lockedPart(adCfg, "ads", Number(ads.reward) || 0);
+      const adFreeCap = economyConfig(adCfg).dailyFreeDiamondCap;
+      const adDayStart = rewardDayStart(ts, (await getSettings(env)).dayResetOffsetMinutes);
+      await assertUnderFreeDiamondCap(env, adFreeCap, uid, adDayStart, adLocked);
+      const adCapGate = freeDiamondCapGate(adFreeCap, uid, adDayStart, adLocked);
       // The cap is enforced by a COUNT(*) guard evaluated INSIDE the crediting
       // transaction, and the credit + ledger are gated on that claim row
       // existing. Concurrent requests are serialised by the transaction, so the
@@ -2096,8 +2113,8 @@ apiRoute.post("/", async (c) => {
         env.DB.prepare(
           `INSERT INTO ad_reward_claims (id, uid, day, provider, reward, created_at)
            SELECT ?, ?, ?, ?, ?, ?
-            WHERE (SELECT COUNT(*) FROM ad_reward_claims WHERE uid = ? AND day = ?) < ?`,
-        ).bind(claimId, uid, day, ads.provider, ads.reward, ts, uid, day, ads.dailyCap),
+            WHERE (SELECT COUNT(*) FROM ad_reward_claims WHERE uid = ? AND day = ?) < ? AND ${adCapGate.sql}`,
+        ).bind(claimId, uid, day, ads.provider, ads.reward, ts, uid, day, ads.dailyCap, ...adCapGate.args),
         ...adBudget.reserve,
         env.DB.prepare(
           `INSERT OR IGNORE INTO coin_transactions
@@ -2116,6 +2133,7 @@ apiRoute.post("/", async (c) => {
       ]);
 
       if (Number(adResults[0]?.meta?.changes || 0) === 0) {
+        if (await overFreeDiamondCap(env, adFreeCap, uid, adDayStart, adLocked)) throw dailyFreeLimitError(adFreeCap);
         throw httpsError("resource-exhausted", "Daily ad reward limit reached. Come back tomorrow!");
       }
       if (Number(adResults[adBudget.reserve.length + 2]?.meta?.changes || 0) === 0) {
@@ -2194,6 +2212,9 @@ apiRoute.post("/", async (c) => {
       const reward = assertCoinAmount(task.reward, "task reward");
       const taskCfg = await getAppConfig(env);
       const taskLocked = lockedPart(taskCfg, "tasks", reward);
+      const taskFreeCap = economyConfig(taskCfg).dailyFreeDiamondCap;
+      await assertUnderFreeDiamondCap(env, taskFreeCap, uid, startOfDay, taskLocked);
+      const taskCapGate = freeDiamondCapGate(taskFreeCap, uid, startOfDay, taskLocked);
       /**
        * Claim + credit + ledger in ONE batch, the same shape as `claimAdReward`
        * above.
@@ -2220,8 +2241,9 @@ apiRoute.post("/", async (c) => {
       const taskGate =
         `EXISTS (SELECT 1 FROM daily_task_claims WHERE uid = ? AND task_id = ? AND day = ?)
          AND NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)
-         AND EXISTS (SELECT 1 FROM users WHERE uid = ?)`;
-      const taskBindings = [uid, taskId, day, ledgerId, uid];
+         AND EXISTS (SELECT 1 FROM users WHERE uid = ?)
+         AND ${taskCapGate.sql}`;
+      const taskBindings = [uid, taskId, day, ledgerId, uid, ...taskCapGate.args];
       const taskBudget = freeRewardBudgetStatements(env, {
         budgetId: freeRewardsBudgetId(taskCfg),
         refId: ledgerId,
@@ -2246,8 +2268,8 @@ apiRoute.post("/", async (c) => {
       const taskResults = await env.DB.batch([
         env.DB.prepare(
           `INSERT OR IGNORE INTO daily_task_claims (uid, task_id, day, reward, created_at)
-           VALUES (?, ?, ?, ?, ?)`,
-        ).bind(uid, taskId, day, reward, ts),
+           SELECT ?, ?, ?, ?, ? WHERE ${taskCapGate.sql}`,
+        ).bind(uid, taskId, day, reward, ts, ...taskCapGate.args),
         ...taskBudget.reserve,
         env.DB.prepare(
           `UPDATE users SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, updated_at = ? WHERE uid = ? AND ${taskGate} AND ${taskBudget.heldGate}`,
@@ -2263,6 +2285,10 @@ apiRoute.post("/", async (c) => {
         ...taskXp.statements,
       ]);
       if (Number(taskResults[taskBudget.reserve.length + 1]?.meta?.changes || 0) === 0) {
+        if (taskFreeCap > 0) {
+          const done = await env.DB.prepare(`SELECT 1 AS x FROM coin_transactions WHERE id = ?`).bind(ledgerId).first();
+          if (!done && (await overFreeDiamondCap(env, taskFreeCap, uid, startOfDay, taskLocked))) throw dailyFreeLimitError(taskFreeCap);
+        }
         if (taskBudget.reservationId) {
           const credited = await env.DB.prepare(`SELECT 1 AS x FROM coin_transactions WHERE id = ?`).bind(ledgerId).first();
           if (!credited) {

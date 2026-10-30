@@ -3,6 +3,8 @@ import type { ProductPrize } from "./prizes";
 import { matchPot } from "./money";
 import { matchReservationId, platformLedgerStatement, releaseStatement } from "./promoBudget";
 import { getProgression } from "./progression";
+import { getAppConfig } from "./settings";
+import { economyConfig, samePairMatchesSince, utcDayStart, utcMonthStart, winCapExcessSql } from "./economyLimits";
 import { xpAwardStatements, xpReversalStatements } from "./xpService";
 
 export type MatchStatus = "waiting_for_opponent" | "active";
@@ -207,6 +209,17 @@ export async function settleWinner(
   // Entry fees the platform keeps: the pot minus the part of it paid out.
   const platformFee = product ? 0 : Math.max(0, pot - (rewardAmount - subsidyUsed));
 
+  // Economy guardrails (lib/economyLimits.ts).
+  const economy = economyConfig(await getAppConfig(env));
+  // Monthly DP coin win cap: the part of the prize above it is paid as Diamonds.
+  // The users UPDATE runs before the ledger INSERT, so both read the same sum.
+  const excess = winCapExcessSql(economy.monthlyDpCoinWinCap, input.winnerUid, utcMonthStart(input.completedAt), rewardAmount);
+  // Same two players again today: the match still pays its prize, but gives no
+  // XP and does not count toward monthly wins (Hall of Fame).
+  const farmed = economy.sameOpponentRewardsPerDay > 0
+    && (await samePairMatchesSince(env, input.winnerUid, input.loserUid, utcDayStart(input.completedAt), input.matchId))
+      >= economy.sameOpponentRewardsPerDay;
+
   const statements = [
     env.DB.prepare(
       `UPDATE contest_matches
@@ -227,13 +240,15 @@ export async function settleWinner(
     ),
     env.DB.prepare(
       `UPDATE users
-          SET dpcoin = dpcoin + ?,
-              wins = wins + 1, monthly_wins = monthly_wins + 1,
+          SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ${excess.sql},
+              wins = wins + 1, monthly_wins = monthly_wins + ?,
               updated_at = ?
         WHERE uid = ? AND ${gate}
           AND NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)`,
     ).bind(
       rewardAmount,
+      ...excess.args,
+      farmed ? 0 : 1,
       input.completedAt,
       input.winnerUid,
       input.matchId,
@@ -243,7 +258,7 @@ export async function settleWinner(
     // Win / loss XP through the XP engine, with the same two gates the stats
     // update uses. Before the ledger insert below, so both read the same
     // "not yet settled" snapshot.
-    ...xpAwardStatements(env, progression, {
+    ...(farmed ? [] : xpAwardStatements(env, progression, {
       uid: input.winnerUid,
       action: "match_win",
       eventId: `match_win:${input.matchId}`,
@@ -252,8 +267,8 @@ export async function settleWinner(
       ts: input.completedAt,
       gate: `${gate} AND NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)`,
       gateArgs: [input.matchId, settlementId, transactionId],
-    }).statements,
-    ...xpAwardStatements(env, progression, {
+    }).statements),
+    ...(farmed ? [] : xpAwardStatements(env, progression, {
       uid: input.loserUid,
       action: "match_loss",
       eventId: `match_loss:${input.matchId}:${input.loserUid}`,
@@ -262,11 +277,14 @@ export async function settleWinner(
       ts: input.completedAt,
       gate: `${gate} AND NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)`,
       gateArgs: [input.matchId, settlementId, transactionId],
-    }).statements,
+    }).statements),
     env.DB.prepare(
       `INSERT OR IGNORE INTO coin_transactions
-         (id, uid, amount, type, contest_id, match_id, description, created_at, budget_id)
-       SELECT ?, ?, ?, 'contest_win_reward', ?, ?, ?, ?, ?
+         (id, uid, amount, type, contest_id, match_id, description, created_at, budget_id, locked_delta)
+       SELECT ?, ?, ?, 'contest_win_reward', ?, ?,
+              ? || CASE WHEN x.e > 0 THEN ' · ' || x.e || ' as Diamond (monthly DP coin limit)' ELSE '' END,
+              ?, ?, x.e
+         FROM (SELECT ${excess.sql} AS e) x
         WHERE ${gate}`,
     ).bind(
       transactionId,
@@ -277,6 +295,7 @@ export async function settleWinner(
       input.description,
       input.completedAt,
       subsidyUsed > 0 ? budgetId : null,
+      ...excess.args,
       input.matchId,
       settlementId,
     ),

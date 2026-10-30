@@ -40,6 +40,25 @@ Settings, Referrals, Deposits, Rewards) link there, so each setting has one edit
   `economy_reset` of 2026-10-30. Every one is written in the same batch as the balance change, so the invariants below hold.
 - The tables further down describe the earlier model (purchases, withdrawals) and are kept for the history they explain.
 
+### Economy limits (`monetization.economy`, `lib/economyLimits.ts`)
+
+Edited in Coin Economy → Overview → "Economy limits". Every limit is 0 = off (the code default).
+
+| Setting | What it does | Where it is enforced |
+|---|---|---|
+| `contestPlatformFeePercent` (0-90) | A new match's coin prize = `min(rewardCoins, pot × (100 − fee) / 100)`. The rest is recorded as `platform_fee` in `platform_ledger` at settlement. Promo contests (linked to a budget) and product prizes are exempt. The contest listing shows the same prize. | `startMatch`, `read.ts#withPromoPrizeAvailability` |
+| `dailyFreeDiamondCap` | Free Diamonds per user per reward day, summed over check-in, daily tasks, rewarded ads (legacy and AdMob SSV) and XP conversion. A SQL gate in each crediting batch makes it exact under concurrency; a refused claim writes nothing (no claim row, no task marked claimed). Error reason `daily_free_limit`. | `api.ts`, `admobSsv.ts`, `xpConversion.ts` |
+| `monthlyDpCoinWinCap` | DP coin one user may win from contests per UTC month. The part of a prize above the cap is paid as Diamonds (`locked_delta` on the `contest_win_reward` row), so it can enter contests but not the shop. | `contestSettlement.ts#settleWinner` |
+| `sameOpponentRewardsPerDay` | Completed matches between the same two players per UTC day that still give win/loss XP and a monthly win (Hall of Fame). Past the limit the prize is still paid. | `settleWinner` |
+
+Also:
+- `match_win` / `match_loss` XP have default daily caps of 300 / 60 (Gamification → XP rules can change them).
+- Hall of Fame Diamonds are charged to the free-rewards budget. If the budget has no room, that winner is not paid,
+  the cron run fails (alert), the leaderboard is kept, and a re-run after raising the budget pays them once.
+- Economy health: `GET /admin/monetization/economy-health?days=30` reports active users, ad (per currency) and
+  sponsored revenue, physical shop cost in ₹, DP coin minted and its ₹ value, Diamonds given free and kept as fees,
+  per-active-user numbers, and alerts for missing guardrails. Shown on the Coin Economy overview.
+
 ## Concepts
 
 | Term | Meaning | Where |

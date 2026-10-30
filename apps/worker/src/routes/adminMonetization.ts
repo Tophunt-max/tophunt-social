@@ -610,6 +610,81 @@ export function registerMonetizationRoutes(
     });
   });
 
+  /**
+   * Economy health (Coin Economy → Overview): does the platform earn more than
+   * the closed loop costs it? The only real-money cost is physical shop orders
+   * (DP coin → products); revenue is ads (as reported, per currency) and
+   * sponsored campaigns (impressions × CPM). Also: DP coin minted from contests
+   * and its ₹ liability, Diamonds kept as the contest platform fee, and the
+   * active guardrails (lib/economyLimits.ts).
+   */
+  adminRoute.get("/monetization/economy-health", async (c) => {
+    const days = Math.min(Math.max(Number(c.req.query("days")) || 30, 1), 365);
+    const since = Date.now() - days * DAY_MS;
+    const sinceDay = utcDay(since);
+    const db = c.env.DB;
+    const appCfg = await getAppConfig(c.env);
+    const values = coinValuesFromConfig(appCfg);
+    const cfg = parseMonetizationConfig(appCfg);
+    const [active, shop, won, fee, free, ads, sponsored] = await Promise.all([
+      db.prepare(`SELECT COUNT(*) AS n FROM users WHERE last_seen_at >= ? AND COALESCE(role, '') <> 'superadmin'`).bind(since).first<any>(),
+      db.prepare(
+        `SELECT COUNT(*) AS n, COALESCE(SUM(total_inr_paise), 0) AS p FROM shop_orders WHERE created_at >= ? AND status NOT IN ('cancelled', 'returned')`,
+      ).bind(since).first<any>(),
+      db.prepare(
+        `SELECT COALESCE(SUM(amount - COALESCE(locked_delta, 0)), 0) AS dp, COALESCE(SUM(COALESCE(locked_delta, 0)), 0) AS diamonds
+           FROM coin_transactions WHERE type = 'contest_win_reward' AND amount > 0 AND created_at >= ?`,
+      ).bind(since).first<any>(),
+      db.prepare(`SELECT COALESCE(SUM(coins), 0) AS n FROM platform_ledger WHERE kind = 'platform_fee' AND created_at >= ?`).bind(since).first<any>(),
+      db.prepare(
+        `SELECT COALESCE(SUM(locked_delta), 0) AS n FROM coin_transactions
+          WHERE created_at >= ? AND locked_delta > 0
+            AND type IN ('daily_reward', 'daily_task', 'ad_reward', 'xp_conversion', 'monthly_hall_of_fame_reward', 'referral_bonus', 'verification_bonus', 'signup_bonus', 'gamification_reward')`,
+      ).bind(since).first<any>(),
+      db.prepare(
+        `SELECT currency, COALESCE(SUM(revenue_micros), 0) AS micros FROM ad_revenue_reports WHERE day >= ? GROUP BY currency`,
+      ).bind(sinceDay).all<any>(),
+      db.prepare(
+        `SELECT COALESCE(SUM(s.impressions * c.cpm_paise), 0) / 1000.0 AS p
+           FROM campaign_daily_stats s JOIN sponsored_campaigns c ON c.id = s.campaign_id WHERE s.day >= ?`,
+      ).bind(sinceDay).first<any>(),
+    ]);
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const activeUsers = Number(active?.n ?? 0);
+    const shopInr = Number(shop?.p ?? 0) / 100;
+    const adsByCurrency = (ads.results ?? []).map((r) => ({ currency: String(r.currency), amount: round(Number(r.micros) / 1e6) }));
+    const adsInr = adsByCurrency.find((r) => r.currency === "INR")?.amount ?? 0;
+    const sponsoredInr = round(Number(sponsored?.p ?? 0) / 100);
+    const dpWon = Number(won?.dp ?? 0);
+    const revenueInr = round(adsInr + sponsoredInr);
+    const per = (n: number) => (activeUsers > 0 ? round(n / activeUsers) : 0);
+    const alerts: string[] = [];
+    if (shopInr > revenueInr) alerts.push("shop_cost_above_revenue");
+    if (adsByCurrency.some((r) => r.currency !== "INR" && r.amount > 0)) alerts.push("non_inr_ad_revenue_not_counted");
+    if (cfg.economy.contestPlatformFeePercent === 0) alerts.push("no_contest_fee");
+    if (cfg.economy.dailyFreeDiamondCap === 0) alerts.push("no_daily_free_cap");
+    if (cfg.economy.monthlyDpCoinWinCap === 0) alerts.push("no_monthly_win_cap");
+    if (!appCfg?.freeRewardsBudgetId) alerts.push("no_free_rewards_budget");
+    return c.json({
+      days,
+      values,
+      activeUsers,
+      cost: { shopOrders: Number(shop?.n ?? 0), shopInr: round(shopInr) },
+      revenue: { adsByCurrency, adsInr, sponsoredInr, totalInr: revenueInr },
+      netInr: round(revenueInr - shopInr),
+      minted: {
+        dpCoinWon: dpWon,
+        dpCoinWonInr: round(dpWon * values.dpCoinInr),
+        winExcessAsDiamonds: Number(won?.diamonds ?? 0),
+        freeDiamonds: Number(free?.n ?? 0),
+        platformFeeDiamonds: Number(fee?.n ?? 0),
+      },
+      perActiveUser: { shopInr: per(shopInr), revenueInr: per(revenueInr), dpCoinWon: per(dpWon) },
+      guardrails: cfg.economy,
+      alerts,
+    });
+  });
+
   /** One user's shopping, gifts, digital items and XP conversions (Users → Shopping tab). */
   adminRoute.get("/monetization/users/:uid/summary", async (c) => {
     const uid = c.req.param("uid");

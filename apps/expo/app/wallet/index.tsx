@@ -44,6 +44,9 @@ const FILTERS = ['All', 'Income', 'Expense'];
 // budget runs out (worker FREE_REWARDS_EXHAUSTED); its message says so.
 const freeRewardsOut = (e: any) => typeof e?.message === 'string' && e.message.toLowerCase().includes('free rewards khatam');
 const FREE_REWARDS_OUT_MSG = 'Aaj ke free rewards khatam ho gaye hain. Thodi der baad try karo.';
+// Per-user daily free Diamond cap (worker lib/economyLimits.ts); the server's message names the cap.
+const dailyFreeLimit = (e: any): string | null =>
+  e?.reason === 'daily_free_limit' && typeof e?.message === 'string' ? e.message : null;
 
 const taskIcon = (type: string) =>
   type === 'vote' ? 'stats-chart' : type === 'share' ? 'share-social' : type === 'contest' ? 'trophy' : 'videocam';
@@ -179,7 +182,9 @@ export default function WalletScreen() {
           "Error",
           alreadyClaimed
             ? "You have already claimed your daily reward today."
-            : freeRewardsOut(error)
+            : dailyFreeLimit(error)
+              ? dailyFreeLimit(error)!
+              : freeRewardsOut(error)
               ? FREE_REWARDS_OUT_MSG
               : "Could not claim bonus.",
         );
@@ -224,7 +229,9 @@ export default function WalletScreen() {
       const limitHit = typeof error?.message === 'string' && error.message.toLowerCase().includes('limit');
       Alert.alert(
         'Reward',
-        freeRewardsOut(error)
+        dailyFreeLimit(error)
+          ? dailyFreeLimit(error)!
+          : freeRewardsOut(error)
           ? FREE_REWARDS_OUT_MSG
           : limitHit
             ? "You've reached today's ad reward limit. Come back tomorrow!"
