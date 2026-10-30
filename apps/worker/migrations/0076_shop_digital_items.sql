@@ -48,25 +48,22 @@ INSERT OR IGNORE INTO reward_catalog (id, type, name, description, rarity, asset
   ('shop_title_hunt_master', 'title', 'Hunt Master Title', 'Wear the "Hunt Master" title.', 'epic',
    '{"key":"shop.title_hunt_master","text":"Hunt Master","colors":["#FBBF24","#B45309"]}', 1330, 0, 0);
 
-INSERT OR IGNORE INTO store_listings (item_id, price_coins, ownership, refundable, stock_limit, sold_count, active, starts_at, ends_at, sort, created_at, updated_at)
-SELECT id, price, 'permanent', 1, NULL, 0, 1, NULL, NULL, sort,
-       CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000
-  FROM (
-    SELECT 'shop_frame_rose_petal' AS id, 49 AS price, 1010 AS sort
-    UNION ALL SELECT 'shop_frame_ocean_wave', 99, 1020
-    UNION ALL SELECT 'shop_frame_neon_pulse', 199, 1030
-    UNION ALL SELECT 'shop_frame_fire_blaze', 399, 1040
-    UNION ALL SELECT 'shop_frame_galaxy_swirl', 399, 1050
-    UNION ALL SELECT 'shop_frame_royal_crown', 799, 1060
-    UNION ALL SELECT 'shop_theme_sunset_glow', 49, 1110
-    UNION ALL SELECT 'shop_theme_aurora', 199, 1120
-    UNION ALL SELECT 'shop_theme_cyber_neon', 399, 1130
-    UNION ALL SELECT 'shop_theme_golden_hour', 799, 1140
-    UNION ALL SELECT 'shop_badge_trendsetter', 99, 1210
-    UNION ALL SELECT 'shop_badge_fan_favourite', 199, 1220
-    UNION ALL SELECT 'shop_badge_elite_hunter', 399, 1230
-    UNION ALL SELECT 'shop_title_style_icon', 49, 1310
-    UNION ALL SELECT 'shop_title_trend_boss', 199, 1320
-    UNION ALL SELECT 'shop_title_hunt_master', 399, 1330
-  )
- WHERE id IN (SELECT id FROM reward_catalog);
+-- Plain multi-row VALUES, not a UNION ALL derived table: D1 caps the number of
+-- terms in a compound SELECT and rejected the 16-way union.
+INSERT OR IGNORE INTO store_listings (item_id, price_coins, ownership, refundable, stock_limit, sold_count, active, starts_at, ends_at, sort, created_at, updated_at) VALUES
+  ('shop_frame_rose_petal', 49, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1010, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_frame_ocean_wave', 99, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1020, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_frame_neon_pulse', 199, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1030, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_frame_fire_blaze', 399, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1040, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_frame_galaxy_swirl', 399, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1050, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_frame_royal_crown', 799, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1060, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_theme_sunset_glow', 49, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1110, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_theme_aurora', 199, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1120, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_theme_cyber_neon', 399, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1130, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_theme_golden_hour', 799, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1140, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_badge_trendsetter', 99, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1210, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_badge_fan_favourite', 199, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1220, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_badge_elite_hunter', 399, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1230, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_title_style_icon', 49, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1310, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_title_trend_boss', 199, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1320, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000),
+  ('shop_title_hunt_master', 399, 'permanent', 1, NULL, 0, 1, NULL, NULL, 1330, CAST(strftime('%s', 'now') AS INTEGER) * 1000, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
