@@ -693,14 +693,27 @@ export interface CallApiOptions {
   allowUnauthenticated?: boolean;
 }
 
+/**
+ * Actions that can pay the signup bonus. The server's anti-fraud rules (one bonus
+ * per device, shared-device holds) need this installation's device id.
+ */
+const DEVICE_ID_ACTIONS = new Set(['verifyEmailOtp', 'verifyPhoneOtp', 'refreshVerification', 'claimVerificationReward']);
+
 export const callApi = async (action: string, data: any = {}, options: CallApiOptions = {}) => {
   const isAuthAction = AUTH_ACTIONS.has(action);
   const path = isAuthAction ? '/auth' : '/api';
+  let extra: Record<string, unknown> = {};
+  if (DEVICE_ID_ACTIONS.has(action) && data?.deviceId === undefined) {
+    // Lazy: keeps AsyncStorage out of this module's import graph.
+    const { getDeviceId } = await import('../lib/deviceId');
+    const deviceId = await getDeviceId().catch(() => null);
+    if (deviceId) extra = { deviceId };
+  }
 
   try {
     const { data: json } = await request<any>(`${API_BASE_URL}${path}`, {
       method: 'POST',
-      body: { action, ...data },
+      body: { action, ...extra, ...data },
       timeoutMs: options.timeoutMs,
       retries: options.retries ?? 0,
       // Auth actions run pre-login; a 401 there is an expected outcome, not an

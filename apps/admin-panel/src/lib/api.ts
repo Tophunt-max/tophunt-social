@@ -1005,6 +1005,10 @@ export const api = {
   uploadExploreBanner,
   onboardingStats: (days = 30) => get<OnboardingStats>(`/admin/onboarding/stats?days=${days}`),
   verificationReward: () => get<any>("/admin/verification-reward"),
+  signupBonusReviews: (status: "pending" | "approved" | "rejected" = "pending") =>
+    get<any>(`/admin/verification-reward/reviews?status=${status}`),
+  reviewSignupBonus: (uid: string, decision: "approve" | "reject", note?: string) =>
+    post<any>(`/admin/verification-reward/reviews/${encodeURIComponent(uid)}`, { decision, note }),
 
   // Legal documents. `legal()` returns each doc's EFFECTIVE raw content (a stored
   // override, or the bundled default) so the editor is never blank; `saveLegal`

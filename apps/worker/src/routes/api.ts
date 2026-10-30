@@ -2037,15 +2037,15 @@ apiRoute.post("/", async (c) => {
       await refreshVerificationFromFirebase(env, uid);
       // Referral: email AND mobile verified may qualify a pending referral.
       await qualifyReferral(env, uid, "verified");
-      const reward = await tryCreditVerificationReward(env, uid);
+      const reward = await tryCreditVerificationReward(env, uid, { deviceId: body.deviceId, ip: clientIp(c.req.raw.headers) });
       const status = await getVerificationStatus(env, uid);
-      return c.json({ success: true, reward: { credited: reward.credited, coins: reward.coins, reason: reward.reason }, status });
+      return c.json({ success: true, reward: { credited: reward.credited, coins: reward.coins, reason: reward.reason, availableAt: reward.availableAt ?? null }, status });
     }
     case "claimVerificationReward": {
       await rateLimit(env, `verifyclaim:${uid}`, 30, 3600, { failClosed: true });
-      const reward = await tryCreditVerificationReward(env, uid);
+      const reward = await tryCreditVerificationReward(env, uid, { deviceId: body.deviceId, ip: clientIp(c.req.raw.headers) });
       const status = await getVerificationStatus(env, uid);
-      return c.json({ success: true, reward: { credited: reward.credited, coins: reward.coins, reason: reward.reason }, status });
+      return c.json({ success: true, reward: { credited: reward.credited, coins: reward.coins, reason: reward.reason, availableAt: reward.availableAt ?? null }, status });
     }
     case "markVerificationPromptShown": {
       await rateLimit(env, `verifyprompt:${uid}`, 30, 3600);

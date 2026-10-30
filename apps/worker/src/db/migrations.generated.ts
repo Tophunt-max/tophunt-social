@@ -75,6 +75,7 @@ import m_0070_gamification_sql from "../../migrations/0070_gamification.sql";
 import m_0071_gamification_assets_sql from "../../migrations/0071_gamification_assets.sql";
 import m_0072_monetization_sql from "../../migrations/0072_monetization.sql";
 import m_0073_shop_earning_sql from "../../migrations/0073_shop_earning.sql";
+import m_0074_signup_bonus_fraud_sql from "../../migrations/0074_signup_bonus_fraud.sql";
 
 export interface Migration {
   name: string;
@@ -156,4 +157,5 @@ export const MIGRATIONS: Migration[] = [
   { name: "0071_gamification_assets.sql", sql: m_0071_gamification_assets_sql },
   { name: "0072_monetization.sql", sql: m_0072_monetization_sql },
   { name: "0073_shop_earning.sql", sql: m_0073_shop_earning_sql },
+  { name: "0074_signup_bonus_fraud.sql", sql: m_0074_signup_bonus_fraud_sql },
 ];

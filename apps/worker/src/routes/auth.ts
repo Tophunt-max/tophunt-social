@@ -52,14 +52,8 @@ import {
 } from "../lib/verificationReward";
 import { now } from "../lib/ids";
 import { qualifyReferral } from "../lib/referralProgram";
+import { isDisposableEmail } from "../lib/disposableEmail";
 
-const DISPOSABLE_DOMAINS = new Set([
-  "yopmail.com", "mailinator.com", "temp-mail.org", "10minutemail.com",
-  "guerrillamail.com", "sharklasers.com", "maildrop.cc", "getnada.com",
-  "dispostable.com", "tempmail.com", "throwawaymail.com", "mail.tm",
-  "temp-mail.io", "yopmail.net", "cool.fr.nf", "jetable.org", "temporarily.de",
-  "tempmailo.com", "smailpro.com", "trashmail.com", "luxusmail.org",
-]);
 // The username policy (reserved names, charset, length) is shared with every
 // other write path that can set a username — see lib/userIdentifiers.ts.
 
@@ -67,20 +61,16 @@ function normalizePhone(phone?: string | null): string | null {
   if (!phone) return null;
   return phone.replace(/[^\d+]/g, "").trim() || null;
 }
-function isDisposableEmail(email: string): boolean {
-  const domain = email.split("@")[1];
-  return domain ? DISPOSABLE_DOMAINS.has(domain.toLowerCase()) : false;
-}
 /**
  * Attempt the verification completion credit after a successful proof. Never
  * fails the verification itself: the proof is already committed, and the credit
  * is retried idempotently by the next status refresh / claim.
  */
-async function creditAfterVerification(env: Env, uid: string) {
+async function creditAfterVerification(env: Env, uid: string, ctx: { deviceId?: unknown; ip?: string } = {}) {
   // Referral: email AND mobile verified may qualify a pending referral.
   await qualifyReferral(env, uid, "verified");
   try {
-    const r = await tryCreditVerificationReward(env, uid);
+    const r = await tryCreditVerificationReward(env, uid, { deviceId: typeof ctx.deviceId === "string" ? ctx.deviceId : null, ip: ctx.ip ?? null });
     return { credited: r.credited, coins: r.coins, reason: r.reason };
   } catch (e) {
     console.error("[auth] verification reward attempt failed (will retry)", uid, e);
@@ -641,7 +631,7 @@ authRoute.post("/", async (c) => {
         } catch (e) {
           console.error("[auth] phoneSignIn: could not mark phone verified", uid, e);
         }
-        await creditAfterVerification(env, uid);
+        await creditAfterVerification(env, uid, { deviceId: body?.deviceId, ip });
       }
 
       const customToken = await createCustomToken(env, uid);
@@ -798,7 +788,7 @@ authRoute.post("/", async (c) => {
       const { email, verifyOnly } = await confirmEmailChange(env, c.get("user"), body.otp, c);
       // Proving an identifier may complete the verification reward. The server
       // decides eligibility and amount; the response only reports the outcome.
-      const verificationReward = await creditAfterVerification(env, uid);
+      const verificationReward = await creditAfterVerification(env, uid, { deviceId: body?.deviceId, ip });
       return c.json({ success: true, email, verifyOnly, verificationReward });
     }
 
@@ -811,7 +801,7 @@ authRoute.post("/", async (c) => {
       if (!uid) throw httpsError("unauthenticated", "User must be logged in.");
       await rateLimit(env, `phoneotpverify:${uid}`, 20, 3600, { failClosed: true });
       const { phone, verifyOnly } = await confirmPhoneChange(env, c.get("user"), body.otp, c);
-      const verificationReward = await creditAfterVerification(env, uid);
+      const verificationReward = await creditAfterVerification(env, uid, { deviceId: body?.deviceId, ip });
       return c.json({ success: true, phone, verifyOnly, verificationReward });
     }
 

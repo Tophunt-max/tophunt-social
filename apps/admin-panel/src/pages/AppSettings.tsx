@@ -38,8 +38,8 @@ const hint = "text-[11px] text-muted-foreground mt-1";
 
 /** Keys this form owns. Anything else is shown in the Advanced JSON section. */
 const MANAGED_KEYS = [
-  // Legacy: the signup bonus is gone and the referral reward moved to the
-  // Referrals page (`referralProgram`). Kept here so it is never re-posted.
+  // The signup bonus is edited in Coin Economy → Diamond (paid after
+  // verification); the referral reward on the Referrals page. Never re-posted here.
   "rewardSettings",
   // Owned by the Referrals page.
   "referralProgram",

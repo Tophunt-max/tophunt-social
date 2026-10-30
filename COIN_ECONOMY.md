@@ -40,6 +40,21 @@ Settings, Referrals, Deposits, Rewards) link there, so each setting has one edit
   `economy_reset` of 2026-10-30. Every one is written in the same batch as the balance change, so the invariants below hold.
 - The tables further down describe the earlier model (purchases, withdrawals) and are kept for the history they explain.
 
+### Signup bonus (paid only after verification, `lib/verificationReward.ts`)
+
+Admin: Coin Economy → 💎 Diamond → "Signup bonus (verify ke baad)" and "Signup bonus review".
+
+- Amount: `rewardSettings.signupBonus`. The admin save mirrors it into `verificationReward.completionReward`, which
+  is snapshotted at signup. Paid as 💎 Diamonds, from the free-rewards budget, once, after email AND mobile are verified
+  by server-side proof. `verificationReward.registrationReward` (paid at signup without verification) should stay 0.
+- Hard rules (never paid): the email, mobile or device already earned a bonus on another account
+  (`verification_reward_claims`, kinds email / phone / device); a disposable email; a blocked or inactive account.
+- Wait: `minAccountAgeHours`. The hourly cron (`sweepSignupBonuses`) pays it once the account is old enough.
+- Review hold (admin approves or rejects, with a reason; both audited): `requireDevice` and no device id,
+  `maxBonusesPerIpPerDay` bonuses already paid to one IP in 24h, more than `maxAccountsPerDevice` accounts on one
+  device, or `reviewAll`. Approve still applies the hard rules. Device and IP are stored only as SHA-256 hashes
+  (migration 0074). The app sends its install id with every call that can pay the bonus.
+
 ### Economy limits (`monetization.economy`, `lib/economyLimits.ts`)
 
 Edited in Coin Economy → Overview → "Economy limits". Every limit is 0 = off (the code default).

@@ -31,7 +31,7 @@ import { toast } from "@/lib/toast";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { RewardLockingCard } from "@/components/coin/CoinCards";
 import { CoinAlertsCard, FreeRewardsBudgetCard } from "@/components/coin/AlertCards";
-import { AdsRewardCard, DailyLoginCard, DailyTasksCard, HallOfFameCard, RewardStatsCard, VerificationRewardCard } from "@/components/coin/EarnCards";
+import { AdsRewardCard, DailyLoginCard, DailyTasksCard, HallOfFameCard, RewardStatsCard, SignupBonusReviewCard, VerificationRewardCard } from "@/components/coin/EarnCards";
 import { ProgramSettings } from "@/pages/Referrals";
 import Transactions from "@/pages/Transactions";
 import { CoinValuesCard, ShoppingSummaryCard } from "@/components/coin/ClosedLoopCards";
@@ -233,6 +233,7 @@ function EarnTab() {
         <FreeRewardsBudgetCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
         <CoinAlertsCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
         <VerificationRewardCard data={data} />
+        <SignupBonusReviewCard />
         <DailyLoginCard rewards={rewards.data} />
         <DailyTasksCard rewards={rewards.data} />
         <RewardStatsCard />

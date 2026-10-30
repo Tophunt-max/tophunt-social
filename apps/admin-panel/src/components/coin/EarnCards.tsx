@@ -50,10 +50,18 @@ export function VerificationRewardCard({ data }: { data: any }) {
   const read = () => ({
     enabled: stored.enabled !== false,
     registrationReward: Number(stored.registrationReward ?? 0),
-    completionReward: Number(stored.completionReward ?? 90),
+    // The signup bonus: rewardSettings.signupBonus, mirrored to completionReward by the worker.
+    completionReward: Number(data?.rewardSettings?.signupBonus ?? stored.completionReward ?? 90),
     maxTotalReward: Number(stored.maxTotalReward ?? 100),
     requireEmail: stored.requireEmail !== false,
     requirePhone: stored.requirePhone !== false,
+    // Anti-fraud (worker lib/verificationReward.ts).
+    minAccountAgeHours: Number(stored.minAccountAgeHours ?? 0),
+    oneBonusPerDevice: stored.oneBonusPerDevice !== false,
+    requireDevice: stored.requireDevice === true,
+    maxBonusesPerIpPerDay: Number(stored.maxBonusesPerIpPerDay ?? 0),
+    maxAccountsPerDevice: Number(stored.maxAccountsPerDevice ?? 0),
+    reviewAll: stored.reviewAll === true,
   });
   const [v, setV] = useState(read);
   useEffect(() => {
@@ -61,62 +69,149 @@ export function VerificationRewardCard({ data }: { data: any }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
   const { data: info } = useQuery({ queryKey: ["verification-reward"], queryFn: api.verificationReward });
-  const save = useAppSettingsSave("Verification reward saved");
+  const save = useAppSettingsSave("Signup bonus saved");
   const error = useMemo(() => {
-    for (const [name, n] of [["Signup par turant", v.registrationReward], ["Email + mobile verify par", v.completionReward]] as const) {
+    for (const [name, n] of [["Signup par turant", v.registrationReward], ["Signup bonus", v.completionReward]] as const) {
       if (!Number.isInteger(n) || n < 0 || n > 500_000) return `${name}: 0 se 500,000 ke beech poora number.`;
     }
     if (!v.requireEmail && !v.requirePhone && v.completionReward > 0) return "Email ya mobile me se kam se kam ek verify karna zaroori rakho.";
+    if (!Number.isInteger(v.minAccountAgeHours) || v.minAccountAgeHours < 0 || v.minAccountAgeHours > 720) return "Account age: 0 se 720 ghante.";
+    if (!Number.isInteger(v.maxBonusesPerIpPerDay) || v.maxBonusesPerIpPerDay < 0 || v.maxBonusesPerIpPerDay > 1000) return "IP limit: 0 se 1000.";
+    if (!Number.isInteger(v.maxAccountsPerDevice) || v.maxAccountsPerDevice < 0 || v.maxAccountsPerDevice > 50) return "Device limit: 0 se 50.";
     return null;
   }, [v]);
   const stats = info?.stats;
+  const n = (k: keyof typeof v) => (e: any) => setV({ ...v, [k]: num(e.target.value) });
   return (
     <Card
       icon={ShieldCheck}
-      title="Signup bonus"
+      title="Signup bonus (verify ke baad)"
       tint="text-emerald-500"
       pending={save.isPending}
-      // The worker caps signup + verify by maxTotalReward; the cap simply
-      // follows the two amounts so changing either never trips it.
       onSave={() =>
-        error ? toast.error(error) : save.mutate({ verificationReward: { ...v, maxTotalReward: v.registrationReward + v.completionReward } })
+        error
+          ? toast.error(error)
+          : save.mutate({
+              rewardSettings: { signupBonus: v.completionReward },
+              verificationReward: { ...v, maxTotalReward: v.registrationReward + v.completionReward },
+            })
       }
     >
       <Toggle label="Enabled" checked={v.enabled} onChange={(x) => setV({ ...v, enabled: x })} />
       <div className="grid grid-cols-2 gap-3 mt-2">
         <div>
-          <label className={label}>Signup par turant (Diamond)</label>
-          <input type="number" min={0} className={field} value={v.registrationReward} onChange={(e) => setV({ ...v, registrationReward: num(e.target.value) })} />
+          <label className={label}>Signup bonus: email + mobile verify ke baad (💎)</label>
+          <input type="number" min={0} className={field} value={v.completionReward} onChange={n("completionReward")} />
         </div>
         <div>
-          <label className={label}>Email + mobile verify par (Diamond)</label>
-          <input type="number" min={0} className={field} value={v.completionReward} onChange={(e) => setV({ ...v, completionReward: num(e.target.value) })} />
+          <label className={label}>Signup par turant, bina verify (💎)</label>
+          <input type="number" min={0} className={field} value={v.registrationReward} onChange={n("registrationReward")} />
+          {v.registrationReward > 0 && <p className="text-[11px] text-amber-600 mt-1">Fraud risk: fake accounts ko bhi milega. 0 rakho.</p>}
         </div>
       </div>
-      <p className={hint}>Naye user ko kul: {(v.registrationReward + v.completionReward).toLocaleString()} Diamond.</p>
       <Toggle label="Email verify zaroori" checked={v.requireEmail} onChange={(x) => setV({ ...v, requireEmail: x })} />
       <Toggle label="Mobile verify zaroori" checked={v.requirePhone} onChange={(x) => setV({ ...v, requirePhone: x })} />
+
+      <p className="text-xs font-semibold text-foreground mt-3">Anti-fraud</p>
+      <Toggle label="Ek device = ek hi signup bonus (pakka niyam)" checked={v.oneBonusPerDevice} onChange={(x) => setV({ ...v, oneBonusPerDevice: x })} />
+      <Toggle label="Device id na ho to review mein rakho" checked={v.requireDevice} onChange={(x) => setV({ ...v, requireDevice: x })} />
+      <Toggle label="Har signup bonus admin approve kare" checked={v.reviewAll} onChange={(x) => setV({ ...v, reviewAll: x })} />
+      <div className="grid grid-cols-3 gap-3 mt-2">
+        <div>
+          <label className={label}>Account kitna purana (ghante)</label>
+          <input type="number" min={0} className={field} value={v.minAccountAgeHours} onChange={n("minAccountAgeHours")} />
+        </div>
+        <div>
+          <label className={label}>1 IP se bonus / 24h (0 = off)</label>
+          <input type="number" min={0} className={field} value={v.maxBonusesPerIpPerDay} onChange={n("maxBonusesPerIpPerDay")} />
+        </div>
+        <div>
+          <label className={label}>1 device par max accounts (0 = off)</label>
+          <input type="number" min={0} className={field} value={v.maxAccountsPerDevice} onChange={n("maxAccountsPerDevice")} />
+        </div>
+      </div>
       <p className={hint}>
-        Signup wale Diamond account bante hi milte hain, baaki email + mobile dono verify hone par. Dono "Free rewards: sirf khelne ke liye" me
-        "Signup bonus" switch se locked hote hain. Badlav sirf naye signup par lagta hai.
+        Pakke niyam (kabhi nahi milta): wahi email / mobile / device pehle bonus le chuka ho, temporary email, blocked account. Account chhota ho to
+        bonus baad mein apne aap milta hai (har ghante). IP / device shak ho to bonus review mein jaata hai: neeche approve ya reject karo. Bonus
+        hamesha 💎 Diamond hai aur free-rewards budget se katta hai. Badlav sirf naye signup par lagta hai.
       </p>
       {error && (
         <p className="text-xs text-red-600 mt-2 flex items-center gap-1.5"><AlertTriangle size={13} /> {error}</p>
       )}
       {stats && (
-        <div className="grid grid-cols-3 gap-2 mt-3 text-center">
+        <div className="grid grid-cols-4 gap-2 mt-3 text-center">
           {([
             ["Enrolled", stats.enrolled],
-            ["Completed", stats.completed],
-            ["Diamond diye", stats.completionCoinsCredited],
-          ] as const).map(([n, val]) => (
-            <div key={n} className="rounded-xl bg-secondary py-2">
+            ["Paid", stats.completed],
+            ["Review mein", stats.pendingReview],
+            ["💎 diye", stats.completionCoinsCredited],
+          ] as const).map(([name, val]) => (
+            <div key={name} className="rounded-xl bg-secondary py-2">
               <div className="text-sm font-bold text-foreground">{Number(val ?? 0).toLocaleString()}</div>
-              <div className="text-[11px] text-muted-foreground">{n}</div>
+              <div className="text-[11px] text-muted-foreground">{name}</div>
             </div>
           ))}
         </div>
       )}
+    </Card>
+  );
+}
+
+/** Held signup bonuses: approve pays at once (hard rules still apply); reject needs a reason. */
+export function SignupBonusReviewCard() {
+  const qc = useQueryClient();
+  const [status, setStatus] = useState<"pending" | "approved" | "rejected">("pending");
+  const { data } = useQuery({ queryKey: ["signup-bonus-reviews", status], queryFn: () => api.signupBonusReviews(status) });
+  const decide = useMutation({
+    mutationFn: ({ uid, decision, note }: { uid: string; decision: "approve" | "reject"; note?: string }) =>
+      api.reviewSignupBonus(uid, decision, note),
+    onSuccess: (r: any) => {
+      const reason = r?.result?.reason;
+      toast.success(r?.status === "rejected" ? "Rejected" : r?.result?.credited ? "Approved, bonus paid" : `Approved (${reason ?? "not paid"})`);
+      qc.invalidateQueries({ queryKey: ["signup-bonus-reviews"] });
+      qc.invalidateQueries({ queryKey: ["verification-reward"] });
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+  const items: any[] = data?.items ?? [];
+  const labels: Record<string, string> = data?.flagLabels ?? {};
+  return (
+    <Card icon={ShieldCheck} title="Signup bonus review" tint="text-amber-500">
+      <div className="flex gap-2 mb-3">
+        {(["pending", "approved", "rejected"] as const).map((s) => (
+          <button key={s} type="button" onClick={() => setStatus(s)}
+            className={`text-xs px-3 py-1 rounded-full border ${status === s ? "bg-violet-500 text-white border-violet-500" : "border-border"}`}>
+            {s === "pending" ? "Review mein" : s === "approved" ? "Approved" : "Rejected"}
+          </button>
+        ))}
+      </div>
+      {items.length === 0 && <p className="text-sm text-muted-foreground">Kuch nahi.</p>}
+      <div className="space-y-2">
+        {items.map((i) => (
+          <div key={i.uid} className="rounded-xl border border-border p-3 text-sm">
+            <div className="flex justify-between gap-2">
+              <span className="font-semibold text-foreground">@{i.username || i.uid}</span>
+              <span>{Number(i.coins).toLocaleString()} 💎</span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {i.email || "—"} · {i.phone || "—"} · device par {i.deviceAccounts} account · IP par {i.ipAccounts}
+            </div>
+            <div className="text-xs mt-1 text-amber-700">{(i.flags || []).map((f: string) => labels[f] ?? f).join(" · ")}</div>
+            {i.note && <div className="text-xs mt-1">Note: {i.note}</div>}
+            {status === "pending" && (
+              <div className="flex gap-2 mt-2">
+                <button type="button" className="text-xs px-3 py-1 rounded-lg bg-emerald-500 text-white" disabled={decide.isPending}
+                  onClick={() => decide.mutate({ uid: i.uid, decision: "approve" })}>Approve + pay</button>
+                <button type="button" className="text-xs px-3 py-1 rounded-lg bg-red-500 text-white" disabled={decide.isPending}
+                  onClick={() => {
+                    const note = window.prompt("Reject karne ki wajah?");
+                    if (note && note.trim().length >= 3) decide.mutate({ uid: i.uid, decision: "reject", note: note.trim() });
+                  }}>Reject</button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </Card>
   );
 }

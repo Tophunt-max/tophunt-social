@@ -13,6 +13,7 @@
  * tokens on the edge (lib/firebaseAuth.ts) and uses the Identity Toolkit REST
  * API for admin user operations (lib/firebaseAdmin.ts).
  */
+import { sweepSignupBonuses } from "./lib/verificationReward";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
@@ -635,6 +636,8 @@ export default {
             await runCronJob(env, "coinReport", () => maybeSendCoinReport(env));
             // Seasons, background level-up/achievement sync, XP ledger check.
             await runCronJob(env, "gamificationHourly", () => gamificationHourly(env));
+            // Signup bonuses that were waiting for the account to age (lib/verificationReward.ts).
+            await runCronJob(env, "signupBonusSweep", () => sweepSignupBonuses(env));
           })(),
         );
         break;

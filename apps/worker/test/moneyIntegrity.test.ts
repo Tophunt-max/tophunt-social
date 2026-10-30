@@ -527,19 +527,22 @@ describe('no unledgered coin printer remains', () => {
 
 // ===========================================================================
 describe('reward settings in app-settings cannot corrupt a balance', () => {
-  it('rejects a fractional, negative, non-numeric or oversized referral bonus, and any signup bonus', async () => {
+  it('rejects a fractional, negative, non-numeric or oversized referral or signup bonus; the signup bonus pays after verification', async () => {
     const { env } = makeEnv();
 
     expect((await admin(env, 'POST', '/app-settings', { rewardSettings: { referralBonus: 10.5 } })).status).toBe(400);
     expect((await admin(env, 'POST', '/app-settings', { rewardSettings: { referralBonus: -1 } })).status).toBe(400);
     expect((await admin(env, 'POST', '/app-settings', { rewardSettings: { referralBonus: 'free' } })).status).toBe(400);
     expect((await admin(env, 'POST', '/app-settings', { rewardSettings: { referralBonus: 2_000_000 } })).status).toBe(400);
-    // The signup bonus was removed: any non-zero value is refused with an explanation.
-    const signup = await admin(env, 'POST', '/app-settings', { rewardSettings: { signupBonus: 100 } });
-    expect(signup.status).toBe(400);
-    expect(JSON.stringify(signup.body)).toMatch(/Signup bonus has been removed/);
+    // The signup bonus is validated like any coin amount...
+    expect((await admin(env, 'POST', '/app-settings', { rewardSettings: { signupBonus: -5 } })).status).toBe(400);
+    expect((await admin(env, 'POST', '/app-settings', { rewardSettings: { signupBonus: 2.5 } })).status).toBe(400);
     // Nothing bad was stored.
     expect(await drizzleOf(env).select().from(schema.settings).all()).toHaveLength(0);
+    // ...and a valid one becomes the after-verification amount (verificationReward.completionReward).
+    expect((await admin(env, 'POST', '/app-settings', { rewardSettings: { signupBonus: 100 } })).status).toBe(200);
+    const stored: any = (await drizzleOf(env).select().from(schema.settings).all())[0]?.data;
+    expect(stored.verificationReward).toMatchObject({ completionReward: 100, maxTotalReward: 100 });
 
     // Whole values within range are accepted (and a zero signup bonus is harmless).
     expect(
