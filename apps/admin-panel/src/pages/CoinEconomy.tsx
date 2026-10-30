@@ -36,7 +36,7 @@ import { ProgramSettings } from "@/pages/Referrals";
 import { GatewayConfig } from "@/pages/Deposits";
 import CoinPackages from "@/pages/CoinPackages";
 import Transactions from "@/pages/Transactions";
-import { CoinValuesCard, EconomyResetPanel, ShoppingSummaryCard, XpConversionCard } from "@/components/coin/ClosedLoopCards";
+import { CoinValuesCard, ShoppingSummaryCard, XpConversionCard } from "@/components/coin/ClosedLoopCards";
 
 /**
  * Coin Economy — the one place for everything coins: where every coin came from,
@@ -69,7 +69,6 @@ const TABS = [
   { key: "budgets", label: "Budgets" },
   { key: "ledger", label: "Ledger" },
   { key: "health", label: "Health" },
-  { key: "reset", label: "Fresh start" },
 ];
 
 const KIND_LABEL: Record<PromoBudgetKind, string> = {
@@ -126,7 +125,6 @@ export default function CoinEconomy() {
       {tab === "values" && <ValuesTab />}
       {tab === "contests" && <ContestsPnl />}
       {tab === "shopping" && <ShoppingTab />}
-      {tab === "reset" && <EconomyResetPanel />}
       {tab === "budgets" && <Budgets />}
       {tab === "ledger" && (
         <div className="space-y-8">

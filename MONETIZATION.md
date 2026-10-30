@@ -20,10 +20,12 @@ Earning (free) → 💎 Diamond → contest entry → win → 🪙 DP coin → S
   cron still credit an order that was paid before the switch, so nobody loses money.
 - Diamond → DP coin conversion does not exist, by design. XP → Diamond does (`lib/xpConversion.ts`): convertible XP is
   `xp - xp_converted`, so XP, levels and leaderboards never go down. Daily cap, charged to the free-rewards budget.
-- **Fresh start** (`lib/economyReset.ts`, Coin Economy → Fresh start): superadmin + approval password + typed phrase
-  `RESET ECONOMY`. Rejects every open withdrawal (held DP coin refunded), then zeroes DP coin and/or Diamonds through
-  `economy_reset` ledger rows, in resumable chunks. Refuses while any manual deposit is pending (those users paid ₹).
-  **Not run automatically.** Take a D1 backup and get legal advice first: DP coin was withdrawable money.
+- **Fresh start (done once, 2026-10-30, by the operator, not an admin tool).** On `tophunt-social-db`: 9 users,
+  0 DP coin and 5,826 Diamonds in total, no open withdrawals, no pending deposits. Every balance was set to 0 through one
+  `economy_reset` ledger row per user (id `economy_reset:fresh-start-2026-10-30:<uid>`), so `dpcoin = SUM(amount)` and
+  `locked_coins = SUM(locked_delta)` still hold (verified: 0 drift). Restore point before the reset: D1 Time Travel
+  bookmark `00000057-00000000-00005114-65e6bf3a832e4d5297657598f6b42315`
+  (`wrangler d1 time-travel restore tophunt-social-db --bookmark=<id>`, available for 30 days).
 
 ### Physical shop (`lib/shop.ts`, admin Shopping page, app `/shop`)
 

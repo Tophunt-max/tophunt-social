@@ -63,7 +63,7 @@ export const LEDGER_CATEGORIES: Record<string, string> = {
   shop_refund: "spend",
   // Earning: XP turned into Diamonds (lib/xpConversion.ts), paid from free-rewards budget.
   xp_conversion: "rewards",
-  // Admin fresh start (lib/economyReset.ts): balances removed, kept in the ledger.
+  // One-off fresh start run by the operator (MONETIZATION.md): removed balances, kept in the ledger.
   economy_reset: "reversals",
 };
 

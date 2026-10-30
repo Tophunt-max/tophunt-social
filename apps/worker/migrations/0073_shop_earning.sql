@@ -1,5 +1,5 @@
--- 0073 — Closed-loop economy: physical shop (DP coin), XP → Diamond conversion,
--- and the record of an admin economy reset. See MONETIZATION.md.
+-- 0073 — Closed-loop economy: physical shop (DP coin) and XP → Diamond conversion.
+-- See MONETIZATION.md.
 -- Money: product prices are stored in paise (INR); every order stores the
 -- DP coin price it was charged AND the ₹-per-DP-coin rate used, so a later
 -- rate change never rewrites an order.
@@ -100,19 +100,3 @@ CREATE TABLE IF NOT EXISTS xp_conversions (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_xp_conversions_uid_day ON xp_conversions (uid, day);
-
--- ---------------------------------------------------------------- economy reset
-
-CREATE TABLE IF NOT EXISTS economy_resets (
-  id              TEXT PRIMARY KEY,
-  reset_dp_coin   INTEGER NOT NULL,
-  reset_diamonds  INTEGER NOT NULL,
-  reason          TEXT NOT NULL,
-  started_by      TEXT NOT NULL,
-  users_reset     INTEGER NOT NULL DEFAULT 0,
-  dp_coin_removed REAL NOT NULL DEFAULT 0,
-  diamonds_removed REAL NOT NULL DEFAULT 0,
-  withdrawals_rejected INTEGER NOT NULL DEFAULT 0,
-  completed_at    INTEGER,
-  created_at      INTEGER NOT NULL
-);

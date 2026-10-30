@@ -291,7 +291,7 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["POST", /^\/gamification\/users\/[^/]+\/inventory\/[^/]+\/(revoke|restore)$/],
   ["PUT", /^\/gamification\/(achievements|catalog)\/[^/]+$/],
   // Monetization writes: prices, refunds, revenue imports, campaign approval.
-  ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop|economy)(\/.*)?$/],
+  ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop)(\/.*)?$/],
 ];
 export function isSensitiveAdminRoute(method: string, path: string): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;

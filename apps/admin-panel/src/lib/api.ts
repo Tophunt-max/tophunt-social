@@ -997,9 +997,6 @@ export const api = {
     shopOrders: (status?: string) => get<{ counts: Record<string, number>; orders: any[] }>(`/admin/monetization/shop/orders${status ? `?status=${status}` : ""}`),
     shopOrder: (id: string) => get<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}`),
     setOrderStatus: (id: string, payload: any) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/status`, payload),
-    // Economy reset (worker lib/economyReset.ts).
-    resetPreview: () => get<any>("/admin/monetization/economy/reset"),
-    runReset: (payload: any) => post<any>("/admin/monetization/economy/reset", payload),
   },
   appSettings: () => get<any>("/admin/app-settings"),
   // For You ranking weights: defaults, ranges, stored and effective values (full admins).

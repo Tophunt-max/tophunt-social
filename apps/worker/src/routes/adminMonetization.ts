@@ -29,8 +29,6 @@ import { purgeShared } from "../lib/edgeCache";
 import { ADMIN_TRANSITIONS, ORDER_STATUSES, loadOrder, transitionOrder, unitCoins, validateProductInput, type OrderStatus } from "../lib/shop";
 import { coinValuesFromConfig } from "../lib/coinPricing";
 import { createNotification } from "../lib/notify";
-import { RESET_CONFIRM_PHRASE, resetPreview, runResetChunk } from "../lib/economyReset";
-import { assertApproval } from "../lib/approvalPassword";
 
 type Audit = (c: any, action: string, targetType: string, targetId: string | null, detail?: Record<string, unknown>) => Promise<void>;
 
@@ -511,24 +509,4 @@ export function registerMonetizationRoutes(
     return c.json({ success: true, order: await loadOrder(c.env, id, null) });
   });
 
-  // ------------------------------------------------------------ economy reset (lib/economyReset.ts)
-
-  adminRoute.get("/monetization/economy/reset", async (c) => {
-    const history = await c.env.DB.prepare(`SELECT * FROM economy_resets ORDER BY created_at DESC LIMIT 20`).all<any>();
-    return c.json({ preview: await resetPreview(c.env), history: history.results ?? [] });
-  });
-
-  adminRoute.post("/monetization/economy/reset", async (c) => {
-    // Superadmin only, recent sign-in (sensitive route), approval password, typed phrase.
-    if (c.get("adminRole") !== "superadmin") throw httpsError("permission-denied", "Only a superadmin can reset the economy.");
-    const body = await c.req.json<any>().catch(() => ({}));
-    if (body?.confirm !== RESET_CONFIRM_PHRASE) throw httpsError("invalid-argument", `Type "${RESET_CONFIRM_PHRASE}" to confirm.`);
-    await assertApproval(c, body);
-    const reason = reasonOf(body);
-    const progress = await runResetChunk(c.env, {
-      resetId: String(body.resetId ?? ""), resetDpCoin: body.resetDpCoin === true, resetDiamonds: body.resetDiamonds === true, reason, actor: actorOf(c),
-    });
-    await logAudit(c, "economy.reset.chunk", "economy_reset", progress.resetId, { ...progress, resetDpCoin: body.resetDpCoin === true, resetDiamonds: body.resetDiamonds === true, reason });
-    return c.json(progress);
-  });
 }

@@ -22,7 +22,7 @@ Settings, Referrals, Deposits, Rewards) link there, so each setting has one edit
 Real-money deposits and withdrawals are retired (`lib/cashRetirement.ts`). Diamonds are earned for free and pay
 contest entries; DP coin is won and spent on gifts, digital items and the physical shop, **DP coin only**
 (`gift_send`, `store_purchase`, `shop_order`; refunds `store_refund`, `shop_refund`). XP can be turned into Diamonds
-(`xp_conversion`). An admin fresh start writes `economy_reset` rows. Every one of these is a ledger row in the same
+(`xp_conversion`). The one-off fresh start of 2026-10-30 wrote one `economy_reset` row per user. Every one of these is a ledger row in the same
 batch as the balance change, so the invariants below still hold. ₹ per coin: Coin Economy → Coin value
 (`coinPricing.dpCoinInr`, `coinPricing.diamondInr`). The tables below describe the earlier model where noted.
 Details: `MONETIZATION.md`.

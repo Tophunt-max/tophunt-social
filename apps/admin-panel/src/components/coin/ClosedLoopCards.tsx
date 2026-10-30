@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, describeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
-import { fmtDateTime, fmtNumber } from "@/lib/format";
-import { useAuth } from "@/lib/auth";
+import { fmtNumber } from "@/lib/format";
 import { Button, Card, Notice, Num, Text, Toggle, field, inr } from "@/components/monetization/shared";
 
 /**
@@ -104,115 +103,6 @@ function Row({ label, value, strong }: { label: string; value: React.ReactNode; 
     <div className={`flex items-center justify-between py-1 ${strong ? "font-semibold" : ""}`}>
       <span className="text-muted-foreground">{label}</span>
       <span>{value}</span>
-    </div>
-  );
-}
-
-const newResetId = () => `reset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-
-/**
- * Fresh start: reject open withdrawals (DP coin returned first), then set
- * balances to zero through ledger rows. Superadmin, approval password and a
- * typed phrase. Runs in chunks until done.
- */
-export function EconomyResetPanel() {
-  const qc = useQueryClient();
-  const { user } = useAuth();
-  const q = useQuery({ queryKey: ["economy-reset"], queryFn: api.monetization.resetPreview });
-  const [dp, setDp] = useState(true);
-  const [dia, setDia] = useState(true);
-  const [reason, setReason] = useState("");
-  const [phrase, setPhrase] = useState("");
-  const [password, setPassword] = useState("");
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<string | null>(null);
-  const p = q.data?.preview;
-  const isSuper = user?.role === "superadmin";
-
-  const run = async () => {
-    const resetId = newResetId();
-    setRunning(true);
-    try {
-      for (let i = 0; i < 500; i++) {
-        const r = await api.monetization.runReset({ resetId, resetDpCoin: dp, resetDiamonds: dia, reason, confirm: phrase, approvalPassword: password });
-        setProgress(`Withdrawals rejected: ${r.withdrawalsRejected} · users reset this step: ${r.usersReset} · remaining: ${r.remaining < 0 ? "…" : r.remaining}`);
-        if (r.done) break;
-      }
-      toast.success("Economy reset complete");
-      setPhrase("");
-      setPassword("");
-      qc.invalidateQueries();
-    } catch (e) {
-      toast.error(describeError(e));
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <Card title="Fresh start (economy reset)" subtitle="Rejects every open withdrawal (held DP coin is returned first), then sets the chosen balances to zero.">
-        <Notice tone="danger">
-          This removes coins from every user. DP coin was withdrawable before, so check with your CA or lawyer, take a D1 backup, and tell users before you run it. Each removed balance is kept as an <code>economy_reset</code> ledger row, so it can be traced and, if ever needed, restored.
-        </Notice>
-        {p ? (
-          <div className="grid sm:grid-cols-2 gap-2 text-sm">
-            <Row label="Users with a balance" value={fmtNumber(p.usersWithBalance)} />
-            <Row label="🪙 DP coin in total" value={fmtNumber(p.dpCoinTotal)} />
-            <Row label="💎 Diamonds in total" value={fmtNumber(p.diamondTotal)} />
-            <Row label="Open withdrawals" value={`${fmtNumber(p.openWithdrawals)} (${fmtNumber(p.openWithdrawalCoins)} DP coin)`} />
-            <Row label="Pending manual deposits" value={fmtNumber(p.pendingDeposits)} strong />
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        )}
-        {p?.pendingDeposits > 0 && (
-          <Notice tone="warning">Resolve the pending deposits first (Deposits page). Those users paid real money: reject and refund them, or approve them.</Notice>
-        )}
-        {!isSuper ? (
-          <Notice tone="warning">Only a superadmin can run the reset.</Notice>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex gap-6">
-              <Toggle label="Reset 🪙 DP coin" checked={dp} onChange={setDp} />
-              <Toggle label="Reset 💎 Diamonds" checked={dia} onChange={setDia} />
-            </div>
-            <Text label="Reason (kept in the ledger and audit log)" value={reason} onChange={setReason} placeholder="Withdrawals retired, fresh start" />
-            <label className="block">
-              <span className="text-xs text-muted-foreground mb-1 block">Approval password</span>
-              <input type="password" className={field} value={password} onChange={(e) => setPassword(e.target.value)} />
-            </label>
-            <Text label={`Type "${p?.confirmPhrase ?? "RESET ECONOMY"}" to confirm`} value={phrase} onChange={setPhrase} />
-            <div className="flex justify-end">
-              <Button
-                variant="danger"
-                disabled={running || !p || p.pendingDeposits > 0 || (!dp && !dia) || reason.trim().length < 3 || phrase !== p?.confirmPhrase}
-                onClick={() => void run()}
-              >
-                {running ? "Resetting…" : "Run reset"}
-              </Button>
-            </div>
-            {progress && <p className="text-xs text-muted-foreground">{progress}</p>}
-          </div>
-        )}
-      </Card>
-
-      <Card title="Past resets">
-        {(q.data?.history ?? []).length === 0 ? (
-          <p className="text-sm text-muted-foreground">None.</p>
-        ) : (
-          <div className="space-y-2 text-sm">
-            {q.data.history.map((h: any) => (
-              <div key={h.id} className="rounded-xl border border-border p-3">
-                <p className="font-semibold">{fmtDateTime(h.created_at)} · {h.completed_at ? "completed" : "in progress"}</p>
-                <p className="text-muted-foreground">
-                  {h.reason} · users {fmtNumber(h.users_reset)} · DP coin removed {fmtNumber(h.dp_coin_removed)} · Diamonds removed {fmtNumber(h.diamonds_removed)} · withdrawals rejected {fmtNumber(h.withdrawals_rejected)}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
     </div>
   );
 }
