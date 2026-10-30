@@ -101,6 +101,7 @@ import { playbackUrlFor, qencodeConfigured, thumbnailUrlFor } from "../lib/qenco
 import { applyEncodeResult, LIVE_STATUS_RECHECK_MS } from "../lib/videoReconcile";
 import { mediaRouting } from "../lib/mediaRouting";
 import { getAppConfig, getAppControlConfig, getRewardedAdConfig } from "../lib/settings";
+import { publicMonetizationConfig } from "../lib/monetizationConfig";
 import { appControlGate } from "../lib/appControl";
 import { PROFILE_INCOMPLETE_CODE } from "../lib/accountStatus";
 import { applyReferralCode, ensureReferralCode, qualifyReferral } from "../lib/referralProgram";
@@ -135,6 +136,11 @@ import {
  *  - vote:    votes cast;
  *  - share:   DIFFERENT battles shared (sharing one battle again does not count);
  *  - contest: contest entries (startMatch / joinMatch entry-fee ledger rows);
+ *  - like:    DIFFERENT battles liked (one row per battle, so unlike + like
+ *             again does not add up);
+ *  - comment: DIFFERENT battles commented on (spamming one battle counts once);
+ *  - follow:  people followed today (one row per person);
+ *  - ads:     rewarded ads credited today (ad_reward_claims, i.e. verified views);
  *  - ad:      not counted here (claimAdReward credits ads).
  */
 async function dailyTaskProgress(env: Env, uid: string, type: DailyTaskDef["type"], startOfDay: number): Promise<number> {
@@ -147,6 +153,14 @@ async function dailyTaskProgress(env: Env, uid: string, type: DailyTaskDef["type
     row = await env.DB.prepare(
       `SELECT COUNT(*) AS n FROM coin_transactions WHERE uid = ? AND type = 'contest_entry_fee' AND created_at >= ?`,
     ).bind(uid, startOfDay).first();
+  } else if (type === "like") {
+    row = await env.DB.prepare(`SELECT COUNT(DISTINCT match_id) AS n FROM match_likes WHERE user_id = ? AND created_at >= ?`).bind(uid, startOfDay).first();
+  } else if (type === "comment") {
+    row = await env.DB.prepare(`SELECT COUNT(DISTINCT match_id) AS n FROM match_comments WHERE user_id = ? AND created_at >= ?`).bind(uid, startOfDay).first();
+  } else if (type === "follow") {
+    row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM follows WHERE follower_id = ? AND created_at >= ?`).bind(uid, startOfDay).first();
+  } else if (type === "ads") {
+    row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ad_reward_claims WHERE uid = ? AND created_at >= ?`).bind(uid, startOfDay).first();
   }
   return Number(row?.n ?? 0);
 }
@@ -2169,7 +2183,17 @@ apiRoute.post("/", async (c) => {
           endsAt: t.endsAt,
         };
       });
-      return c.json({ tasks: out, resetsAt: startOfDay + 86_400_000 });
+      // Rewarded ads today, for the Earn screen's ad counter. Same day bucket and
+      // cap as the SSV credit (lib/admobSsv.ts), so "x of cap" matches what pays.
+      const rewarded = publicMonetizationConfig(await getAppConfig(env)).ads.rewarded;
+      const adsRow = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ad_reward_claims WHERE uid = ? AND day = ?`).bind(uid, day).first<{ n: number }>();
+      const ads = {
+        enabled: rewarded.enabled,
+        rewardDiamonds: rewarded.rewardDiamonds,
+        dailyCap: rewarded.dailyCap,
+        watchedToday: Number(adsRow?.n ?? 0),
+      };
+      return c.json({ tasks: out, resetsAt: startOfDay + 86_400_000, ads });
     }
 
     case "claimDailyTask": {

@@ -48,8 +48,9 @@ const FREE_REWARDS_OUT_MSG = 'Aaj ke free rewards khatam ho gaye hain. Thodi der
 const dailyFreeLimit = (e: any): string | null =>
   e?.reason === 'daily_free_limit' && typeof e?.message === 'string' ? e.message : null;
 
-const taskIcon = (type: string) =>
-  type === 'vote' ? 'stats-chart' : type === 'share' ? 'share-social' : type === 'contest' ? 'trophy' : 'videocam';
+const TASK_ICON: Record<string, string> = { vote: 'stats-chart', share: 'share-social', contest: 'trophy', like: 'heart', comment: 'chatbubble-outline', follow: 'people' };
+const taskIcon = (type: string) => TASK_ICON[type] ?? 'videocam';
+const TASK_GO: Record<string, string> = { vote: 'Vote', share: 'Share', contest: 'Join', like: 'Like', comment: 'Comment', follow: 'Follow' };
 
 /** One slot of the check-in track, as the Worker's `getDailyReward` returns it. */
 type DailySlot = { day: number; amount: number; status: 'claimed' | 'ready' | 'upcoming' };
@@ -127,7 +128,8 @@ export default function WalletScreen() {
   // offering a reward the backend will reject.
   const adsEnabled = (appConfig as any)?.ads?.enabled === true;
   const tasks = ((tasksResp as any)?.tasks || [])
-    .filter((t: any) => t.type !== 'ad' || adsEnabled)
+    // "ads" (watch N ads) counts verified rewarded ads, so it needs them switched on.
+    .filter((t: any) => (t.type !== 'ad' || adsEnabled) && (t.type !== 'ads' || (tasksResp as any)?.ads?.enabled === true))
     .map((t: any) => ({ ...t, maxProgress: t.target, icon: taskIcon(t.type) }));
 
   const claimTask = async (taskId: string) => {
@@ -241,9 +243,11 @@ export default function WalletScreen() {
     if (task.claimable) { claimTask(task.id); return; }
     // The share task counts battles shared from a battle's share button, so it
     // sends the user to the battles; sharing the invite link does not count.
-    if (task.type === 'share' || task.type === 'contest') router.push('/explore/battles' as any);
+    if (task.type === 'share' || task.type === 'contest' || task.type === 'like' || task.type === 'comment') router.push('/explore/battles' as any);
     else if (task.type === 'vote') router.push('/');
+    else if (task.type === 'follow') router.push('/explore/search' as any);
     else if (task.type === 'ad') startRewardedAd();
+    else if (task.type === 'ads') router.push('/earn' as any);
   };
 
   const renderFilter = (filter: string) => {
@@ -326,7 +330,7 @@ export default function WalletScreen() {
       ? 'Done'
       : item.claimable
         ? 'Claim'
-        : item.type === 'vote' ? 'Vote' : item.type === 'share' ? 'Share' : item.type === 'contest' ? 'Join' : 'Watch';
+        : TASK_GO[item.type] ?? 'Watch';
     return (
         <Animated.View entering={FadeInRight.delay(index * 100).duration(500)} style={[styles.taskCard, { backgroundColor: cardBg }]}>
             <View style={[styles.taskIconBox, { backgroundColor: isDark ? '#2A2D35' : '#F5F5F5' }]}>
