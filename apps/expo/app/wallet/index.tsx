@@ -34,6 +34,7 @@ import { readApi } from '@/src/services/api';
 import { useQuery } from '@tanstack/react-query';
 import { useDesignWindow } from '@/src/lib/layout';
 import { StreakMilestoneBanner } from '@/src/components/gamification/MotionBits';
+import { WalletShortcuts } from '@/src/components/gifts/WalletShortcuts';
 
 
 const FILTERS = ['All', 'Income', 'Expense'];
@@ -494,6 +495,8 @@ export default function WalletScreen() {
                         )}
                     </LinearGradient>
                 </Animated.View>
+
+                <WalletShortcuts isDark={isDark} />
 
                 {/* Daily Bonus Section (hidden while an admin has it switched off) */}
                 {dailyEnabled && dailyTrack.length > 0 && (

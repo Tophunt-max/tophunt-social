@@ -10,6 +10,8 @@ import { RarityPill } from '@/src/components/gamification/RarityPill';
 import { CosmeticPreview, GamificationEmpty } from '@/src/components/gamification/RewardBits';
 import { badgeState } from '@/src/lib/gamificationAssets';
 import { useEquipCosmetic, useInventory, type InventoryItemView } from '@/src/services/gamification';
+import { useMonetizationConfig } from '@/src/services/monetization';
+import { useRouter } from 'expo-router';
 
 const SECTIONS: { type: string; title: string; equippable: boolean }[] = [
   { type: 'frame', title: 'Profile frames', equippable: true },
@@ -32,6 +34,8 @@ export default function InventoryScreen() {
   const q = useInventory(!!user);
   const avatar = { uri: user?.photoURL ?? null, name: user?.displayName ?? null };
   const equip = useEquipCosmetic();
+  const router = useRouter();
+  const storeOpen = useMonetizationConfig().store.enabled;
 
   const sections = useMemo(() => {
     const items = q.data?.items ?? [];
@@ -54,6 +58,12 @@ export default function InventoryScreen() {
       <View style={styles.header}>
         <BackButton size={24} color={p.text} style={{ marginRight: 12 }} />
         <Text style={[styles.headerTitle, { color: p.text }]} accessibilityRole="header">Inventory</Text>
+        <View style={{ flex: 1 }} />
+        {storeOpen ? (
+          <TouchableOpacity onPress={() => router.push('/rewards/store' as any)} accessibilityRole="button">
+            <Text style={{ color: BRAND, fontFamily: 'Urbanist-Bold', fontSize: 14 }}>Store</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
       {q.isLoading ? (
         <View style={styles.center}><ActivityIndicator color={BRAND} /></View>

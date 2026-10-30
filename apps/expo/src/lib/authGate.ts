@@ -23,7 +23,8 @@ export type GatedAction =
   | 'notifications'
   | 'wallet'
   | 'profile'
-  | 'report';
+  | 'report'
+  | 'gift';
 
 const COPY: Record<GatedAction, string> = {
   like: 'like battles',
@@ -40,6 +41,7 @@ const COPY: Record<GatedAction, string> = {
   wallet: 'use your wallet',
   profile: 'see your profile',
   report: 'report content',
+  gift: 'send gifts',
 };
 
 export function authPromptCopy(action: GatedAction): { title: string; message: string } {
