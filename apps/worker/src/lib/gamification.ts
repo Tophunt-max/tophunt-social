@@ -145,18 +145,31 @@ export interface DailyTaskDef {
   /** XP for completing the task (daily quest). 0 = none. Capped by the daily_task rule. */
   xp: number;
   target: number;
-  type: "vote" | "share" | "contest" | "ad";
+  /**
+   * What counts as progress (counted on the server, api.ts#dailyTaskProgress):
+   * vote, share (distinct battles), contest (entries), like (distinct battles
+   * liked), comment (distinct battles commented on), follow (people followed),
+   * ads (verified rewarded ads watched; a bonus on top of each ad's own reward).
+   * "ad" is the legacy single-ad row, credited by the ad itself and never
+   * claimable as a task.
+   */
+  type: "vote" | "share" | "contest" | "like" | "comment" | "follow" | "ads" | "ad";
   /** Off: hidden and not claimable, but kept in the list. */
   enabled: boolean;
   /** Optional window (epoch ms) for limited-time tasks. */
   startsAt: number | null;
   endsAt: number | null;
 }
-export const DAILY_TASK_TYPES = ["vote", "share", "contest", "ad"] as const;
+export const DAILY_TASK_TYPES = ["vote", "share", "contest", "like", "comment", "follow", "ads", "ad"] as const;
 export const DEFAULT_DAILY_TASKS: DailyTaskDef[] = [
   { id: "vote5", title: "Vote in 5 battles", reward: 15, xp: 15, target: 5, type: "vote", enabled: true, startsAt: null, endsAt: null },
   { id: "share", title: "Share a battle", reward: 10, xp: 0, target: 1, type: "share", enabled: true, startsAt: null, endsAt: null },
+  { id: "like5", title: "Like 5 battles", reward: 5, xp: 5, target: 5, type: "like", enabled: true, startsAt: null, endsAt: null },
+  { id: "comment3", title: "Comment on 3 battles", reward: 10, xp: 10, target: 3, type: "comment", enabled: true, startsAt: null, endsAt: null },
+  { id: "follow3", title: "Follow 3 creators", reward: 5, xp: 5, target: 3, type: "follow", enabled: true, startsAt: null, endsAt: null },
+  { id: "join1", title: "Join a contest", reward: 10, xp: 10, target: 1, type: "contest", enabled: true, startsAt: null, endsAt: null },
   { id: "watch_ad", title: "Watch a video ad", reward: 5, xp: 0, target: 1, type: "ad", enabled: true, startsAt: null, endsAt: null },
+  { id: "ads3", title: "Watch 3 video ads", reward: 10, xp: 0, target: 3, type: "ads", enabled: true, startsAt: null, endsAt: null },
 ];
 
 const optionalMs = (v: unknown): number | null => {
