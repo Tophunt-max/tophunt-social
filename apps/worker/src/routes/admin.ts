@@ -579,7 +579,7 @@ adminRoute.post("/app-settings", async (c) => {
   edgePurgeUrl(c, "/read/app-config");
   // Push the new public config to every connected app instance (all shards), so
   // maintenance / flags / banner change within seconds instead of on the next poll.
-  const pushed = publicAppConfig(merged, Date.now());
+  const pushed = publicAppConfig(merged, Date.now(), cashFlowsRetired(c.env));
   c.executionCtx.waitUntil(publishMany(c.env, appConfigChannels(), { type: "config", config: pushed }));
   // Package prices are base coins × buy rate: a new buy rate re-prices the whole
   // store, and a new payout rate can change which packages are sellable, so push
@@ -4797,6 +4797,11 @@ adminRoute.patch("/deposits/:id", async (c) => {
   const id = c.req.param("id");
   const { action, adminNote } = await c.req.json<any>();
   if (!["approve", "reject"].includes(action)) throw httpsError("invalid-argument", "Invalid action.");
+  // Buying Diamonds is retired (lib/cashRetirement.ts): an old pending deposit
+  // can only be rejected (and the ₹ refunded outside the app).
+  if (action === "approve" && cashFlowsRetired(c.env)) {
+    throw httpsError("failed-precondition", "Deposits are retired. Reject this request and refund the payment outside the app.", CASH_RETIRED_REASON);
+  }
   const d = await db.select().from(schema.deposits).where(eq(schema.deposits.id, id)).get();
   if (!d) throw httpsError("not-found", "Deposit not found.");
   if (d.status !== "pending") throw httpsError("failed-precondition", "Deposit is already processed.");

@@ -75,6 +75,29 @@ describe('cash flows retired', () => {
     expect((await user(env, 'alice'))!.dpcoin).toBe(100);
   });
 
+  it('tells old app builds that buying, UPI deposits and withdrawals are off, whatever the stored config says', async () => {
+    const { env } = makeEnv(RETIRED);
+    await config(env, { features: { topups: true, withdrawals: true }, withdrawal: { enabled: true }, paymentGateway: { mode: 'manual', upiId: 'x@upi', qrImageUrl: 'https://media.test/qr.jpg' } });
+    const res = await app.request('/read/app-config', {}, env, fakeCtx());
+    const body: any = await res.json();
+    expect(body.features).toMatchObject({ topups: false, withdrawals: false });
+    expect(body.withdrawal).toMatchObject({ enabled: false, payoutsFrozen: true });
+    expect(body.paymentGateway).toEqual({ mode: 'off' });
+    expect(JSON.stringify(body)).not.toMatch(/x@upi|qr\.jpg/);
+  });
+
+  it('admin can no longer approve an old manual deposit, only reject it', async () => {
+    const { env } = makeEnv(RETIRED);
+    await seedUser(env, 'alice');
+    const ts = Date.now();
+    await drizzleOf(env).insert(schema.deposits).values({ id: 'd1', userId: 'alice', amount: 100, payAmount: 10, utr: 'UTR12345', status: 'pending', createdAt: ts, updatedAt: ts } as any);
+    let r = await admin(env, 'PATCH', '/deposits/d1', { action: 'approve' });
+    expect(r.body.error.reason).toBe('cash_flows_retired');
+    expect((await user(env, 'alice'))!.dpcoin).toBe(0);
+    r = await admin(env, 'PATCH', '/deposits/d1', { action: 'reject', adminNote: 'retired' });
+    expect(r.status).toBe(200);
+  });
+
   it('defaults to retired when the deploy flag is missing', async () => {
     const { env } = makeEnv({ CASH_FLOWS_RETIRED: undefined } as any);
     await seedUser(env, 'alice', 100);
