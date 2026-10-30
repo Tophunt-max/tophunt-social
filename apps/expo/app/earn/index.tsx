@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,6 +20,7 @@ import { useDesignWindow } from '@/src/lib/layout';
 import { useAppConfig } from '@/src/services/appSettings';
 import { walletService } from '@/src/services/wallet/walletService';
 import { getAdProvider } from '@/src/services/ads/adProvider';
+import { preloadWebRewarded, showWebRewarded, type WebRewardedOutcome } from '@/src/services/ads/webRewarded';
 import { newRequestId, useMonetizationConfig } from '@/src/services/monetization';
 import { useConvertXp, useXpConversion } from '@/src/services/shop';
 
@@ -50,6 +51,16 @@ const freeRewardsOut = (e: any) => typeof e?.message === 'string' && e.message.t
 const dailyFreeLimit = (e: any): string | null => (e?.reason === 'daily_free_limit' && typeof e?.message === 'string' ? e.message : null);
 const errorText = (e: any, fallback: string) =>
   dailyFreeLimit(e) ?? (freeRewardsOut(e) ? 'Aaj ke free rewards khatam ho gaye hain. Thodi der baad try karo.' : e?.message || fallback);
+
+const IS_WEB = Platform.OS === 'web';
+/** What to tell the user when a web ad did not end in a reward. */
+const WEB_OUTCOME_TEXT: Record<Exclude<WebRewardedOutcome, 'granted'>, string> = {
+  closed: 'Ad poora nahi hua, isliye reward nahi mila.',
+  no_fill: 'Abhi koi ad available nahi hai. Thodi der baad try karo.',
+  unsupported: 'Video ads abhi sirf mobile browser par chalte hain. Phone par tophunt.in kholo.',
+  blocked: 'Ad load nahi hua. Ad blocker band karke dobara try karo.',
+};
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type DailySlot = { day: number; amount: number; status: 'claimed' | 'ready' | 'upcoming' };
 type Task = { id: string; title: string; reward: number; xp: number; target: number; type: string; progress: number; claimed: boolean; claimable: boolean; endsAt: number | null };
@@ -85,12 +96,21 @@ export default function EarnScreen() {
   const checkinReady = checkinOn && d.claimedToday !== true;
 
   const tr: any = tasksQ.data ?? {};
-  const adInfo = {
-    enabled: tr.ads?.enabled ?? mon.ads.rewarded.enabled,
-    reward: Number(tr.ads?.rewardDiamonds ?? mon.ads.rewarded.rewardDiamonds) || 0,
-    cap: Number(tr.ads?.dailyCap ?? mon.ads.rewarded.dailyCap) || 0,
-    watched: Number(tr.ads?.watchedToday ?? 0),
-  };
+  // The web build shows Google Ad Manager ads with their own reward and cap;
+  // the app shows AdMob. Both counters come from getDailyTasks.
+  const adInfo = IS_WEB
+    ? {
+        enabled: tr.ads?.web?.enabled ?? false,
+        reward: Number(tr.ads?.web?.rewardDiamonds ?? mon.ads.web.rewardDiamonds) || 0,
+        cap: Number(tr.ads?.web?.dailyCap ?? mon.ads.web.dailyCap) || 0,
+        watched: Number(tr.ads?.web?.watchedToday ?? 0),
+      }
+    : {
+        enabled: tr.ads?.enabled ?? mon.ads.rewarded.enabled,
+        reward: Number(tr.ads?.rewardDiamonds ?? mon.ads.rewarded.rewardDiamonds) || 0,
+        cap: Number(tr.ads?.dailyCap ?? mon.ads.rewarded.dailyCap) || 0,
+        watched: Number(tr.ads?.watchedToday ?? 0),
+      };
   const adsLeft = Math.max(0, adInfo.cap - adInfo.watched);
   const allTasks: Task[] = useMemo(() => tr.tasks ?? [], [tr.tasks]);
   // The legacy single "ad" row is paid by the ad itself; the ad card covers it.
@@ -112,6 +132,11 @@ export default function EarnScreen() {
     (checkinReady ? Number(d.todayReward) || 0 : 0) +
     (adInfo.enabled ? adsLeft * adInfo.reward : 0);
   const referral = (config as any)?.referral;
+
+  // Fetch GPT as soon as web ads are on, so the tap shows the ad quickly.
+  useEffect(() => {
+    if (IS_WEB && adInfo.enabled) preloadWebRewarded();
+  }, [adInfo.enabled]);
 
   const refreshAll = () => {
     void refetchMe();
@@ -165,8 +190,50 @@ export default function EarnScreen() {
    * paid by the ad network's server-side callback to the Worker, so we refetch a
    * moment later instead of crediting anything here.
    */
+  /**
+   * Web: ask the server for a watch token, show the Ad Manager ad, and once GPT
+   * grants the reward (and the minimum watch time has passed) claim the token.
+   */
+  const watchWebAd = async () => {
+    if (!adInfo.enabled) {
+      setAdSheet(true);
+      return;
+    }
+    if (adsLeft <= 0) {
+      emitToast('Aaj ke saare ads ho gaye. Kal phir aao!', 'info');
+      return;
+    }
+    setBusy('ad');
+    try {
+      const t0 = Date.now();
+      const start = await walletService.startWebAd();
+      const outcome = await showWebRewarded(start.adUnitPath);
+      if (outcome !== 'granted') {
+        emitToast(WEB_OUTCOME_TEXT[outcome], 'info');
+        return;
+      }
+      // The server only pays after the minimum watch time (+1s for clock drift).
+      const wait = start.minWatchSec * 1000 + 1000 - (Date.now() - t0);
+      if (wait > 0) await sleep(wait);
+      const r = await walletService.claimWebAdReward(start.token);
+      success(`+${r.reward} Diamond mil gaye!${r.remaining > 0 ? ` Aaj ${r.remaining} ad aur.` : ''}`);
+      refreshAll();
+    } catch (e: any) {
+      if (e?.reason === 'phone_not_verified') {
+        emitToast(e.message || 'Pehle mobile number verify karo.', 'info');
+        router.push('/profile/manage/verification' as any);
+        return;
+      }
+      fail(errorText(e, 'Ad reward nahi mila. Dobara try karo.'));
+      void tasksQ.refetch();
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const watchAd = async () => {
     if (busy) return;
+    if (IS_WEB) return watchWebAd();
     const provider = getAdProvider();
     if (!adInfo.enabled || !provider.isAvailable()) {
       setAdSheet(true);
@@ -221,7 +288,7 @@ export default function EarnScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 48, width: contentW, alignSelf: 'center' }}
+        contentContainerStyle={{ paddingBottom: IS_WEB && adInfo.enabled ? 120 : 48, width: contentW, alignSelf: 'center' }}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refreshAll} tintColor={BRAND} />}
       >
         {/* Balance + today's potential */}
@@ -346,6 +413,30 @@ export default function EarnScreen() {
         </View>
         {mon.earning.xpConversion.enabled ? <XpCard p={p} status={xp.data} loading={xp.isLoading} onDone={() => void refetchMe()} /> : null}
       </ScrollView>
+
+      {/* Web: the ad is the main way to earn, so it stays one tap away while scrolling. */}
+      {IS_WEB && adInfo.enabled && adsLeft > 0 ? (
+        <View style={[styles.floatWrap, { width: contentW }]} pointerEvents="box-none">
+          <TouchableOpacity
+            onPress={() => void watchAd()}
+            disabled={busy === 'ad'}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel={`Watch an ad for ${adInfo.reward} Diamonds, ${adsLeft} left today`}
+          >
+            <LinearGradient colors={['#8B5CF6', '#FF4D67', '#FF8A4D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.float}>
+              <View style={styles.floatPlay}>
+                {busy === 'ad' ? <ActivityIndicator color="#FF4D67" size="small" /> : <Ionicons name="play" size={18} color="#FF4D67" />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.floatTitle}>{busy === 'ad' ? 'Ad chal raha hai…' : `Ad dekho, +${adInfo.reward} Diamond pao`}</Text>
+                <Text style={styles.floatSub}>Aaj {adsLeft} ad baaki · {(adsLeft * adInfo.reward).toLocaleString()} Diamond</Text>
+              </View>
+              <DiamondIcon size={20} color="#FFF" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* Ads not available in this build / switched off */}
       <Modal visible={adSheet} transparent animationType="fade" onRequestClose={() => setAdSheet(false)}>
@@ -743,6 +834,24 @@ const styles = StyleSheet.create({
 
   empty: { marginHorizontal: PAD, borderRadius: 18, borderWidth: 1.5, borderStyle: 'dashed', padding: 18, alignItems: 'center', gap: 8 },
   emptyText: { fontFamily: 'Urbanist-Medium', fontSize: 13, textAlign: 'center' },
+
+  floatWrap: { position: 'absolute', bottom: 16, alignSelf: 'center', paddingHorizontal: PAD },
+  float: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 22,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    shadowColor: '#FF4D67',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  floatPlay: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center' },
+  floatTitle: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 14.5 },
+  floatSub: { color: 'rgba(255,255,255,0.88)', fontFamily: 'Urbanist-SemiBold', fontSize: 11.5, marginTop: 1 },
 
   sheetBack: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   sheet: { width: '100%', maxWidth: 380, borderRadius: 26, padding: 22, gap: 12, alignItems: 'center' },

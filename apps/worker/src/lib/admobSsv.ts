@@ -166,7 +166,7 @@ export async function creditVerifiedAdReward(env: Env, p: SsvParams, ts = Date.n
     env.DB.prepare(
       `INSERT OR IGNORE INTO ad_reward_claims (id, uid, day, provider, reward, created_at)
        SELECT ?, ?, ?, 'admob', ?, ?
-        WHERE (SELECT COUNT(*) FROM ad_reward_claims WHERE uid = ? AND day = ?) < ? AND ${capGate.sql}`,
+        WHERE (SELECT COUNT(*) FROM ad_reward_claims WHERE uid = ? AND day = ? AND COALESCE(provider, '') <> 'web') < ? AND ${capGate.sql}`,
     ).bind(claimId, p.userId, day, reward, ts, p.userId, day, m.ads.rewarded.dailyCap, ...capGate.args),
     ...budget.reserve,
     env.DB.prepare(

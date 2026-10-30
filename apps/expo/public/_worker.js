@@ -79,7 +79,11 @@ export const CONTENT_SECURITY_POLICY =
   // apis.google.com serves gapi (`/js/api.js`), which Firebase's web SDK loads to
   // run Google / Facebook / Apple sign-in. Without it every social sign-in failed
   // with "auth/internal-error" before the popup even opened.
-  "script-src 'self' 'unsafe-inline' https://apis.google.com https://*.gstatic.com https://*.googleapis.com https://static.cloudflareinsights.com; " +
+  // Google Ad Manager (GPT) for rewarded video ads on the Earn page
+  // (src/services/ads/webRewarded.ts). Google only documents a nonce-based
+  // strict CSP for GPT; this allowlist covers today's ad hosts and may need a
+  // new host if Google adds one (watch the console for CSP violations).
+  "script-src 'self' 'unsafe-inline' https://apis.google.com https://*.gstatic.com https://*.googleapis.com https://static.cloudflareinsights.com https://securepubads.g.doubleclick.net https://*.doubleclick.net https://*.googlesyndication.com https://*.googletagservices.com https://*.adtrafficquality.google; " +
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data: blob: https:; " +
   "media-src 'self' blob: https:; " +
@@ -94,10 +98,13 @@ export const CONTENT_SECURITY_POLICY =
   'https://securetoken.googleapis.com https://identitytoolkit.googleapis.com ' +
   'https://fcmregistrations.googleapis.com ' +
   // The analytics beacon POSTs its payload back to this host.
-  'https://cloudflareinsights.com; ' +
+  'https://cloudflareinsights.com ' +
+  // Ad requests and ad-quality pings (GPT).
+  'https://*.doubleclick.net https://*.googlesyndication.com https://*.adtrafficquality.google https://www.google.com; ' +
   // 'self': on tophunt.in the Firebase auth iframe is served first-party from
   // `/__/auth/iframe` (see FIREBASE_AUTH_PROXY below).
-  "frame-src 'self' https://*.firebaseapp.com; " +
+  // Ad creatives render in Google's safe frames.
+  "frame-src 'self' https://*.firebaseapp.com https://*.doubleclick.net https://*.googlesyndication.com https://www.google.com; " +
   // `blob:` is required by hls.js, which plays HLS on the web: it spawns
   // its demuxer in a Web Worker created from a blob URL. Without this the worker
   // is blocked and playback degrades to the main thread (or fails outright).
