@@ -36,6 +36,7 @@ import { ProgramSettings } from "@/pages/Referrals";
 import { GatewayConfig } from "@/pages/Deposits";
 import CoinPackages from "@/pages/CoinPackages";
 import Transactions from "@/pages/Transactions";
+import { CoinValuesCard, EconomyResetPanel, ShoppingSummaryCard, XpConversionCard } from "@/components/coin/ClosedLoopCards";
 
 /**
  * Coin Economy — the one place for everything coins: where every coin came from,
@@ -57,15 +58,18 @@ import Transactions from "@/pages/Transactions";
  *
  * Worker: lib/coinEconomy.ts, lib/promoBudget.ts, lib/approvalPassword.ts.
  */
+// Closed loop: Earning (free) → Diamond → contests → DP coin → Shopping.
+// "Buy" and "Cash out" were the real-money tabs; they are retired.
 const TABS = [
   { key: "overview", label: "Overview" },
-  { key: "earn", label: "Earn" },
-  { key: "buy", label: "Buy" },
+  { key: "earn", label: "Earning" },
+  { key: "values", label: "Coin value (₹)" },
   { key: "contests", label: "Contests" },
-  { key: "cashout", label: "Cash out" },
+  { key: "shopping", label: "Shopping" },
   { key: "budgets", label: "Budgets" },
   { key: "ledger", label: "Ledger" },
   { key: "health", label: "Health" },
+  { key: "reset", label: "Fresh start" },
 ];
 
 const KIND_LABEL: Record<PromoBudgetKind, string> = {
@@ -99,12 +103,15 @@ const field =
   "w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
 export default function CoinEconomy() {
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    return TABS.some((x) => x.key === t) ? (t as string) : "overview";
+  });
   return (
     <div>
       <PageHeader
         title="Coin Economy"
-        subtitle="Har DP coin aur Diamond ka hisab: kahan se aaya, kahan gaya, aur platform ne apni taraf se kitna diya."
+        subtitle="Earning se 💎 Diamond → contest → 🪙 DP coin → Shopping. Asli ₹ na aata hai na jaata hai; ₹ sirf coin ki value hai."
       />
       <div className="overflow-x-auto">
         <SegTabs tab={tab} setTab={setTab} tabs={TABS} />
@@ -116,9 +123,10 @@ export default function CoinEconomy() {
         </div>
       )}
       {tab === "earn" && <EarnTab />}
-      {tab === "buy" && <BuyTab />}
+      {tab === "values" && <ValuesTab />}
       {tab === "contests" && <ContestsPnl />}
-      {tab === "cashout" && <CashOutTab />}
+      {tab === "shopping" && <ShoppingTab />}
+      {tab === "reset" && <EconomyResetPanel />}
       {tab === "budgets" && <Budgets />}
       {tab === "ledger" && (
         <div className="space-y-8">
@@ -219,6 +227,7 @@ function EarnTab() {
         <DailyLoginCard rewards={rewards.data} />
         <DailyTasksCard rewards={rewards.data} />
         <RewardStatsCard />
+        <XpConversionCard />
         <AdsRewardCard data={data} />
         <HallOfFameCard rewards={rewards.data} />
       </div>
@@ -232,49 +241,32 @@ function EarnTab() {
   );
 }
 
-// ─── Buy ─────────────────────────────────────────────────────────────────────
+// ─── Coin value (₹) ──────────────────────────────────────────────────────────
 
-function BuyTab() {
+function ValuesTab() {
   const { data, isLoading, save } = useAppConfig();
   if (isLoading || !data) return <p className="text-sm text-muted-foreground py-10 text-center">Loading…</p>;
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        <CoinPricingCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
-        <GatewayConfig />
-      </div>
-      <CoinPackages />
-      <div>
-        <p className="font-bold text-foreground mb-3">Package P&amp;L</p>
-        <PackagesPnl />
-      </div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+      <CoinValuesCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
+      <ShoppingSummaryCard />
     </div>
   );
 }
 
-// ─── Cash out ────────────────────────────────────────────────────────────────
+// ─── Shopping (replaces Cash out) ────────────────────────────────────────────
 
-function CashOutTab() {
-  const { data, isLoading, save } = useAppConfig();
-  const { confirm } = useConfirm();
-  const eco = useQuery({ queryKey: ["coin-economy"], queryFn: () => api.coinEconomy() });
-  if (isLoading || !data) return <p className="text-sm text-muted-foreground py-10 text-center">Loading…</p>;
+function ShoppingTab() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-      <WithdrawalCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} confirm={confirm} />
-      <Card title="Payout ka hisab">
-        {eco.data ? (
-          <>
-            <Row label="DP coin (withdraw ho sakte)" value={fmtNumber(eco.data.supply.withdrawable)} />
-            <Row label="Liability (agar sab nikal lein)" value={inr(eco.data.supply.liabilityInr)} />
-            <Row label="Payout bheja" value={inr(eco.data.cash.paidOutInr)} />
-            <Row label="Payout baaki (pending/approved)" value={inr(eco.data.cash.pendingOutInr)} strong />
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        )}
-        <p className="mt-3 text-sm">
-          <Link href="/withdrawals" className="font-semibold text-primary">Withdrawal requests approve / pay karo →</Link>
+      <ShoppingSummaryCard />
+      <Card title="Old deposits and withdrawals">
+        <p className="text-sm text-muted-foreground">
+          Real-money top-ups and withdrawals are switched off on the server. Their history stays readable, and any withdrawal still open can only be rejected (the DP coin goes back to the user).
+        </p>
+        <p className="mt-3 text-sm space-x-4">
+          <Link href="/withdrawals" className="font-semibold text-primary">Withdrawal history →</Link>
+          <Link href="/deposits" className="font-semibold text-primary">Deposit history →</Link>
         </p>
       </Card>
     </div>

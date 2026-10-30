@@ -991,6 +991,15 @@ export const api = {
     updateCampaign: (id: string, payload: any) => patch(`/admin/monetization/campaigns/${encodeURIComponent(id)}`, payload),
     setCampaignStatus: (id: string, status: string, note?: string) => post(`/admin/monetization/campaigns/${encodeURIComponent(id)}/status`, { status, note }),
     campaignReport: (id: string) => get<any>(`/admin/monetization/campaigns/${encodeURIComponent(id)}/report`),
+    // Physical shop (worker lib/shop.ts).
+    shopProducts: () => get<{ dpCoinInr: number; products: any[] }>("/admin/monetization/shop/products"),
+    saveProduct: (id: string, payload: any) => put(`/admin/monetization/shop/products/${encodeURIComponent(id)}`, payload),
+    shopOrders: (status?: string) => get<{ counts: Record<string, number>; orders: any[] }>(`/admin/monetization/shop/orders${status ? `?status=${status}` : ""}`),
+    shopOrder: (id: string) => get<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}`),
+    setOrderStatus: (id: string, payload: any) => post<any>(`/admin/monetization/shop/orders/${encodeURIComponent(id)}/status`, payload),
+    // Economy reset (worker lib/economyReset.ts).
+    resetPreview: () => get<any>("/admin/monetization/economy/reset"),
+    runReset: (payload: any) => post<any>("/admin/monetization/economy/reset", payload),
   },
   appSettings: () => get<any>("/admin/app-settings"),
   // For You ranking weights: defaults, ranges, stored and effective values (full admins).
