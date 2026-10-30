@@ -186,7 +186,7 @@ export function announcementId(a: any): string {
  * Everything the app may know, for every caller (it is public and unauthenticated).
  * Explicit allow-list: a new setting is private unless it is added here.
  */
-export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
+export function publicAppConfig(cfg: any, nowMs: number = Date.now(), cashRetired = true) {
   cfg = cfg || {};
   const ads = cfg.ads || {};
   const withdrawal = cfg.withdrawal || {};
@@ -217,7 +217,10 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
       startAt: num(a.startAt),
       endAt: num(a.endAt),
     },
-    features: resolveFeatures(cfg),
+    // Old app builds still read `topups` / `withdrawals`. With real money retired
+    // (lib/cashRetirement.ts) they are always reported off, so those builds hide
+    // Buy Diamonds / manual UPI deposit / Withdraw.
+    features: cashRetired ? { ...resolveFeatures(cfg), topups: false, withdrawals: false } : resolveFeatures(cfg),
     // Only partial rollouts are sent; the app applies them per account.
     featureRollout: Object.fromEntries(
       FEATURE_KEYS.filter((k) => rolloutPercent(cfg, k) < 100).map((k) => [k, rolloutPercent(cfg, k)]),
@@ -228,8 +231,8 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
     appleLogin: methodAllowed(authMethods, "apple"),
     facebookLogin: methodAllowed(authMethods, "facebook"),
     withdrawal: {
-      enabled: withdrawal.enabled !== false,
-      payoutsFrozen: withdrawal.payoutsFrozen === true,
+      enabled: !cashRetired && withdrawal.enabled !== false,
+      payoutsFrozen: cashRetired || withdrawal.payoutsFrozen === true,
       minAmount: Number(withdrawal.minAmount ?? 0),
       maxAmount: Number(withdrawal.maxAmount ?? 0),
       maxPerDay: Number(withdrawal.maxPerDay ?? 0),
@@ -237,7 +240,8 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
       // Platform fee, shown to the user before they confirm (lib/withdrawalFee.ts).
       ...feeRuleFromConfig(cfg),
     },
-    paymentGateway: { mode: cfg.paymentGateway?.mode || "auto" },
+    // "off": no checkout and no manual UPI/QR deposit (old builds read this).
+    paymentGateway: { mode: cashRetired ? "off" : cfg.paymentGateway?.mode || "auto" },
     // What the signup and invite screens may show (rewards, qualifying action).
     referral: publicReferralConfig(parseReferralConfig(cfg), cfg),
     // Explore banners (live ones only) and section order (lib/exploreConfig.ts).

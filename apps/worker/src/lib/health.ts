@@ -14,6 +14,7 @@
 import type { Env } from "../types";
 import { cronHealth } from "./ops";
 import { resolveSecret, getRazorpayCredentials } from "./integrations";
+import { cashFlowsRetired } from "./cashRetirement";
 import { integrationHealth } from "../routes/integrations";
 import { mediaRouting } from "./mediaRouting";
 
@@ -93,9 +94,10 @@ export async function computeDeepHealth(env: Env): Promise<DeepHealth> {
   const requiredSecrets: Record<string, unknown> = {
     FIREBASE_SERVICE_ACCOUNT: faSvc,
     FIREBASE_PROJECT_ID: env.FIREBASE_PROJECT_ID,
-    RAZORPAY_KEY_ID: rzp.keyId,
-    RAZORPAY_KEY_SECRET: rzp.keySecret,
-    RAZORPAY_WEBHOOK_SECRET: rzp.webhookSecret,
+    // Razorpay is only needed while real-money payments exist (lib/cashRetirement.ts).
+    ...(cashFlowsRetired(env)
+      ? {}
+      : { RAZORPAY_KEY_ID: rzp.keyId, RAZORPAY_KEY_SECRET: rzp.keySecret, RAZORPAY_WEBHOOK_SECRET: rzp.webhookSecret }),
     R2_PUBLIC_BASE_URL: env.R2_PUBLIC_BASE_URL,
     ALLOWED_ORIGINS: env.ALLOWED_ORIGINS,
   };
@@ -113,7 +115,7 @@ export async function computeDeepHealth(env: Env): Promise<DeepHealth> {
   try {
     const providers = await integrationHealth(env);
     const missing = Object.entries(providers)
-      .filter(([, ok]) => !ok)
+      .filter(([name, ok]) => !ok && !(name === "razorpay" && cashFlowsRetired(env)))
       .map(([name]) => name);
     checks.integrations = {
       ok: missing.filter((m) => m !== "qencodeVideo").length === 0,

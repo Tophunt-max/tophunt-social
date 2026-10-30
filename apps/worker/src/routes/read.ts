@@ -1987,7 +1987,7 @@ readRoute.get("/app-config", async (c) => {
     c,
     APP_CONFIG_EDGE_TTL_SEC,
     async () => ({
-      ...publicAppConfig((await getAppConfig(c.env)) || {}, Date.now()),
+      ...publicAppConfig((await getAppConfig(c.env)) || {}, Date.now(), cashFlowsRetired(c.env)),
       // The client builds responsive Cloudflare variants itself
       // (apps/expo/src/lib/imageVariants.ts). This is its kill switch: false makes
       // every image load the original, without an app release. Env-derived, so

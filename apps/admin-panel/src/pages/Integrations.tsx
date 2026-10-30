@@ -388,7 +388,7 @@ export default function Integrations() {
     <div>
       <PageHeader
         title="Integrations"
-        subtitle="SMS, email, payments, video and storage — all configurable without a deploy"
+        subtitle="SMS, email, video and storage — all configurable without a deploy"
         action={
           <button
             onClick={() => saveMut.mutate()}
@@ -612,27 +612,16 @@ export default function Integrations() {
           </div>
         </Card>
 
-        {/* ---------------- Payments ---------------- */}
-        <Card
-          group="payments"
-          secrets={byGroup.payments ?? []}
-          disabled={!!noStorage}
-          onSaved={refresh}
-          test={<TestButton provider="razorpay" />}
-        >
-          <div>
-            <label className={label}>Razorpay Key ID (public)</label>
-            <input
-              value={cfg.payments.razorpayKeyId}
-              onChange={(e) => setCfg({ ...cfg, payments: { razorpayKeyId: e.target.value } })}
-              placeholder="rzp_live_xxxxxxxx"
-              className={`${field} font-mono`}
-            />
-            <p className="text-[11px] text-muted-foreground mt-1">
-              This one is not secret — the app sends it to the checkout SDK. The key secret below is.
-            </p>
-          </div>
-        </Card>
+        {/* ---------------- Payments: retired ---------------- */}
+        {/* Real money is retired (worker lib/cashRetirement.ts): no Razorpay checkout,
+            no UPI/QR deposits, no withdrawals. Nothing to configure here any more. */}
+        <div className="bg-card border border-border rounded-2xl p-5 text-sm">
+          <p className="font-bold text-foreground">Payments (Razorpay): band</p>
+          <p className="text-muted-foreground mt-1">
+            App mein ab asli paise na aate hain na jaate hain: Diamond free kamaaye jaate hain aur DP coin Shopping mein kharch hota hai.
+            Razorpay keys ki zaroorat nahi hai.
+          </p>
+        </div>
 
         {/* ---------------- Video ---------------- */}
         <Card
