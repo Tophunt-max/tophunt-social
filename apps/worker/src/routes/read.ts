@@ -58,6 +58,9 @@ import { recordBlogView } from "../lib/viewCounter";
 import { kickSettlementIfDue } from "../lib/settleDue";
 import { publicAppConfig } from "../lib/appControl";
 import { listPublicCoinPackages } from "../lib/coinCatalog";
+import { liveCampaigns } from "../lib/sponsored";
+import { profileGiftSummary } from "../lib/gifts";
+import { adsAllowedIn, parseMonetizationConfig } from "../lib/monetizationConfig";
 
 const APP_CONFIG_EDGE_TTL_SEC = 30;
 import { getLiveTally, getViewerVote } from "../lib/voteCounter";
@@ -2369,6 +2372,55 @@ readRoute.get("/coin-packages", async (c) => {
   const res = c.json(await listPublicCoinPackages(c.env));
   res.headers.set("Cache-Control", "no-store, max-age=0");
   return res;
+});
+
+// ================= MONETIZATION (lib/sponsored.ts, lib/gifts.ts) =================
+
+/** Caller's country from Cloudflare, upper-case, or null. */
+const callerCountry = (c: any): string | null => {
+  const cc = (c.req.raw as any)?.cf?.country ?? c.req.header("CF-IPCountry");
+  return typeof cc === "string" && /^[A-Z]{2}$/i.test(cc) ? cc.toUpperCase() : null;
+};
+
+/**
+ * Whether ads may be shown to this caller (regional switch). Uncached: the
+ * answer depends on the caller's country and costs one settings read.
+ */
+readRoute.get("/ad-eligibility", async (c) => {
+  const cfg = parseMonetizationConfig(await getAppConfig(c.env));
+  const country = callerCountry(c);
+  const res = c.json({ country, adsAllowed: adsAllowedIn(cfg, country) });
+  res.headers.set("Cache-Control", "private, max-age=300");
+  return res;
+});
+
+/**
+ * Live sponsored campaigns for a placement. Identical for every viewer except
+ * the regional switch, so it is cached per placement + allowed/blocked.
+ */
+readRoute.get("/sponsored", optionalAuth, guestReadLimit, async (c) => {
+  const placement = c.req.query("placement") === "feed" ? "feed" : null;
+  if (!placement) throw httpsError("invalid-argument", "placement must be 'feed'.");
+  const cfg = parseMonetizationConfig(await getAppConfig(c.env));
+  if (!cfg.sponsored.enabled || !adsAllowedIn(cfg, callerCountry(c))) return c.json({ campaigns: [] });
+  const data = await cachedJson(c, {
+    key: `sponsored:${placement}`,
+    edgeTtlSec: 60,
+    load: async () => ({ campaigns: await liveCampaigns(c.env, placement) }),
+  });
+  return c.json(data);
+});
+
+/** Public gift wall for a profile: totals only, no sender identities. */
+readRoute.get("/users/:id/gift-wall", optionalAuth, guestReadLimit, async (c) => {
+  const id = c.req.param("id");
+  if (!id || id.length > 128) throw httpsError("invalid-argument", "Invalid user id.");
+  const data = await cachedJson(c, {
+    key: `giftwall:${id}`,
+    edgeTtlSec: 60,
+    load: () => profileGiftSummary(c.env, id),
+  });
+  return c.json(data);
 });
 
 // ================= USERS =================

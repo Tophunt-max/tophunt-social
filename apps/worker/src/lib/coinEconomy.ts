@@ -54,6 +54,11 @@ export const LEDGER_CATEGORIES: Record<string, string> = {
   chargeback_clawback: "reversals",
   account_deletion_forfeit: "reversals",
   balance_rounding: "reversals",
+  // Coins spent on in-app goods (lib/gifts.ts, lib/store.ts). Burned from the
+  // user's side; nothing is credited to the gift recipient.
+  gift_send: "spend",
+  store_purchase: "spend",
+  store_refund: "spend",
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -64,6 +69,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   contests: "Contests (entry Diamond, prize DP coin, refund)",
   cash_out: "Withdrawals",
   reversals: "Refund clawback / account deletion",
+  spend: "In-app goods (gifts, store, store refunds)",
   other: "Other",
 };
 

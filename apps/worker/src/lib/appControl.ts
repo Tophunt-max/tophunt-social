@@ -29,6 +29,7 @@ import { validateCoinAlertPatch } from "./coinAlerts";
 import { feeRuleFromConfig, validateWithdrawalFeePatch } from "./withdrawalFee";
 import { parseReferralConfig, publicReferralConfig, validateReferralPatch } from "./referralProgram";
 import { publicExploreConfig, validateExplorePatch } from "./exploreConfig";
+import { publicMonetizationConfig, validateMonetizationPatch } from "./monetizationConfig";
 import { httpsError } from "./http";
 import { legacyAuthSettings, methodAllowed, resolveAuthMethods } from "./authMethods";
 import { onboardingEnabled, ONBOARDING_MAX_SLIDES } from "./onboardingConfig";
@@ -239,6 +240,8 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
     // Explore banners (live ones only) and section order (lib/exploreConfig.ts).
     explore: publicExploreConfig(cfg, nowMs),
     ads: { enabled: ads.enabled === true, reward: Number(ads.reward ?? 0), dailyCap: Number(ads.dailyCap ?? 0) },
+    // Ad placements, sponsored posts, gifts and the store (lib/monetizationConfig.ts).
+    monetization: publicMonetizationConfig(cfg),
     supportEmail: cfg.supportEmail || "",
     socialLinks: cfg.socialLinks || {},
     splashImageUrl: typeof cfg.splashImageUrl === "string" ? cfg.splashImageUrl : "",
@@ -416,6 +419,7 @@ export function validateAppControlPatch(body: any, existing: any, nowMs: number 
   if (body.referralProgram !== undefined) validateReferralPatch(body.referralProgram);
   // Explore page banners + sections (lib/exploreConfig.ts).
   if (body.explore !== undefined) validateExplorePatch(body.explore);
+  if (body.monetization !== undefined) validateMonetizationPatch(body.monetization);
 }
 
 // ---------------------------------------------------------------- the gate
@@ -528,4 +532,6 @@ export const AUDITED_SECTIONS = [
   "withdrawal",
   // Ranking weights decide what every viewer is shown first.
   "feedWeights",
+  // Ad frequency, ad units, gifts and store switches (lib/monetizationConfig.ts).
+  "monetization",
 ] as const;

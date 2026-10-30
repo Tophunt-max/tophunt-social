@@ -24,6 +24,8 @@ import { timingSafeEqualSecret } from "../lib/timingSafe";
 import { newId, now } from "../lib/ids";
 import { callbackSignature, isVideoId, qencodeConfig, qencodeConfigured } from "../lib/qencode";
 import { applyEncodeResult } from "../lib/videoReconcile";
+import { creditVerifiedAdReward, verifySsv } from "../lib/admobSsv";
+import { clientIp, consumeRateLimit } from "../lib/rateLimit";
 
 export const webhookRoute = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -319,4 +321,34 @@ webhookRoute.post("/qencode", async (c) => {
     console.error("[webhook/qencode] processing failed", videoId, e);
     return c.json({ ok: true, error: "internal" });
   }
+});
+
+/**
+ * AdMob rewarded-ad server-side verification callback (lib/admobSsv.ts).
+ *
+ * Trust comes only from Google's ECDSA signature over the raw query string.
+ * Always answers 200 once the signature verifies (even for a duplicate or a
+ * capped user) so AdMob does not retry; 4xx only for an unverifiable request.
+ */
+webhookRoute.get("/admob/ssv", async (c) => {
+  // Coarse per-IP ceiling: verification fetches keys and does crypto.
+  if (!(await consumeRateLimit(c.env, `ssv:${clientIp(c.req.raw.headers)}`, 600, 60))) {
+    return c.json({ ok: false, error: "rate_limited" }, 429);
+  }
+  const rawQuery = new URL(c.req.url).search;
+  const params = await verifySsv(rawQuery);
+  if (!params) return c.json({ ok: false, error: "invalid_signature" }, 400);
+  const outcome = await creditVerifiedAdReward(c.env, params);
+  console.log(JSON.stringify({ evt: "admob_ssv", outcome, tx: params.transactionId }));
+  if (outcome === "credited") {
+    c.executionCtx.waitUntil(
+      createNotification(c.env, params.userId, {
+        title: "Reward added",
+        body: "Thanks for watching. Your Diamonds have been added.",
+        type: "ad_reward",
+        targetId: "wallet",
+      }).catch(() => undefined),
+    );
+  }
+  return c.json({ ok: true, outcome });
 });

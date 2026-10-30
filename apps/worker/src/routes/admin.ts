@@ -117,6 +117,7 @@ import { fetchExternalImage } from "../lib/safeFetch";
 import { enforceAdminIdempotency } from "../lib/idempotency";
 import { registerIntegrationRoutes } from "./integrations";
 import { registerGamificationRoutes } from "./adminGamification";
+import { registerMonetizationRoutes } from "./adminMonetization";
 import { assertIdentifiersAvailable, recordUsernameTransition, validateUsername } from "../lib/userIdentifiers";
 import { revokeAllSessions } from "../lib/sessionRevocation";
 import {
@@ -288,6 +289,8 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["POST", /^\/gamification\/users\/[^/]+\/achievements\/[^/]+$/],
   ["POST", /^\/gamification\/users\/[^/]+\/inventory\/[^/]+\/(revoke|restore)$/],
   ["PUT", /^\/gamification\/(achievements|catalog)\/[^/]+$/],
+  // Monetization writes: prices, refunds, revenue imports, campaign approval.
+  ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns)(\/.*)?$/],
 ];
 export function isSensitiveAdminRoute(method: string, path: string): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
@@ -356,6 +359,9 @@ registerIntegrationRoutes(adminRoute, requireFullAdmin);
 
 // ---- gamification (routes/adminGamification.ts) ----
 registerGamificationRoutes(adminRoute, requireFullAdmin, isFullAdmin, logAudit);
+
+// ---- monetization: ads, sponsorships, gifts, store (routes/adminMonetization.ts) ----
+registerMonetizationRoutes(adminRoute, requireFullAdmin, logAudit);
 
 // ---- app settings (settings/appConfig) ----
 

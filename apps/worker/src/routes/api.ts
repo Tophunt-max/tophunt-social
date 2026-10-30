@@ -116,6 +116,7 @@ import { assertLevelEligible, getProgression } from "../lib/progression";
 import { xpAwardStatements, xpEventOutcome, xpReversalStatements } from "../lib/xpService";
 import { syncProgressionSafe } from "../lib/achievements";
 import { handleGamificationAction } from "../lib/gamificationApi";
+import { handleMonetizationAction } from "../lib/monetizationApi";
 import { activeDailyTasks, dailyRewardFor, dailyRewardState, getDailyTaskDefs, getSettings, levelForXp, rewardDayNumber, rewardDayStart, type DailyTaskDef } from "../lib/gamification";
 import { sendEmail, sendUserEmail } from "../lib/email";
 import { passwordChangedEmail, dataExportEmail } from "../lib/emailTemplates";
@@ -4436,6 +4437,24 @@ apiRoute.post("/", async (c) => {
     case "getXpRank":
       return c.json(
         await handleGamificationAction(action, {
+          env,
+          uid,
+          body,
+          waitUntil: (p) => c.executionCtx.waitUntil(p),
+          purgeProfile: () => c.executionCtx.waitUntil(purgeShared(c, userCacheKey(uid))),
+        }),
+      );
+
+    // Gifts, digital store, ad diagnostics, sponsored delivery (lib/monetizationApi.ts).
+    case "getGiftCatalog":
+    case "sendGift":
+    case "getGiftHistory":
+    case "getStore":
+    case "buyStoreItem":
+    case "recordAdEvents":
+    case "recordSponsoredEvent":
+      return c.json(
+        await handleMonetizationAction(action, {
           env,
           uid,
           body,
