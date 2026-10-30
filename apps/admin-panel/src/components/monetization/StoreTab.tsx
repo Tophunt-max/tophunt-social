@@ -7,7 +7,7 @@ import { Table } from "@/components/ui/Table";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
 import { fmtDateTime, fmtNumber } from "@/lib/format";
-import { RARITY_COLOR, assetColors, shopArtFor } from "@/lib/shopArt";
+import { RARITY_COLOR, assetColors, shopArtFor, tierOf } from "@/lib/shopArt";
 import { Button, Card, Notice, Num, Text, Toggle, field, fromLocalInput, toLocalInput } from "./shared";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -196,6 +196,7 @@ export function ItemPreview({ r, height = 144 }: { r: any; height?: number }) {
     return (
       <div className="relative w-full overflow-hidden" style={{ height }}>
         <img src={art.url} alt={r.name} className="absolute inset-0 w-full h-full object-cover" />
+        {art.fxUrl ? <img src={art.fxUrl} alt="" className="absolute inset-0 w-full h-full object-cover th-fx-drift" /> : null}
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="rounded-full bg-white p-1 shadow"><div className="w-14 h-14 rounded-full bg-gradient-to-br from-slate-300 to-slate-500" /></div>
         </div>
@@ -208,6 +209,7 @@ export function ItemPreview({ r, height = 144 }: { r: any; height?: number }) {
         <div className="relative" style={{ width: height * 0.8, height: height * 0.8 }}>
           <div className="absolute rounded-full bg-gradient-to-br from-slate-300 to-slate-500" style={{ inset: "8.33%" }} />
           <img src={art.url} alt={r.name} className="absolute inset-0 w-full h-full" />
+          {art.fxUrl ? <img src={art.fxUrl} alt="" className="absolute inset-0 w-full h-full th-fx-pulse" /> : null}
         </div>
       </div>
     );
@@ -215,7 +217,10 @@ export function ItemPreview({ r, height = 144 }: { r: any; height?: number }) {
   if (art) {
     return (
       <div className="w-full flex flex-col items-center justify-center gap-2" style={{ height, ...bg }}>
-        <img src={art.url} alt={r.name} style={{ width: height * 0.42, height: height * 0.42 }} />
+        <span className="relative" style={{ width: height * 0.42, height: height * 0.42 }}>
+          <img src={art.url} alt={r.name} className="absolute inset-0 w-full h-full" />
+          {art.fxUrl ? <img src={art.fxUrl} alt="" className="absolute inset-0 w-full h-full th-fx-pulse" /> : null}
+        </span>
         {r.type === "title" ? (
           <span className="text-xs font-bold px-2.5 py-0.5 rounded-full border" style={{ color: c1, borderColor: c1 }}>{String(r.asset?.text ?? r.name)}</span>
         ) : (
@@ -248,7 +253,10 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
     <div className="rounded-2xl border border-border bg-card overflow-hidden flex flex-col">
       <div className="relative">
         <ItemPreview r={r} />
-        <span className="absolute top-2 left-2 text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full text-white" style={{ background: rarity }}>{r.rarity}</span>
+        <span className="absolute top-2 left-2 flex gap-1">
+          <span className="text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full text-white" style={{ background: rarity }}>{r.rarity}</span>
+          <TierTag asset={r.asset} />
+        </span>
         <span className="absolute top-2 right-2">
           {st === "on_sale" ? <Badge variant="active">on sale</Badge> : st === "hidden" ? <Badge variant="warning">hidden</Badge> : <Badge>not listed</Badge>}
         </span>
@@ -272,7 +280,7 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
           <Detail k="Ownership" v={l ? "Permanent" : "–"} />
           <Detail k="Sale window" v={l ? window : "–"} wide />
           <Detail k="Artwork" v={r.asset?.key ? <span className="font-mono text-xs">{String(r.asset.key)}</span> : "Built-in (by rarity)"} wide />
-          {r.asset?.animated ? <Detail k="Motion" v="Animated" /> : null}
+          <Detail k="Family" v={tierOf(r.asset) === "premium" ? "Premium · animated" : "XP reward · static"} />
           {l ? <Detail k="Sort" v={String(l.sort)} /> : null}
           {l?.updatedAt ? <Detail k="Last changed" v={fmtDateTime(l.updatedAt)} wide /> : null}
         </dl>
@@ -286,6 +294,17 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
         </div>
       </div>
     </div>
+  );
+}
+
+/** XP (earned, static artwork) or Premium (bought, animated artwork). */
+function TierTag({ asset }: { asset: any }) {
+  const tier = tierOf(asset);
+  const level = Number(asset?.level);
+  return tier === "premium" ? (
+    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full text-white bg-fuchsia-600 border border-fuchsia-300">◆ Premium</span>
+  ) : (
+    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full text-slate-600 bg-slate-200 border border-slate-400">★ XP{Number.isFinite(level) && level > 0 ? ` · Lv ${level}` : ""}</span>
   );
 }
 

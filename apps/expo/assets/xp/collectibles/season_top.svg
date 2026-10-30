@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+<defs><linearGradient id="xpSeasonTopMedal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FEF08A"/><stop offset="1" stop-color="#CA8A04"/></linearGradient></defs>
+<path d="M14 2 H22 L26 18 H18 Z" fill="#2563EB"/><path d="M34 2 H26 L22 18 H30 Z" fill="#DC2626"/>
+<circle cx="24" cy="30" r="14" fill="url(#xpSeasonTopMedal)" stroke="#FFFFFF" stroke-width="2.5"/>
+<circle cx="24" cy="30" r="10" fill="none" stroke="#854D0E" stroke-opacity="0.5" stroke-width="1"/>
+<path d="M24.00 23.00 L25.85 27.45 L30.66 27.84 L27.00 30.97 L28.11 35.66 L24.00 33.15 L19.89 35.66 L21.00 30.97 L17.34 27.84 L22.15 27.45 Z" fill="#FFFFFF" stroke="#854D0E" stroke-width="0.8" stroke-linejoin="round"/>
+</svg>

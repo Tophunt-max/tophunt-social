@@ -1,29 +1,47 @@
 /**
- * Shop artwork for admin previews. The files are the app's own
- * (apps/expo/assets/shop/digital), so the admin preview is the exact artwork
- * users see, with no second copy to keep in sync. A catalog item points at
- * one through `asset.key` = `shop.<kind>_<file>`, e.g. `shop.frame_royal_crown`
- * for frames/royal_crown.svg.
+ * Cosmetic artwork for admin previews. The files are the app's own, so the
+ * admin preview is the exact artwork users see, with no second copy:
+ *
+ *   - Premium (Shop) items: apps/expo/assets/shop/digital, key `shop.<kind>_<file>`,
+ *     plus an animated overlay in `<kind>/fx/<file>.svg`;
+ *   - XP (earned) items:    apps/expo/assets/xp, key `xp.<kind>_<file>`, static.
  */
-const files = import.meta.glob("../../../expo/assets/shop/digital/*/*.svg", {
-  eager: true,
-  query: "?url",
-  import: "default",
-}) as Record<string, string>;
+// Vite reads the glob options statically, so they must be written inline.
+const shopFiles = import.meta.glob("../../../expo/assets/shop/digital/*/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
+const shopFx = import.meta.glob("../../../expo/assets/shop/digital/*/fx/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
+const xpFiles = import.meta.glob("../../../expo/assets/xp/*/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
 
-const SINGULAR: Record<string, string> = { frames: "frame", themes: "theme", badges: "badge", titles: "title" };
+const SINGULAR: Record<string, string> = {
+  frames: "frame", themes: "theme", badges: "badge", titles: "title",
+  stickers: "sticker", collectibles: "collectible", effects: "effect",
+};
 
-export const SHOP_ART: Record<string, { kind: string; url: string }> = {};
-for (const [path, url] of Object.entries(files)) {
-  const m = path.match(/\/([a-z]+)\/([a-z0-9_]+)\.svg$/);
-  if (!m || !SINGULAR[m[1]]) continue;
-  const kind = SINGULAR[m[1]];
-  SHOP_ART[`shop.${kind}_${m[2]}`] = { kind, url };
+export type Tier = "xp" | "premium";
+export interface Art { kind: string; url: string; fxUrl: string | null; tier: Tier }
+
+export const SHOP_ART: Record<string, Art> = {};
+
+function index(files: Record<string, string>, prefix: "shop" | "xp", tier: Tier) {
+  for (const [path, url] of Object.entries(files)) {
+    const m = path.match(/\/([a-z]+)\/([a-z0-9_]+)\.svg$/);
+    if (!m || !SINGULAR[m[1]]) continue;
+    const kind = SINGULAR[m[1]];
+    const fx = tier === "premium" ? Object.entries(shopFx).find(([p]) => p.endsWith(`/${m[1]}/fx/${m[2]}.svg`))?.[1] ?? null : null;
+    SHOP_ART[`${prefix}.${kind}_${m[2]}`] = { kind, url, fxUrl: fx, tier };
+  }
 }
+index(shopFiles, "shop", "premium");
+index(xpFiles, "xp", "xp");
 
-export function shopArtFor(asset: Record<string, unknown> | null | undefined) {
+export function shopArtFor(asset: Record<string, unknown> | null | undefined): Art | null {
   const key = asset?.key;
   return typeof key === "string" ? SHOP_ART[key] ?? null : null;
+}
+
+/** XP (earned) or Premium (bought): `asset.tier`, then the key prefix; earned by default. */
+export function tierOf(asset: Record<string, unknown> | null | undefined): Tier {
+  if (asset?.tier === "premium" || asset?.tier === "xp") return asset.tier;
+  return typeof asset?.key === "string" && asset.key.startsWith("shop.") ? "premium" : "xp";
 }
 
 export const RARITY_COLOR: Record<string, string> = {
