@@ -229,17 +229,19 @@ export async function withCardCosmetics<T extends { cosmetics?: unknown }>(env: 
 export interface InventoryEntry {
   itemId: string;
   source: string;
+  sourceRef: string | null;
   acquiredAt: number;
   revoked: boolean;
 }
 
 export async function loadInventory(env: Env, uid: string): Promise<InventoryEntry[]> {
   const rows = await env.DB.prepare(
-    `SELECT item_id, source, acquired_at, revoked_at FROM user_inventory WHERE uid = ? ORDER BY acquired_at`,
+    `SELECT item_id, source, source_ref, acquired_at, revoked_at FROM user_inventory WHERE uid = ? ORDER BY acquired_at`,
   ).bind(uid).all<any>();
   return (rows.results ?? []).map((r) => ({
     itemId: r.item_id,
     source: r.source,
+    sourceRef: r.source_ref ?? null,
     acquiredAt: Number(r.acquired_at),
     revoked: r.revoked_at != null,
   }));

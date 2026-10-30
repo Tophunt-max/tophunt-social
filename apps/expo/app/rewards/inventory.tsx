@@ -60,6 +60,9 @@ export default function InventoryScreen() {
         <BackButton size={24} color={p.text} style={{ marginRight: 12 }} />
         <Text style={[styles.headerTitle, { color: p.text }]} accessibilityRole="header">Inventory</Text>
         <View style={{ flex: 1 }} />
+        <TouchableOpacity onPress={() => router.push('/rewards/xp-cosmetics' as any)} accessibilityRole="button" style={{ marginRight: 14 }}>
+          <Text style={{ color: '#22D3EE', fontFamily: 'Urbanist-Bold', fontSize: 14 }}>XP Rewards</Text>
+        </TouchableOpacity>
         {storeOpen ? (
           <TouchableOpacity onPress={() => router.push('/rewards/store' as any)} accessibilityRole="button">
             <Text style={{ color: BRAND, fontFamily: 'Urbanist-Bold', fontSize: 14 }}>Store</Text>

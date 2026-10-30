@@ -9,7 +9,7 @@ import { rateLimit } from "./rateLimit";
 import { computeMetrics, syncProgression } from "./achievements";
 import { equipCosmetic, loadAchievementDefs, loadCatalog, loadInventory, parseEquipped, pinAchievements, resolveCosmetics } from "./cosmetics";
 import { creatorInsights } from "./creatorInsights";
-import { experienceOn, featureLevel, getProgression, levelFor, type Progression } from "./progression";
+import { experienceOn, featureLevel, getProgression, levelFor, xpForLevel, type Progression } from "./progression";
 import { claimQuest, listQuests } from "./quests";
 import { claimRewardGrant, listGrants, rewardBudgetFor } from "./rewardGrants";
 import { currentSeason, LEADERBOARD_PERIODS, myRank, rangeFor, type LeaderboardPeriod } from "./seasons";
@@ -18,6 +18,7 @@ export const GAMIFICATION_ACTIONS = new Set([
   "getProgression",
   "getAchievements",
   "getInventory",
+  "getXpCosmetics",
   "equipCosmetic",
   "pinAchievements",
   "getQuests",
@@ -114,6 +115,7 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
       const u = await own(env, uid);
       const inv = await loadInventory(env, uid);
       const owned = new Set(inv.filter((i) => !i.revoked).map((i) => i.itemId));
+      const catalogById = new Map((await loadCatalog(env)).map((item) => [item.id, item]));
       const recent = await env.DB.prepare(
         `SELECT id, action, delta, created_at FROM user_xp_events WHERE uid = ? AND action <> 'opening_balance' ORDER BY created_at DESC, id DESC LIMIT 10`,
       ).bind(uid).all<any>();
@@ -153,6 +155,12 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
           }
           return out.slice(0, 5);
         })(),
+        // Cosmetic ids/names granted by this sync feed the existing level-up
+        // reveal (sparkles, confetti, haptic) without trusting client claims.
+        newCosmetics: sync.newItems.flatMap((id) => {
+          const item = catalogById.get(id);
+          return item ? [{ id: item.id, name: item.name, type: item.type, asset: item.asset }] : [];
+        }),
         cosmetics: await resolveCosmetics(env, u.cosmetics),
         roadmap: await roadmap(env, p, sync.levelInfo.level, owned, uid, on),
         recentXp: (recent.results ?? []).map((r) => ({ id: r.id, action: r.action, label: ACTION_LABELS[r.action] ?? r.action, delta: Number(r.delta), createdAt: Number(r.created_at) })),
@@ -215,6 +223,82 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
       };
     }
 
+    case "getXpCosmetics": {
+      await rateLimit(env, `xpcos:${uid}`, 240, 3600);
+      // Full sync backfills newly introduced rewards for users who already
+      // passed their unlock level. The server, not this request body, decides
+      // eligibility from the authoritative XP ledger balance.
+      const sync = await syncProgression(env, uid, { p, full: true });
+      if (!sync) throw httpsError("not-found", "User not found.");
+      const u = await own(env, uid);
+      const equipped = parseEquipped(u.cosmetics);
+      const inventory = await loadInventory(env, uid);
+      const held = new Map(inventory.map((item) => [item.itemId, item]));
+      const catalog = new Map((await loadCatalog(env)).map((item) => [item.id, item]));
+      const rules = await env.DB.prepare(
+        `SELECT item_id, category, unlock_level, item_order
+           FROM xp_cosmetic_unlocks
+          WHERE collection = 'xp40'
+          ORDER BY CASE category WHEN 'frame' THEN 0 WHEN 'theme' THEN 1 WHEN 'badge' THEN 2 ELSE 3 END, item_order`,
+      ).all<{ item_id: string; category: string; unlock_level: number; item_order: number }>();
+      const level = sync.levelInfo.level;
+      const items = (rules.results ?? []).flatMap((rule) => {
+        const item = catalog.get(rule.item_id);
+        if (!item || !item.active) return [];
+        const inv = held.get(item.id);
+        const owned = !!inv && !inv.revoked;
+        const isEquipped = equipped[item.type as keyof typeof equipped] === item.id;
+        const requiredXp = rule.unlock_level <= 0 ? 0 : xpForLevel(rule.unlock_level, p.curve);
+        return [{
+          id: item.id,
+          type: item.type,
+          name: item.name,
+          description: item.description,
+          rarity: item.rarity,
+          asset: item.asset,
+          collection: "xp40" as const,
+          source: owned ? inv!.source : null,
+          sourceRef: owned ? inv!.sourceRef : null,
+          acquiredAt: owned ? inv!.acquiredAt : null,
+          unlocksAtLevel: Number(rule.unlock_level),
+          requiredXp,
+          xpRemaining: Math.max(0, requiredXp - sync.levelInfo.xp),
+          order: Number(rule.item_order),
+          owned,
+          equipped: isEquipped,
+          state: isEquipped ? "equipped" as const : owned ? "unlocked" as const : "locked" as const,
+        }];
+      });
+      const nextLevel = (rules.results ?? [])
+        .map((r) => Number(r.unlock_level))
+        .filter((n) => n > level)
+        .sort((a, b) => a - b)[0] ?? null;
+      const nextItems = nextLevel == null
+        ? []
+        : items.filter((item) => item.unlocksAtLevel === nextLevel).map((item) => ({ id: item.id, name: item.name, type: item.type }));
+      return {
+        collection: "xp40",
+        total: items.length,
+        counts: {
+          frame: items.filter((item) => item.type === "frame").length,
+          theme: items.filter((item) => item.type === "theme").length,
+          badge: items.filter((item) => item.type === "badge").length,
+          title: items.filter((item) => item.type === "title").length,
+          unlocked: items.filter((item) => item.owned).length,
+        },
+        levelInfo: sync.levelInfo,
+        equipped: { frame: equipped.frame ?? null, theme: equipped.theme ?? null, badge: equipped.badge ?? null, title: equipped.title ?? null },
+        nextUnlock: nextLevel == null ? null : {
+          level: nextLevel,
+          requiredXp: xpForLevel(nextLevel, p.curve),
+          xpRemaining: Math.max(0, xpForLevel(nextLevel, p.curve) - sync.levelInfo.xp),
+          items: nextItems,
+        },
+        newlyUnlocked: sync.newItems.filter((id) => items.some((item) => item.id === id)),
+        items,
+      };
+    }
+
     case "getInventory": {
       const u = await own(env, uid);
       const inv = await loadInventory(env, uid);
@@ -238,6 +322,8 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
               rarity: i.rarity,
               asset: i.asset,
               owned: !!h && !h.revoked,
+              source: h && !h.revoked ? h.source : null,
+              sourceRef: h && !h.revoked ? h.sourceRef : null,
               acquiredAt: h && !h.revoked ? h.acquiredAt : null,
               unlocksAtLevel: unlockAt.get(i.id) ?? null,
               equipped: Object.values(equipped).includes(i.id),

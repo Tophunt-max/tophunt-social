@@ -54,8 +54,8 @@ export default function RewardsScreen() {
           isMaxLevel={data.levelInfo.isMaxLevel}
           previousLevel={data.leveledUp?.from ?? null}
           xpGained={data.recentXp[0] ? { amount: data.recentXp[0].delta, label: data.recentXp[0].label } : null}
-          unlocks={data.leveledUp ? data.roadmap.filter((m) => m.level > data.leveledUp!.from && m.level <= data.leveledUp!.to).map((m) => m.title) : undefined}
-          onView={() => router.push('/rewards/inventory' as any)}
+          unlocks={data.leveledUp ? (data.newCosmetics?.length ? data.newCosmetics.map((item) => item.name) : data.roadmap.filter((m) => m.level > data.leveledUp!.from && m.level <= data.leveledUp!.to).map((m) => m.title)) : undefined}
+          onView={() => router.push('/rewards/xp-cosmetics' as any)}
         />
       ) : null}
       {q.isLoading ? (
@@ -136,7 +136,8 @@ function Grants({ data, p }: { data: ProgressionView; p: ExplorePalette }) {
 function Links({ data, p, onOpen }: { data: ProgressionView; p: ExplorePalette; onOpen: (route: string) => void }) {
   const items: { asset: AssetKey; label: string; sub: string; route: string }[] = [
     { asset: 'activity.achievement', label: 'Achievements', sub: `${data.achievements.unlocked}/${data.achievements.total}`, route: '/rewards/achievements' },
-    { asset: 'activity.inventory', label: 'Inventory', sub: 'Frames & titles', route: '/rewards/inventory' },
+    { asset: 'activity.inventory', label: 'Free XP Cosmetics', sub: '40 level rewards', route: '/rewards/xp-cosmetics' },
+    { asset: 'activity.inventory', label: 'My Items', sub: 'Free & Premium', route: '/rewards/inventory' },
     { asset: 'activity.leaderboard', label: 'Leaderboards', sub: 'Week · Month · All', route: '/rewards/leaderboard' },
     { asset: 'reward.hall_of_fame', label: 'Hall of Fame', sub: 'Champions', route: '/rewards/hall-of-fame' },
     { asset: 'activity.insights', label: 'Insights', sub: 'Your stats', route: '/rewards/insights' },

@@ -79,6 +79,7 @@ import m_0074_signup_bonus_fraud_sql from "../../migrations/0074_signup_bonus_fr
 import m_0075_remove_real_money_sql from "../../migrations/0075_remove_real_money.sql";
 import m_0076_shop_digital_items_sql from "../../migrations/0076_shop_digital_items.sql";
 import m_0077_cosmetic_tiers_sql from "../../migrations/0077_cosmetic_tiers.sql";
+import m_0078_free_xp_cosmetics_sql from "../../migrations/0078_free_xp_cosmetics.sql";
 
 export interface Migration {
   name: string;
@@ -164,4 +165,5 @@ export const MIGRATIONS: Migration[] = [
   { name: "0075_remove_real_money.sql", sql: m_0075_remove_real_money_sql },
   { name: "0076_shop_digital_items.sql", sql: m_0076_shop_digital_items_sql },
   { name: "0077_cosmetic_tiers.sql", sql: m_0077_cosmetic_tiers_sql },
+  { name: "0078_free_xp_cosmetics.sql", sql: m_0078_free_xp_cosmetics_sql },
 ];

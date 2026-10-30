@@ -1,5 +1,5 @@
 /**
- * One clock for every premium cosmetic animation on screen.
+ * One clock for every cosmetic animation on screen.
  *
  * A feed can show 20–30 framed avatars at once. Giving each its own looping
  * animation means 30 timers; here there is ONE shared value running 0 → 1 on

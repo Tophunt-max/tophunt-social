@@ -66,6 +66,7 @@ export interface ProgressionView {
   levelInfo: LevelInfo;
   leveledUp: { from: number; to: number } | null;
   newlyUnlocked: { id: string; name: string; icon: string; rarity: string; tier: number; xp: number }[];
+  newCosmetics?: { id: string; name: string; type: string; asset: Record<string, any> }[];
   cosmetics: PublicCosmetics;
   roadmap: RoadmapEntry[];
   recentXp: { id: string; action: string; label: string; delta: number; createdAt: number }[];
@@ -97,9 +98,38 @@ export interface AchievementView {
 
 export interface InventoryItemView extends CatalogItemView {
   description: string;
+  source?: string | null;
+  sourceRef?: string | null;
   acquiredAt: number | null;
   unlocksAtLevel: number | null;
   equipped: boolean;
+}
+
+export type XpCosmeticState = 'locked' | 'unlocked' | 'equipped';
+export type XpCosmeticType = 'frame' | 'theme' | 'badge' | 'title';
+
+export interface XpCosmeticView extends InventoryItemView {
+  type: XpCosmeticType;
+  collection: 'xp40';
+  unlocksAtLevel: number;
+  requiredXp: number;
+  xpRemaining: number;
+  order: number;
+  owned: boolean;
+  state: XpCosmeticState;
+}
+
+export interface XpCosmeticsView {
+  collection: 'xp40';
+  total: number;
+  counts: Record<XpCosmeticType, number> & { unlocked: number };
+  levelInfo: LevelInfo;
+  equipped: Record<XpCosmeticType, string | null>;
+  nextUnlock: { level: number; requiredXp: number; xpRemaining: number; items: { id: string; name: string; type: XpCosmeticType }[] } | null;
+  newlyUnlocked: string[];
+  items: XpCosmeticView[];
+  /** True only when shown from the per-account device cache after a network failure. */
+  offline?: boolean;
 }
 
 export interface QuestView {
@@ -138,6 +168,7 @@ export const GAMIFICATION_KEYS = {
   progression: ['me', 'progression'] as const,
   achievements: ['me', 'achievements'] as const,
   inventory: ['me', 'inventory'] as const,
+  xpCosmetics: (uid: string) => ['me', 'xpCosmetics', uid] as const,
   quests: ['me', 'quests'] as const,
   history: ['me', 'xpHistory'] as const,
   insights: ['me', 'creatorInsights'] as const,
@@ -171,6 +202,42 @@ export function useInventory(enabled = true) {
     queryFn: () => callApi('getInventory') as Promise<{ level: number; equipped: Record<string, any>; items: InventoryItemView[] }>,
     enabled,
     staleTime: 30_000,
+  });
+}
+
+const xpCosmeticsCacheKey = (uid: string) => `@tophunt/xp-cosmetics/v1/${uid}`;
+
+/**
+ * Server-authoritative XP40 collection, network-first with a per-account offline
+ * display fallback. Cached ownership never grants anything: equip still calls
+ * the Worker, which checks D1 ownership and item type in the same UPDATE.
+ */
+export async function fetchXpCosmetics(uid: string): Promise<XpCosmeticsView> {
+  try {
+    const live = { ...((await callApi('getXpCosmetics')) as XpCosmeticsView), offline: false };
+    await AsyncStorage.setItem(xpCosmeticsCacheKey(uid), JSON.stringify(live)).catch(() => undefined);
+    return live;
+  } catch (error) {
+    const raw = await AsyncStorage.getItem(xpCosmeticsCacheKey(uid)).catch(() => null);
+    if (!raw) throw error;
+    try {
+      const cached = JSON.parse(raw) as XpCosmeticsView;
+      if (cached?.collection === 'xp40' && Array.isArray(cached.items)) return { ...cached, offline: true };
+    } catch {
+      // Corrupt device cache is discarded; it is never an entitlement source.
+      await AsyncStorage.removeItem(xpCosmeticsCacheKey(uid)).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
+export function useXpCosmetics(uid?: string | null, enabled = true) {
+  const id = uid ?? '';
+  return useQuery({
+    queryKey: GAMIFICATION_KEYS.xpCosmetics(id),
+    enabled: enabled && !!id,
+    staleTime: 30_000,
+    queryFn: () => fetchXpCosmetics(id),
   });
 }
 
@@ -263,6 +330,7 @@ export function useEquipCosmetic() {
     mutationFn: (v: { slot: string; itemId: string | null }) => callApi('equipCosmetic', v),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: GAMIFICATION_KEYS.inventory });
+      qc.invalidateQueries({ queryKey: ['me', 'xpCosmetics'] });
       qc.invalidateQueries({ queryKey: GAMIFICATION_KEYS.progression });
       qc.invalidateQueries({ queryKey: ['profile'] });
     },

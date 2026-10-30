@@ -4,12 +4,14 @@
  *
  *   - Premium (Shop) items: apps/expo/assets/shop/digital, key `shop.<kind>_<file>`,
  *     plus an animated overlay in `<kind>/fx/<file>.svg`;
- *   - XP (earned) items:    apps/expo/assets/xp, key `xp.<kind>_<file>`, static.
+ *   - XP legacy items: apps/expo/assets/xp/<category>/<file>.svg;
+ *   - XP40 free items: apps/expo/assets/xp/<category>/<item>/source.svg.
  */
 // Vite reads the glob options statically, so they must be written inline.
 const shopFiles = import.meta.glob("../../../expo/assets/shop/digital/*/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
 const shopFx = import.meta.glob("../../../expo/assets/shop/digital/*/fx/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
 const xpFiles = import.meta.glob("../../../expo/assets/xp/*/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
+const xp40Files = import.meta.glob("../../../expo/assets/xp/*/*/source.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
 
 const SINGULAR: Record<string, string> = {
   frames: "frame", themes: "theme", badges: "badge", titles: "title",
@@ -32,6 +34,12 @@ function index(files: Record<string, string>, prefix: "shop" | "xp", tier: Tier)
 }
 index(shopFiles, "shop", "premium");
 index(xpFiles, "xp", "xp");
+for (const [path, url] of Object.entries(xp40Files)) {
+  const match = path.match(/\/([a-z]+)\/([a-z0-9-]+)\/source\.svg$/);
+  if (!match || !SINGULAR[match[1]]) continue;
+  const kind = SINGULAR[match[1]];
+  SHOP_ART[`xp40.${kind}_${match[2].replace(/-/g, "_")}`] = { kind, url, fxUrl: null, tier: "xp" };
+}
 
 export function shopArtFor(asset: Record<string, unknown> | null | undefined): Art | null {
   const key = asset?.key;

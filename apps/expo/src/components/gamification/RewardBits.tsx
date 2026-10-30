@@ -10,6 +10,7 @@ import React from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/src/components/ui/Avatar';
+import { AppImage } from '@/src/components/ui/AppImage';
 import { Ionicons } from '@/src/lib/icons';
 import {
   achievementAsset,
@@ -87,25 +88,37 @@ export function CosmeticPreview({
   name?: string | null;
 }) {
   const locked = item.owned === false;
-  // Bundled artwork: XP items (assets/xp, static) and Premium (assets/shop/digital, animated).
+  // Bundled artwork: XP40 items use optimized art + lightweight effects;
+  // Premium uses richer layered effects. Both stop under reduced motion/off-screen.
   const art = cosmeticArt(item);
   const tier = !art && item.type === 'frame' ? frameTier(item) : null;
   return (
     <View style={{ width: size, height: size, opacity: locked ? 0.55 : 1 }} accessible accessibilityLabel={`${item.name}${locked ? ', locked' : ''}`}>
-      {art && art.kind === 'frame' ? (
+      {art?.kind === 'frame' && art.Art ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-          <Avatar uri={avatarUri ?? undefined} name={name || 'You'} size={size * FRAME_AVATAR_RATIO} />
+          <Avatar uri={avatarUri ?? undefined} name={name || 'You'} size={size * (art.avatarRatio ?? FRAME_AVATAR_RATIO)} />
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             <art.Art width={size} height={size} />
             {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} /> : null}
           </View>
         </View>
-      ) : art && art.kind === 'theme' ? (
+      ) : art?.kind === 'theme' && art.image ? (
+        <View style={{ width: size, height: size, borderRadius: size * 0.22, overflow: 'hidden' }}>
+          <AppImage source={(art.preview ?? art.image) as any} style={StyleSheet.absoluteFill} contentFit="cover" />
+          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} preserveAspectRatio="xMidYMid slice" /> : null}
+        </View>
+      ) : art?.kind === 'theme' && art.Art ? (
         <View style={{ width: size, height: size, borderRadius: size * 0.22, overflow: 'hidden' }}>
           <art.Art width={size} height={size} preserveAspectRatio="xMidYMid slice" />
           {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} preserveAspectRatio="xMidYMid slice" /> : null}
         </View>
-      ) : art ? (
+      ) : art?.layout === 'nameplate' && art.Art ? (
+        <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+          <art.Art width={size} height={size * 0.3} preserveAspectRatio="none" />
+          <Text style={[styles.titleChipText, { position: 'absolute', color: '#FFFFFF', fontSize: Math.max(7, size * 0.14), maxWidth: size * 0.58 }]} numberOfLines={1}>{String(item.asset?.text ?? item.name)}</Text>
+          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size * 0.3} /> : null}
+        </View>
+      ) : art?.Art ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
           <art.Art width={size * 0.8} height={size * 0.8} />
           {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size * 0.8} height={size * 0.8} /> : null}

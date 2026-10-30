@@ -20,6 +20,7 @@ import { LevelBadge } from './LevelBadge';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { SparkleBurst } from './SparkleBurst';
 import { XpGainPill } from './RewardBits';
+import { XP_UNLOCK_EFFECTS } from '@/assets/xp';
 
 /**
  * Level-up celebration.
@@ -166,6 +167,13 @@ export function LevelUpCelebration({
         <Animated.View style={[styles.cardWrap, cardStyle]} accessibilityViewIsModal accessibilityRole="alert">
           <LinearGradient colors={['#7C4DFF', '#FF4D67']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.card}>
             <View style={styles.badgeWrap}>
+              {unlocks?.length ? (
+                <Animated.View pointerEvents="none" style={[styles.unlockArt, extrasStyle]}>
+                  <XP_UNLOCK_EFFECTS.reveal width={176} height={176} />
+                  <View style={StyleSheet.absoluteFill}><XP_UNLOCK_EFFECTS.burst width={176} height={176} /></View>
+                  {t.particles ? <View style={StyleSheet.absoluteFill}><XP_UNLOCK_EFFECTS.confetti width={176} height={176} /></View> : null}
+                </Animated.View>
+              ) : null}
               <LevelBadge level={shown.to} rankId={rankId} rankName={rankName} isMaxLevel={isMaxLevel} size="xl" />
               {t.particles ? <SparkleBurst playKey={shown.to} size={170} /> : null}
             </View>
@@ -232,6 +240,7 @@ const styles = StyleSheet.create({
   cardWrap: { width: '100%', maxWidth: 360 },
   card: { borderRadius: 24, padding: 22, alignItems: 'center' },
   badgeWrap: { alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  unlockArt: { position: 'absolute', width: 176, height: 176, alignItems: 'center', justifyContent: 'center' },
   kicker: { color: 'rgba(255,255,255,0.85)', letterSpacing: 2, fontSize: 12, fontFamily: 'Urbanist-Bold' },
   levels: { height: 32, justifyContent: 'center', alignItems: 'center', marginTop: 4 },
   levelText: { color: '#FFF', fontSize: 24, fontFamily: 'Urbanist-Black' },

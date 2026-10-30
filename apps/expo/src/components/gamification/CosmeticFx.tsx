@@ -1,7 +1,8 @@
 /**
- * The animated overlay of a premium cosmetic (sparkles, glow, flames, aurora)
- * and the shimmer on premium title chips. Driven by the shared clock in
- * src/lib/fxClock.ts, so any number on screen cost one animation.
+ * Animated overlay for cosmetics: lightweight glow/particles on FREE XP items,
+ * richer sparkles/flames/aurora on Premium items, and title-chip shimmer.
+ * Driven by the shared clock in src/lib/fxClock.ts, so any number on screen
+ * costs one looping animation.
  *
  * Off (drawn static) under reduced motion, while the screen is not focused,
  * while the app is backgrounded, or with `motion="none"`.

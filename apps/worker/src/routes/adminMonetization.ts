@@ -202,6 +202,7 @@ export function registerMonetizationRoutes(
               (SELECT COUNT(*) FROM store_purchases p WHERE p.item_id = r.id AND p.status = 'completed') AS purchases,
               (SELECT COALESCE(SUM(p.price_coins), 0) FROM store_purchases p WHERE p.item_id = r.id AND p.status = 'completed') AS revenue
          FROM reward_catalog r LEFT JOIN store_listings l ON l.item_id = r.id
+        WHERE json_extract(r.asset, '$.collection') IS NULL OR json_extract(r.asset, '$.collection') <> 'xp40' OR l.item_id IS NOT NULL
         ORDER BY (l.item_id IS NULL), l.sort, r.sort, r.id`,
     ).all<any>();
     return c.json((rows.results ?? []).map((r) => ({
@@ -218,8 +219,12 @@ export function registerMonetizationRoutes(
   adminRoute.put("/monetization/store/:itemId", async (c) => {
     const itemId = c.req.param("itemId");
     if (!ITEM_ID_RE.test(itemId)) throw httpsError("invalid-argument", "Invalid item id.");
-    const item = await c.env.DB.prepare(`SELECT id FROM reward_catalog WHERE id = ?`).bind(itemId).first();
+    const item = await c.env.DB.prepare(
+      `SELECT r.id, EXISTS (SELECT 1 FROM xp_cosmetic_unlocks x WHERE x.item_id = r.id AND x.collection = 'xp40') AS xp40
+         FROM reward_catalog r WHERE r.id = ?`,
+    ).bind(itemId).first<any>();
     if (!item) throw httpsError("not-found", "Catalog item not found. Create it under Gamification → Catalog first.");
+    if (item.xp40) throw httpsError("failed-precondition", "Free XP cosmetics cannot be listed for DP coin.");
     const v = validateListingInput(await c.req.json<any>().catch(() => ({})));
     const before = await c.env.DB.prepare(`SELECT * FROM store_listings WHERE item_id = ?`).bind(itemId).first<any>();
     if (before && v.stockLimit !== null && v.stockLimit < Number(before.sold_count)) {
