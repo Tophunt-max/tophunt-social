@@ -183,19 +183,34 @@ export function registerMonetizationRoutes(
 
   // ------------------------------------------------------------ digital store
 
+  /** reward_catalog.asset is JSON text; a malformed row shows as {} rather than failing the list. */
+  const parseAsset = (raw: unknown): Record<string, unknown> => {
+    if (raw && typeof raw === "object") return raw as Record<string, unknown>;
+    try {
+      const v = JSON.parse(String(raw ?? "{}"));
+      return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    } catch {
+      return {};
+    }
+  };
+
   adminRoute.get("/monetization/store", async (c) => {
     const rows = await c.env.DB.prepare(
-      `SELECT r.id, r.type, r.name, r.rarity, r.active AS item_active, l.price_coins, l.ownership, l.refundable, l.stock_limit,
-              l.sold_count, l.active, l.starts_at, l.ends_at, l.sort,
-              (SELECT COUNT(*) FROM user_inventory i WHERE i.item_id = r.id AND i.revoked_at IS NULL) AS owners
+      `SELECT r.id, r.type, r.name, r.description, r.rarity, r.asset, r.active AS item_active, l.price_coins, l.ownership, l.refundable, l.stock_limit,
+              l.sold_count, l.active, l.starts_at, l.ends_at, l.sort, l.updated_at,
+              (SELECT COUNT(*) FROM user_inventory i WHERE i.item_id = r.id AND i.revoked_at IS NULL) AS owners,
+              (SELECT COUNT(*) FROM store_purchases p WHERE p.item_id = r.id AND p.status = 'completed') AS purchases,
+              (SELECT COALESCE(SUM(p.price_coins), 0) FROM store_purchases p WHERE p.item_id = r.id AND p.status = 'completed') AS revenue
          FROM reward_catalog r LEFT JOIN store_listings l ON l.item_id = r.id
         ORDER BY (l.item_id IS NULL), l.sort, r.sort, r.id`,
     ).all<any>();
     return c.json((rows.results ?? []).map((r) => ({
-      itemId: r.id, type: r.type, name: r.name, rarity: r.rarity, itemActive: !!r.item_active, owners: Number(r.owners),
+      itemId: r.id, type: r.type, name: r.name, description: r.description ?? "", rarity: r.rarity, asset: parseAsset(r.asset),
+      itemActive: !!r.item_active, owners: Number(r.owners), purchases: Number(r.purchases), revenueCoins: Number(r.revenue),
       listing: r.price_coins == null ? null : {
         priceCoins: Number(r.price_coins), ownership: r.ownership, refundable: !!r.refundable, stockLimit: r.stock_limit,
         soldCount: Number(r.sold_count), active: !!r.active, startsAt: r.starts_at, endsAt: r.ends_at, sort: Number(r.sort),
+        updatedAt: r.updated_at == null ? null : Number(r.updated_at),
       },
     })));
   });

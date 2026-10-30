@@ -25,4 +25,9 @@ regexes = [
   # apps/worker/test/integrations.test.ts. It is base64 of the literal text
   # "test-encryption-key-for-unit-tests" and encrypts nothing real.
   '''dGVzdC1lbmNyeXB0aW9uLWtleS1mb3ItdW5pdC10ZXN0cw==''',
+
+  # Cosmetic artwork key in apps/worker/migrations/0077_cosmetic_tiers.sql
+  # (`'$.key', 'xp.sticker_streak_30'`): the file name of a bundled sticker in
+  # apps/expo/assets/xp/stickers, not key material.
+  '''xp\.sticker_streak_30''',
 ]

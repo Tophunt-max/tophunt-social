@@ -728,10 +728,15 @@ describe('visual layer contract', () => {
 
   it('seeds a real Champion frame and grants it at level 50, with asset keys on default frames', async () => {
     const env = env0();
-    const item = await env.DB.prepare(`SELECT type, json_extract(asset, '$.key') AS k FROM reward_catalog WHERE id = 'frame_champion'`).first<any>();
-    expect(item).toEqual({ type: 'frame', k: 'frame.champion' });
+    // 0071 gave the default frames `frame.*` vector keys; 0077 moved them to their
+    // Earned (XP) artwork in apps/expo/assets/xp, tagged with tier and level.
+    const item = await env.DB.prepare(`SELECT type, json_extract(asset, '$.key') AS k, json_extract(asset, '$.tier') AS t, json_extract(asset, '$.level') AS l FROM reward_catalog WHERE id = 'frame_champion'`).first<any>();
+    expect(item).toEqual({ type: 'frame', k: 'xp.frame_champion', t: 'xp', l: 50 });
     const bronze = await env.DB.prepare(`SELECT json_extract(asset, '$.key') AS k FROM reward_catalog WHERE id = 'frame_bronze'`).first<any>();
-    expect(bronze.k).toBe('frame.bronze');
+    expect(bronze.k).toBe('xp.frame_bronze');
+    // Earned items never animate: motion is the Premium hallmark.
+    const animated = await env.DB.prepare(`SELECT COUNT(*) AS n FROM reward_catalog WHERE json_extract(asset, '$.tier') = 'xp' AND json_extract(asset, '$.animated') = 1`).first<any>();
+    expect(animated.n).toBe(0);
     await on(env);
     await seedUser(env, 'alice');
     await syncProgression(env, 'alice');

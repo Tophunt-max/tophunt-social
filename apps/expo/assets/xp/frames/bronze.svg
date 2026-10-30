@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+<defs>
+<linearGradient id="xpBronzeRing" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F3C089"/><stop offset="0.5" stop-color="#CD7F32"/><stop offset="1" stop-color="#6E4219"/></linearGradient>
+<linearGradient id="xpBronzeMedal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F3C089"/><stop offset="1" stop-color="#6E4219"/></linearGradient>
+</defs>
+<circle cx="60" cy="60" r="54" fill="none" stroke="url(#xpBronzeRing)" stroke-width="7.5"/>
+<circle cx="60" cy="60" r="57.6" fill="none" stroke="#6E4219" stroke-opacity="0.7" stroke-width="0.8"/>
+<circle cx="60" cy="60" r="50.5" fill="none" stroke="#F3C089" stroke-opacity="0.9" stroke-width="0.9"/>
+<g transform="rotate(15.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g><g transform="rotate(45.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g><g transform="rotate(75.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g><g transform="rotate(105.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g><g transform="rotate(135.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g><g transform="rotate(225.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g><g transform="rotate(255.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g><g transform="rotate(285.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g><g transform="rotate(315.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g><g transform="rotate(345.0 60 60)"><rect x="59.2" y="3.2" width="1.6" height="4.2" rx="0.8" fill="#6E4219" fill-opacity="0.55"/></g>
+
+<circle cx="60" cy="111" r="8.6" fill="url(#xpBronzeMedal)" stroke="#6E4219" stroke-width="1"/><circle cx="60" cy="111" r="6.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="0.6"/><path d="M53.6 107.8 L57.6 114.2 M57.6 107.8 L53.6 114.2 M60.6 114.2 V107.8 H63.6 A1.9 1.9 0 0 1 63.6 111.6 H60.6" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

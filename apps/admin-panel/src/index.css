@@ -77,3 +77,11 @@
   .gradient-red { background: linear-gradient(135deg, #DC2626 0%, #F87171 100%); }
   .gradient-cyan { background: linear-gradient(135deg, #0891B2 0%, #06B6D4 100%); }
 }
+
+/* Digital store previews (components/monetization/StoreTab.tsx): the
+   premium overlay moves the way it does in the app; off under reduced motion. */
+@keyframes th-fx-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes th-fx-drift { 0%, 100% { transform: translateX(-6px) scale(1.05); } 50% { transform: translateX(6px) scale(1.05); } }
+.th-fx-pulse { animation: th-fx-pulse 2s ease-in-out infinite; }
+.th-fx-drift { animation: th-fx-drift 6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .th-fx-pulse, .th-fx-drift { animation: none; } }

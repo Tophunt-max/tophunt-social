@@ -13,7 +13,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { frameAsset, frameTier } from '@/src/lib/gamificationAssets';
 import { useScreenActive } from '@/src/hooks/useScreenActive';
-import { SHOP_FRAME_AVATAR_RATIO, shopArt } from '@/src/lib/shopDigital';
+import { FRAME_AVATAR_RATIO, cosmeticArt } from '@/src/lib/cosmeticArt';
+import { FrameArt } from './CosmeticBits';
 import { FrameRing } from './vectors';
 
 /** Tiers that get the shimmer when equipped. */
@@ -48,11 +49,13 @@ export function ProfileFrame({
 }) {
   const reduce = useReducedMotion();
   const active = useScreenActive();
-  // Shop frames (asset.key = shop.*) draw their own artwork; others use the tier ring.
-  const art = shopArt(frame, 'frame');
+  // Frames with bundled artwork (XP: assets/xp, Premium: assets/shop/digital)
+  // draw it; others use the tier ring. Only PREMIUM items move: earned (XP)
+  // artwork is static by design, whatever an old `animated` flag says.
+  const art = cosmeticArt(frame, 'frame');
   const tier = art ? null : frameTier(frame);
   const running = !reduce && !paused && active;
-  const pulseOn = running && !!frame?.asset?.animated;
+  const pulseOn = running && !!frame?.asset?.animated && (!art || art.tier === 'premium');
   const shimmerOn = running && !!tier && SHIMMER_TIERS.has(tier.id) && shape === 'circle';
 
   const pulse = useSharedValue(1);
@@ -113,11 +116,12 @@ export function ProfileFrame({
           accessible
           accessibilityLabel={frame.name}
         >
-          {/* The artwork's avatar circle is SHOP_FRAME_AVATAR_RATIO of its box, so
+          {/* The artwork's avatar circle is FRAME_AVATAR_RATIO of its box, so
               the box is scaled from the avatar size and may overhang the outer
               box slightly; the parent does not clip. Drawn ABOVE the photo so
-              ornaments that dip into the ring (the crown) stay visible. */}
-          <art.Art width={size / SHOP_FRAME_AVATAR_RATIO} height={size / SHOP_FRAME_AVATAR_RATIO} />
+              ornaments that dip into the ring (the crown, the XP seal) stay
+              visible. The premium fx layer animates inside FrameArt. */}
+          <FrameArt frame={frame} box={size / FRAME_AVATAR_RATIO} motion={paused ? 'none' : 'full'} />
         </Animated.View>
       ) : null}
     </View>
