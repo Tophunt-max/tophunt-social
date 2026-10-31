@@ -1,0 +1,132 @@
+name: App release (Android / iOS)
+
+# Builds the native apps on EAS from GitHub and, optionally, submits them to
+# Google Play / the App Store. Run it from the Actions tab. See APP_RELEASE.md.
+#
+# Needs (Settings → Secrets and variables → Actions):
+#   secret   EXPO_TOKEN            Expo access token (expo.dev → Access tokens)
+#   variable EAS_PROJECT_ID        Expo project id (also turns on OTA updates)
+#   variable EXPO_OWNER            Expo account / organisation (optional)
+#   variable ADMOB_ANDROID_APP_ID  AdMob app id for Android (required for production)
+#   variable ADMOB_IOS_APP_ID      AdMob app id for iOS (required for production)
+#   variable ADMOB_MEDIATION       bidding partners' adapter versions, JSON (optional)
+#   variable ADMOB_SKADNETWORK_IDS partners' SKAdNetwork ids, comma separated (optional)
+# Store credentials (signing keys, Play service account, App Store Connect API
+# key) live in EAS, set up once with `eas credentials`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform
+        type: choice
+        options: [android, ios, all]
+        default: android
+      profile:
+        description: Build profile (eas.json)
+        type: choice
+        options: [production, preview]
+        default: production
+      submit:
+        description: Submit to the store when the build finishes
+        type: boolean
+        default: false
+
+concurrency:
+  group: app-release-${{ inputs.profile }}-${{ inputs.platform }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/expo
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
+      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
+      ADMOB_ANDROID_APP_ID: ${{ vars.ADMOB_ANDROID_APP_ID }}
+      ADMOB_IOS_APP_ID: ${{ vars.ADMOB_IOS_APP_ID }}
+      ADMOB_MEDIATION: ${{ vars.ADMOB_MEDIATION }}
+      ADMOB_SKADNETWORK_IDS: ${{ vars.ADMOB_SKADNETWORK_IDS }}
+    steps:
+      - name: Check setup
+        run: |
+          missing=""
+          [ -n "$EXPO_TOKEN" ] || missing="$missing secret:EXPO_TOKEN"
+          [ -n "$EAS_PROJECT_ID" ] || missing="$missing variable:EAS_PROJECT_ID"
+          if [ "${{ inputs.profile }}" = "production" ]; then
+            case "${{ inputs.platform }}" in
+              android|all) [ -n "$ADMOB_ANDROID_APP_ID" ] || missing="$missing variable:ADMOB_ANDROID_APP_ID" ;;
+            esac
+            case "${{ inputs.platform }}" in
+              ios|all) [ -n "$ADMOB_IOS_APP_ID" ] || missing="$missing variable:ADMOB_IOS_APP_ID" ;;
+            esac
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing:$missing. See APP_RELEASE.md (one-time setup)."
+            exit 1
+          fi
+        working-directory: .
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/expo/package-lock.json
+
+      - run: npm ci
+
+      # Same gates as CI, so a release never ships what CI would refuse.
+      - name: Type-check
+        run: npm run typecheck
+      - name: Icons
+        run: npm run check:icons
+      - name: Tests
+        run: npm test
+
+      - name: Check mediation config
+        if: env.ADMOB_MEDIATION != ''
+        run: node -e "require('./plugins/withAdMediation').parseMediation(process.env.ADMOB_MEDIATION); console.log('mediation ok')"
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # The build runs on EAS, which evaluates app.config.ts there. It does not
+      # see this job's environment, so the ids go into the profile's env in
+      # eas.json for this run only (never committed).
+      - name: Pass build ids to EAS
+        run: |
+          jq --arg p "${{ inputs.profile }}" \
+             --arg id "$EAS_PROJECT_ID" --arg owner "$EXPO_OWNER" \
+             --arg a "$ADMOB_ANDROID_APP_ID" --arg i "$ADMOB_IOS_APP_ID" \
+             --arg med "$ADMOB_MEDIATION" --arg sk "$ADMOB_SKADNETWORK_IDS" \
+             '.build[$p].env += ({EAS_PROJECT_ID: $id}
+               + (if $owner != "" then {EXPO_OWNER: $owner} else {} end)
+               + (if $a != "" then {ADMOB_ANDROID_APP_ID: $a} else {} end)
+               + (if $i != "" then {ADMOB_IOS_APP_ID: $i} else {} end)
+               + (if $med != "" then {ADMOB_MEDIATION: $med} else {} end)
+               + (if $sk != "" then {ADMOB_SKADNETWORK_IDS: $sk} else {} end))' \
+             eas.json > eas.tmp.json && mv eas.tmp.json eas.json
+          jq ".build[\"${{ inputs.profile }}\"].env | keys" eas.json
+
+      - name: Build${{ inputs.submit && ' and submit' || '' }}
+        env:
+          # Archive the working tree as is (it includes the eas.json above).
+          EAS_NO_VCS: "1"
+        run: |
+          args="--platform ${{ inputs.platform }} --profile ${{ inputs.profile }} --non-interactive --no-wait"
+          if [ "${{ inputs.submit }}" = "true" ]; then args="$args --auto-submit"; fi
+          eas build $args --json > build.json
+          cat build.json
+          echo "### EAS build started" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.[] | "- \(.platform): https://expo.dev/accounts/\(.project.ownerAccount.name)/projects/\(.project.slug)/builds/\(.id)"' build.json >> "$GITHUB_STEP_SUMMARY" || true

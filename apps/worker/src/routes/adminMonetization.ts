@@ -16,6 +16,10 @@ import { newId } from "../lib/ids";
 import { getAppConfig } from "../lib/settings";
 import { MONETIZATION_DEFAULTS, parseMonetizationConfig, providerReady } from "../lib/monetizationConfig";
 import { adsReport, importRevenueRows, utcDay } from "../lib/adMetrics";
+import { adPlatformRegistry } from "../lib/adPlatform";
+import { adOptimizerJob, readDecisions } from "../lib/adOptimizer";
+import { adRevenueImportJob, importConfigured } from "../lib/adRevenueImport";
+import { adPerformance, adsSuppressedUntil, clearAdsSuppression } from "../lib/adStats";
 import { GIFT_ID_RE, toGift, validateGiftInput } from "../lib/gifts";
 import { refundStorePurchase, validateListingInput } from "../lib/store";
 import {
@@ -110,7 +114,45 @@ export function registerMonetizationRoutes(
       providerReady: providerReady(cfg),
       ssvCallbackPath: "/webhook/admob/ssv",
       unverifiedClientRewards: (c.env as any).ALLOW_UNVERIFIED_AD_REWARDS === "true",
+      // Web rewarded ads pay only when this deploy switch is on (lib/webAdReward.ts).
+      webAdRewardsAllowed: (c.env as any).ALLOW_WEB_AD_REWARDS === "true",
+      // Slots the app has, network types and limits, for the Ad platform editor.
+      adPlatformRegistry: adPlatformRegistry(),
     });
+  });
+
+  // ------------------------------------------------------------ optimization
+
+  adminRoute.get("/monetization/ads/performance", async (c) => {
+    const { from, to } = range(c);
+    try {
+      const perf = await adPerformance(c.env, utcDay(from), utcDay(to));
+      return c.json({ ...perf, decisions: await readDecisions(c.env), importConfigured: importConfigured(c.env) });
+    } catch (e: any) {
+      throw httpsError("invalid-argument", String(e?.message ?? e));
+    }
+  });
+
+  adminRoute.post("/monetization/ads/optimize-now", async (c) => {
+    const r = await adOptimizerJob(c.env);
+    await logAudit(c, "ads.optimize", "ads", null, r);
+    return c.json(r);
+  });
+
+  adminRoute.post("/monetization/ads/import-now", async (c) => {
+    const r = await adRevenueImportJob(c.env);
+    await logAudit(c, "ads.revenue.api_import", "ad_revenue_reports", null, { admob: r.admob, adsense: r.adsense, errors: r.errors.length });
+    return c.json(r);
+  });
+
+  adminRoute.get("/monetization/ads/suppression/:uid", async (c) => {
+    return c.json({ uid: c.req.param("uid"), suppressedUntil: await adsSuppressedUntil(c.env, c.req.param("uid")) });
+  });
+
+  adminRoute.delete("/monetization/ads/suppression/:uid", async (c) => {
+    await clearAdsSuppression(c.env, c.req.param("uid"));
+    await logAudit(c, "ads.unsuppress", "users", c.req.param("uid"), {});
+    return c.json({ ok: true });
   });
 
   adminRoute.get("/monetization/ads/report", async (c) => {

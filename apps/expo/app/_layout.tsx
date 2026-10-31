@@ -47,6 +47,7 @@ dayjs.extend(utc);
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { ToastProvider } from '@/src/components/toast/ToastProvider';
+import { AdsRuntime } from '@/src/ads/AdsRuntime';
 import { ConfirmHost } from '@/src/components/modals/ConfirmHost';
 import { useFirebaseActionLink } from '@/src/hooks/useFirebaseActionLink';
 import { lightTheme, darkTheme } from '@/constants/theme';
@@ -493,6 +494,8 @@ function RootLayoutNav() {
           </Stack>
           {/* Keeps App Control (maintenance, update, flags, banner) live on this device. */}
           <LiveAppConfig />
+          {/* Ad decisions, consent, suppression, fatigue, app open ads (src/ads/AdsRuntime.tsx). */}
+          <AdsRuntime />
           {/* Upcoming-maintenance notice, and the staff "maintenance is ON" bar. */}
           <AppControlBars />
           {/* Admin-controlled announcement banner (main screens; dismissal persists per announcement). */}

@@ -8,6 +8,8 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import { designWidth } from '@/src/lib/layout';
 import { battleUrl, shareOrigin, shareBattleLink, shareImageFile, prepareShareFile, type ShareOutcome } from '@/src/lib/share';
 import { createShareCounter, resolveBattleShareAsset, shareOutcomeMessage } from '@/src/lib/vsShareAsset';
+import { AdSlot } from '@/src/ads/AdSlot';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { joinedBattleCaption, voteLinkCaption } from '@/src/lib/shareCaptions';
 import { contestSuccessCopy, type VsStoryState } from '@/src/lib/contestSuccess';
 import { contestService } from '@/src/services/contests/contestService';
@@ -89,6 +91,7 @@ export default function ContestJoinedScreen() {
 
   const bgColor = useThemeColor({}, 'background');
   const textColor = useThemeColor({}, 'text');
+  const isDark = useColorScheme() === 'dark';
   const cardBg = useThemeColor({ light: '#FFF', dark: '#1F222A' }, 'background');
 
   /**
@@ -228,6 +231,11 @@ export default function ContestJoinedScreen() {
         <TouchableOpacity style={styles.homeButton} onPress={() => router.replace('/home')}>
             <Text style={[styles.homeText, { color: textColor }]}>Go to Home</Text>
         </TouchableOpacity>
+
+        {/* Small banner below every button (Ad platform → After contest entry). */}
+        <View style={{ alignSelf: 'stretch', marginTop: 16 }}>
+          <AdSlot slot="entry_share" isDark={isDark} />
+        </View>
 
       </View>
       </ScrollView>

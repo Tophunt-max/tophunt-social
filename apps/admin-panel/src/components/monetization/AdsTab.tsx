@@ -79,6 +79,11 @@ export function AdsTab({ range }: { range: Range }) {
   return (
     <div className="space-y-5">
       <Card title="Ad network (SDK ads)" subtitle="Feed native, short-video, interstitial and rewarded placements. Changes apply without an app release.">
+        <Notice tone="info">
+          Where ads show and which network serves them is now set in the <b>Ad platform</b> tab. Here: the global "Ads enabled" switch, consent, blocked countries,
+          and the rewarded amounts and daily caps (apps: AdMob verification; web: watch token). The feed / short-video / interstitial rows below are older settings
+          the current app does not use.
+        </Notice>
         {!ready && ads.enabled && (
           <Notice tone="warning">
             The provider is not ready, so apps treat ads as OFF. Choose AdMob, and for production mode enter the AdMob app ids. The app build must also include the AdMob SDK (see MONETIZATION.md).
@@ -149,6 +154,41 @@ export function AdsTab({ range }: { range: Range }) {
             <p className="text-[11px] text-muted-foreground break-all">
               SSV callback URL for the AdMob rewarded unit: <code>{API_BASE}{cfgQ.data?.ssvCallbackPath}</code>
             </p>
+          </div>
+        </div>
+      </Card>
+
+      <Card title="Web rewarded ads (Google Ad Manager)" subtitle="Video ads on the web app's Earn page (tophunt.in). Paid in Diamonds.">
+        <Notice tone="warning">
+          Web ads have no server-side verification: the browser says the ad was watched. Limits: signed watch token + minimum watch time, the web
+          daily cap below, verified mobile number, the daily free Diamond cap and the free-rewards budget. Keep the reward small.
+        </Notice>
+        {!cfgQ.data?.webAdRewardsAllowed && (
+          <Notice tone="warning">
+            Deploy switch is OFF, so web ads pay nothing even when enabled here. Set the Worker variable <code>ALLOW_WEB_AD_REWARDS=true</code> in Cloudflare to allow it.
+          </Notice>
+        )}
+        {ads.web.enabled && !ads.enabled && <Notice tone="warning">"Ads enabled" (above) is off, so web ads are off too.</Notice>}
+        {ads.web.enabled && !ads.web.adUnitPath && <Notice tone="warning">Enter the Ad Manager rewarded ad unit path, or web ads stay off.</Notice>}
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Toggle label="Web rewarded ads" checked={ads.web.enabled} onChange={(v) => set(["web", "enabled"], v)} hint={`Deploy switch: ${cfgQ.data?.webAdRewardsAllowed ? "ON" : "OFF"}`} />
+          <Toggle
+            label="Verified mobile number required"
+            checked={ads.web.requireVerifiedPhone}
+            onChange={(v) => set(["web", "requireVerifiedPhone"], v)}
+            hint="Strongly recommended: makes farming with many accounts expensive."
+          />
+          <Text
+            label="Rewarded ad unit path"
+            value={ads.web.adUnitPath}
+            placeholder="/1234567/tophunt_rewarded"
+            onChange={(v) => set(["web", "adUnitPath"], v)}
+            hint="Ad Manager → Inventory → Ad units → the rewarded unit's code, with your network code in front."
+          />
+          <div className="grid grid-cols-3 gap-2">
+            <Num label="Diamonds per view" value={ads.web.rewardDiamonds} onChange={(v) => set(["web", "rewardDiamonds"], v)} />
+            <Num label="Per user per day" value={ads.web.dailyCap} onChange={(v) => set(["web", "dailyCap"], v)} />
+            <Num label="Min watch (sec)" value={ads.web.minWatchSec} onChange={(v) => set(["web", "minWatchSec"], v)} />
           </div>
         </div>
       </Card>

@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { PageHeader } from "@/lib/format";
 import { OverviewTab } from "@/components/monetization/OverviewTab";
 import { AdsTab } from "@/components/monetization/AdsTab";
+import { AdPlatformTab } from "@/components/monetization/AdPlatformTab";
+import { AdPerformanceTab } from "@/components/monetization/AdPerformanceTab";
 import { SponsorshipsTab } from "@/components/monetization/SponsorshipsTab";
 import { GiftsTab } from "@/components/monetization/GiftsTab";
 import { StoreTab } from "@/components/monetization/StoreTab";
@@ -9,7 +11,9 @@ import { field } from "@/components/monetization/shared";
 
 const TABS = [
   { id: "overview", label: "Overview" },
-  { id: "ads", label: "Ads" },
+  { id: "adplatform", label: "Ad platform" },
+  { id: "adperformance", label: "Ad performance" },
+  { id: "ads", label: "Ads & rewards" },
   { id: "sponsorships", label: "Sponsorships" },
   { id: "gifts", label: "Gifts" },
   { id: "store", label: "Digital store" },
@@ -67,6 +71,8 @@ export default function Monetization() {
         ))}
       </div>
       {tab === "overview" && <OverviewTab range={range} />}
+      {tab === "adplatform" && <AdPlatformTab />}
+      {tab === "adperformance" && <AdPerformanceTab range={range} />}
       {tab === "ads" && <AdsTab range={range} />}
       {tab === "sponsorships" && <SponsorshipsTab />}
       {tab === "gifts" && <GiftsTab range={range} />}

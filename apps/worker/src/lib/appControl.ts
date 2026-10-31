@@ -408,7 +408,7 @@ export const FEATURE_ACTIONS: Record<FeatureKey, string[]> = {
   stories: ["createStory", "getStoryUrl", "reactToStory", "createHighlight", "addStoryToHighlight"],
   // Emergency switches for the closed loop. Turning one off stops new claims /
   // purchases; cancelling an order or viewing history keeps working.
-  earning: ["claimDailyReward", "claimDailyTask", "claimAdReward", "convertXp", "claimRewardGrant"],
+  earning: ["claimDailyReward", "claimDailyTask", "claimAdReward", "startWebAd", "claimWebAdReward", "convertXp", "claimRewardGrant"],
   shopping: ["placeShopOrder", "buyStoreItem", "sendGift"],
   posts: ["createPost"],
 };

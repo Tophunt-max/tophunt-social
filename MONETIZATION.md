@@ -185,6 +185,95 @@ Policy note: Diamonds pay contest entry fees, and contest prizes are withdrawabl
 reward therefore has indirect cash value. Review AdMob's rewarded-ad policy for this before enabling
 `ads.rewarded`. The safer alternative is a cosmetic item reward, which is not built.
 
+### Rewarded ads on the web (Google Ad Manager, client-trusted)
+
+The web build's Earn page shows rewarded video ads through Google Ad Manager's GPT
+(`apps/expo/src/services/ads/webRewarded.ts`). GPT has **no server-side verification**: only the browser's
+`rewardedSlotGranted` event says the ad was watched. The Worker (`lib/webAdReward.ts`) therefore pays on the
+client's word, bounded by:
+
+1. `startWebAd` returns an HMAC-signed watch token (uid, nonce, issue time, min watch time, 5 min expiry).
+   `claimWebAdReward` pays only the caller's own token, at least `minWatchSec` after it was issued.
+2. One payout per token (`ad_reward_claims.id = web:<nonce>`).
+3. Its own daily cap `ads.web.dailyCap` (provider `web`, separate from the AdMob cap), checked in the batch.
+4. Verified mobile number required (`ads.web.requireVerifiedPhone`, default on).
+5. The shared daily free Diamond cap and the free-rewards budget. Paid in Diamonds only.
+6. Deploy switch: nothing pays unless the Worker variable `ALLOW_WEB_AD_REWARDS` is exactly `true`.
+
+A script that waits `minWatchSec` per token can still collect up to the daily cap without watching. Keep
+`ads.web.rewardDiamonds` and `ads.web.dailyCap` small.
+
+To turn it on:
+
+1. Ad Manager: create a **rewarded** ad unit for the web inventory and approve `tophunt.in`.
+2. Admin → Monetization → Ads: "Ads enabled" on, then "Web rewarded ads" on, the ad unit path
+   (`/<network code>/<unit code>`), reward, daily cap and minimum watch time. Save.
+3. Cloudflare → Worker → Variables: `ALLOW_WEB_AD_REWARDS=true` (optional `WEB_AD_TOKEN_SECRET`; otherwise the
+   key is derived from `ADMIN_PROXY_SECRET`). Deploy.
+4. Check on a phone browser. Google serves web rewarded ads only on mobile-optimised pages with neutral zoom,
+   so desktop browsers usually get none.
+
+The web CSP (`public/_headers` and `public/_worker.js`) allowlists Google's ad hosts. Google documents only a
+nonce-based strict CSP for GPT, so a new Google host can be blocked; watch the browser console for CSP
+violations after enabling.
+
+## Ad platform (admin-managed networks, placements, waterfall)
+
+Admin → Monetization → **Ad platform**. Stored as `appConfig.monetization.adPlatform`
+(`apps/worker/src/lib/adPlatform.ts`), served to the app in `/read/app-config`, used by `apps/expo/src/ads/`.
+
+**Networks** (max 20): Google AdMob (Android / iOS), Google Ad Manager (web and apps), Google Ad Exchange
+(AdX: no tag of its own, served through Ad Manager ad unit paths of an AdX-linked / MCM network; its own type so
+it is named and reported separately), AdSense (web, needs the `ca-pub-` id) and House ads (approved sponsored campaigns). Each
+has on/off, platforms and **test mode** (Google's published test ads, never real ones).
+
+**Placements**: one per slot the app has in code. The panel can switch a slot on per platform and configure
+it, but cannot put an ad on a screen without a slot. Login, signup, checkout, chat, uploads, settings and the
+area next to vote buttons have no slot on purpose.
+
+| Slot | Where | Formats |
+|---|---|---|
+| `home_feed` | Between battles (For You) | native, banner |
+| `explore_grid` | Explore → See all, between tile rows | native, banner |
+| `battle_page` | Shared battle page, below the card | banner, native |
+| `result_page` | Result page, below winner card / share / prize | banner, native |
+| `blog_list` | Between blog articles | native, banner |
+| `blog_article` | After the article text | banner, native |
+| `leaderboard` | After the top 10 | banner, native |
+| `share_sheet` | Share sheet of every battle (VS image), below the preview | small banner 320×50 |
+| `entry_share` | After contest entry (share VS image screen), below Go to Home | small banner 320×50 |
+| `referral_share` | Refer & earn page, at the bottom | small banner 320×50 |
+| `notifications` | After the first 5 notifications | small banner 320×50 |
+| `profile_wins` | Between won battles on a profile's Wins list | native, banner |
+| `prizes` | Below My prizes | small banner 320×50 |
+| `hall_of_fame` | Bottom of Hall of fame | banner, native |
+| `story_between` | Stories: full-screen (video) ad when moving to the next person; apps only, only if preloaded; "every N people" = first position / interval | interstitial |
+| `story_card` | Stories: ad page between people (web + apps; fallback when no interstitial is ready), skip after 3 s, closes after 10 s | native, banner |
+| `earn_rewarded` | Earn page, watch & earn | rewarded |
+| `contest_join_rewarded` | Contest join when Diamonds are short | rewarded |
+| `result_exit_interstitial` | Leaving the result page (apps only) | interstitial |
+
+Per placement: format, platforms, **waterfall** (up to 6 networks, each with its unit per platform and a
+timeout), first position and interval (lists), max per session / per day, seconds between full-screen ads,
+guests on/off, no ads for new accounts for N days, start / end dates.
+
+**Waterfall.** The app tries the first network; on no fill, error or timeout it tries the next. House ads are
+the usual last step; when nothing fills, the slot collapses. Interstitials on leaving a page are shown only
+if already preloaded, so nobody waits for an ad.
+
+**Rewards** are never paid by the panel config. Apps: AdMob rewarded with SSV (amount and cap in Ads &
+rewards → Rewarded ads). Web: Ad Manager rewarded through the watch-token flow below. Rewarded slots accept
+AdMob in the apps and Ad Manager on the web only.
+
+**ads.txt / app-ads.txt**: entered in the panel, served at `https://tophunt.in/ads.txt` and `/app-ads.txt`
+by the web edge worker (`public/_worker.js` → API `/read/ads-txt`).
+
+**Reports**: ad events (request, fill, impression, click, fail, reward_complete) are counted per slot,
+network id and platform in `ad_event_counters`; the Ads & rewards tab shows them with fill rate.
+
+**Apps**: need a build with the AdMob SDK (APP_RELEASE.md). Consent runs first (Google UMP), then the SDK
+starts. Native-format slots render as a medium rectangle banner in the apps.
+
 ### Measurement
 
 - `ad_event_counters`: app-reported requests/fills/impressions/clicks/failures, per day/platform/placement,
@@ -193,6 +282,52 @@ reward therefore has indirect cash value. Review AdMob's rewarded-ad policy for 
   a finalized row is never downgraded. eCPM = revenue ÷ impressions × 1000.
   Estimated revenue for planning = impressions × eCPM ÷ 1000 (`estimateRevenue`).
 - Not built: AdMob Reporting API sync (needs OAuth credentials), invalid-traffic alerts.
+
+## Ad optimization (production)
+
+**Optimizer** (`apps/worker/src/lib/adOptimizer.ts`, hourly). For placements with *Auto-optimize order*, networks
+are ranked by revenue per request = fill rate (Beta posterior over 7 days) × eCPM (AdMob impression-level revenue
+with 50+ paid events, else imported reports with 100+ impressions, else the median). Only networks with 50+
+requests move; house ads keep the admin's place. The app explores 10% of the time (a different network first),
+so a network that improves can climb back. Independently, a network whose fails + timeouts are 85%+ of today's
+requests (50+) is paused on that platform. Adaptive timeouts: ~2.5 × the mean fill latency, 1 s to the admin's
+value. Output in KV, served at `/read/ads/decisions` (edge-cached 5 min); without it the admin's order stands.
+
+**On the device** (`apps/expo/src/ads/optimizer.ts`): circuit breaker (5+ attempts in 10 min, 80%+ failing → skip
+10 min), local latency → tighter timeouts, stable experiment buckets (FNV hash of user or device + slot), fatigue
+(after 6 ads in a session, and per quick exit after a full-screen ad, intervals and gaps stretch, up to 2.5×),
+lazy loading on the web (a slot requests only within ~1 screen; GPT lazy load + single request), viewable refresh
+of web Ad Manager banners (`refreshSec`, 30-300 s, only while 50% on screen and the tab is visible; AdMob banner
+refresh is set in the AdMob console), app open ads (preloaded, shown after 30+ s in the background, never on a
+cold start, default ≤3/day and 4 h apart), ATT prompt on iOS after the UMP consent form, Google's consent message on
+the web (Ad platform → Web consent).
+
+**Data**: `ad_stats` (day × platform × slot × network × country × variant: requests, fills, impressions, clicks,
+fails, timeouts, rewards, latency) and `ad_ilrd` (AdMob paid events, by currency), migration 0078. Dashboard:
+Admin → Monetization → **Ad performance** (slots × networks, decisions with scores, experiments, countries,
+alerts, run optimizer / import now, invalid-traffic lookup).
+
+**Revenue import** (`lib/adRevenueImport.ts`, 6-hourly): AdMob API and AdSense Management API, USD, last 3 days,
+units mapped to slots; finalized rows are never overwritten. Worker secrets: `GOOGLE_ADS_CLIENT_ID`,
+`GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN` (one OAuth client, offline refresh token with
+`admob.readonly` + `adsense.readonly`), and `ADMOB_PUBLISHER_ID` / `ADSENSE_ACCOUNT_ID` (`pub-…`). Ad Manager / AdX
+stay on the CSV import. Then **reconciliation**: app-counted vs network impressions per type, 2 days back; >10%
+apart raises an alert.
+
+**Alerts** (`ad_alerts` + admin notification, 24 h dedupe): fill rate < half the 7-day level, SDK eCPM < 60% of it,
+network paused, reconciliation gap, import failure.
+
+**Invalid traffic** (`lib/adStats.ts`): an account with more than 15 ad clicks in a day, or CTR above 25% over 20+
+impressions, gets no ads for 7 days (the app stops requesting). Lift it in Ad performance.
+
+**Mediation / bidding (apps)**: `apps/expo/plugins/withAdMediation.js` adds partners' AdMob adapters from the
+GitHub variable `ADMOB_MEDIATION` (JSON, pinned versions per platform: meta, applovin, unity, liftoff, inmobi,
+pangle, ironsource, mintegral) and `ADMOB_SKADNETWORK_IDS`. Partners and bidding are switched on in the AdMob
+console. Needs an app release.
+
+**Not in code, set in the networks' consoles**: Open Bidding / AdX demand and Unified Pricing Rules (floors) in
+Ad Manager; eCPM floors and banner refresh in AdMob; Prebid / Amazon TAM need those partners' accounts and are
+not wired.
 
 ## Sponsorships
 
