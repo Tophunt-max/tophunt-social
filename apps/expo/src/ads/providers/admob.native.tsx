@@ -20,6 +20,8 @@ export interface AdmobInlineProps {
   format: AdFormat;
   networkType: 'admob' | 'gam';
   testMode: boolean;
+  /** One-line 320×50 banner. */
+  compact?: boolean;
   onLoad: () => void;
   onFail: (reason: string) => void;
   onClick?: () => void;
@@ -74,7 +76,7 @@ function testUnit(m: any, networkType: 'admob' | 'gam', kind: 'banner' | 'inters
 }
 
 /** Inline banner / native slot (native ads render as a medium rectangle). */
-export function AdmobInline({ unit, format, networkType, testMode, onLoad, onFail, onClick }: AdmobInlineProps) {
+export function AdmobInline({ unit, format, networkType, testMode, compact, onLoad, onFail, onClick }: AdmobInlineProps) {
   const m = lib();
   const [ready, setReady] = React.useState<boolean | null>(null);
   useEffect(() => {
@@ -95,7 +97,7 @@ export function AdmobInline({ unit, format, networkType, testMode, onLoad, onFai
   }, []);
   if (!m || !ready) return null;
   const Banner = networkType === 'gam' ? m.GAMBannerAd : m.BannerAd;
-  const size = format === 'native' ? m.BannerAdSize.MEDIUM_RECTANGLE : m.BannerAdSize.INLINE_ADAPTIVE_BANNER;
+  const size = compact ? m.BannerAdSize.BANNER : format === 'native' ? m.BannerAdSize.MEDIUM_RECTANGLE : m.BannerAdSize.INLINE_ADAPTIVE_BANNER;
   const props: any = {
     unitId: testMode ? testUnit(m, networkType, 'banner') : unit,
     onAdLoaded: () => onLoad(),

@@ -14,6 +14,8 @@ interface WebAdProps {
   unit: string;
   format: AdFormat;
   testMode: boolean;
+  /** One-line banner (320×50 / 320×100). */
+  compact?: boolean;
   onLoad: () => void;
   onFail: (reason: string) => void;
 }
@@ -21,10 +23,11 @@ interface WebAdProps {
 /** Google's published GPT sample unit, used in test mode. */
 const GAM_TEST_UNIT = '/6355419/Travel/Europe/France/Paris';
 const GAM_SIZES: any[] = [[300, 250], [336, 280], [320, 100], [320, 50], 'fluid'];
+const GAM_SIZES_COMPACT: any[] = [[320, 50], [300, 50], [320, 100]];
 
 const domId = (prefix: string, raw: string) => `${prefix}-${raw.replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
-export function GamDisplay({ unit, testMode, onLoad, onFail }: WebAdProps) {
+export function GamDisplay({ unit, testMode, compact, onLoad, onFail }: WebAdProps) {
   const id = domId('gpt', useId());
   useEffect(() => {
     if (!webAdsSupported()) {
@@ -40,7 +43,7 @@ export function GamDisplay({ unit, testMode, onLoad, onFail }: WebAdProps) {
       const gt = googletag();
       gt.cmd.push(() => {
         if (!alive || !document.getElementById(id)) return;
-        slot = gt.defineSlot(testMode ? GAM_TEST_UNIT : unit, GAM_SIZES, id);
+        slot = gt.defineSlot(testMode ? GAM_TEST_UNIT : unit, compact ? GAM_SIZES_COMPACT : GAM_SIZES, id);
         if (!slot) return onFail('error');
         slot.addService(gt.pubads());
         onRender = (e: any) => {
@@ -64,7 +67,7 @@ export function GamDisplay({ unit, testMode, onLoad, onFail }: WebAdProps) {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unit, testMode, id]);
+  }, [unit, testMode, compact, id]);
   return <View nativeID={id} style={{ width: '100%', alignItems: 'center', minHeight: 50 }} />;
 }
 
@@ -96,7 +99,7 @@ function loadAdSense(client: string): Promise<boolean> {
  * AdSense has no load callback, but it marks the `<ins>` with
  * `data-ad-status="filled" | "unfilled"` once it has decided; that is watched.
  */
-export function AdSenseDisplay({ unit, format, testMode, onLoad, onFail, client }: WebAdProps & { client: string }) {
+export function AdSenseDisplay({ unit, format, testMode, compact, onLoad, onFail, client }: WebAdProps & { client: string }) {
   const id = domId('ads', useId());
   useEffect(() => {
     if (!webAdsSupported() || !client) {
@@ -116,9 +119,10 @@ export function AdSenseDisplay({ unit, format, testMode, onLoad, onFail, client 
       ins.style.width = '100%';
       ins.setAttribute('data-ad-client', client);
       ins.setAttribute('data-ad-slot', unit);
-      ins.setAttribute('data-ad-format', format === 'native' ? 'fluid' : 'auto');
+      ins.setAttribute('data-ad-format', compact ? 'horizontal' : format === 'native' ? 'fluid' : 'auto');
+      if (compact) ins.style.height = '50px';
       if (format === 'native') ins.setAttribute('data-ad-layout', 'in-article');
-      ins.setAttribute('data-full-width-responsive', 'true');
+      ins.setAttribute('data-full-width-responsive', compact ? 'false' : 'true');
       if (testMode) ins.setAttribute('data-adtest', 'on');
       host.appendChild(ins);
       const check = () => {
@@ -146,6 +150,6 @@ export function AdSenseDisplay({ unit, format, testMode, onLoad, onFail, client 
       if (host) host.innerHTML = '';
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unit, client, testMode, id]);
+  }, [unit, client, testMode, compact, id]);
   return <View nativeID={id} style={{ width: '100%', minHeight: 50 }} />;
 }

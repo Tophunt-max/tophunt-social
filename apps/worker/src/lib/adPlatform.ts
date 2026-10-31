@@ -66,6 +66,10 @@ export const AD_SLOTS = {
   blog_list: { label: "Blog list", hint: "Between blog articles.", formats: ["native", "banner"], list: true },
   blog_article: { label: "Blog article", hint: "After the article text, before related posts.", formats: ["banner", "native"], list: false },
   leaderboard: { label: "Leaderboard", hint: "After the top 10.", formats: ["banner", "native"], list: false },
+  // Small 320×50 banners where people share. Never inside the VS / winner image.
+  share_sheet: { label: "Share sheet (VS image)", hint: "Small banner in the share sheet of every battle (feed, battle page, both players), below the VS preview.", formats: ["banner"], list: false },
+  entry_share: { label: "After contest entry", hint: "Small banner on the 'entry done, share your VS image' screen, below Go to Home.", formats: ["banner"], list: false },
+  referral_share: { label: "Invite friends page", hint: "Small banner at the bottom of Refer & earn.", formats: ["banner"], list: false },
   earn_rewarded: { label: "Earn page: watch & earn", hint: "The user chooses to watch for Diamonds.", formats: ["rewarded"], list: false },
   contest_join_rewarded: { label: "Contest join: not enough Diamonds", hint: "Offered when the entry fee is short.", formats: ["rewarded"], list: false },
   result_exit_interstitial: { label: "Leaving the result page", hint: "Full screen, apps only, strict caps.", formats: ["interstitial"], list: false },

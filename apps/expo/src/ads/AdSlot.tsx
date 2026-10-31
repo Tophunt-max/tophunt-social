@@ -23,14 +23,17 @@ import { AdmobInline } from './providers/admob';
 import { AdSenseDisplay, GamDisplay } from './providers/web';
 
 const RESERVED_H = 250;
+/** Small banner slots (share screens): one 320×50 line. */
+const COMPACT_SLOTS = new Set<AdSlotKey>(['share_sheet', 'entry_share', 'referral_share']);
+const RESERVED_H_COMPACT = 60;
 
 export function AdSlot({ slot, isDark, index = 0, style }: { slot: AdSlotKey; isDark: boolean; index?: number; style?: StyleProp<ViewStyle> }) {
   const placement = useAdPlacement(slot);
   if (!placement || placement.format === 'interstitial' || placement.format === 'rewarded') return null;
-  return <Waterfall key={`${slot}:${index}`} placement={placement} isDark={isDark} index={index} style={style} />;
+  return <Waterfall key={`${slot}:${index}`} placement={placement} isDark={isDark} index={index} style={style} compact={COMPACT_SLOTS.has(slot)} />;
 }
 
-function Waterfall({ placement, isDark, index, style }: { placement: ResolvedPlacement; isDark: boolean; index: number; style?: StyleProp<ViewStyle> }) {
+function Waterfall({ placement, isDark, index, style, compact }: { placement: ResolvedPlacement; isDark: boolean; index: number; style?: StyleProp<ViewStyle>; compact: boolean }) {
   // Decided once per mount: a slot that is over its cap stays empty.
   const [allowed] = useState(() => canShowAd(placement.slot, placement.rules));
   const [step, setStep] = useState(0);
@@ -71,7 +74,7 @@ function Waterfall({ placement, isDark, index, style }: { placement: ResolvedPla
   if (!allowed || !attempt) return null;
   return (
     <View
-      style={[styles.box, { borderColor: isDark ? '#2A2D35' : '#ECEDF1', backgroundColor: isDark ? '#16171E' : '#FAFAFB' }, !filled && { minHeight: RESERVED_H }, style]}
+      style={[styles.box, { borderColor: isDark ? '#2A2D35' : '#ECEDF1', backgroundColor: isDark ? '#16171E' : '#FAFAFB' }, !filled && { minHeight: compact ? RESERVED_H_COMPACT : RESERVED_H }, compact && styles.compact, style]}
       accessibilityLabel="Advertisement"
     >
       <Text style={[styles.label, { color: isDark ? '#8B8F9A' : '#9A9AA0' }]}>Advertisement</Text>
@@ -79,6 +82,7 @@ function Waterfall({ placement, isDark, index, style }: { placement: ResolvedPla
         key={step}
         attempt={attempt}
         format={placement.format}
+        compact={compact}
         isDark={isDark}
         index={index}
         onLoad={() => load(step)}
@@ -92,6 +96,7 @@ function Waterfall({ placement, isDark, index, style }: { placement: ResolvedPla
 function Attempt({
   attempt,
   format,
+  compact,
   isDark,
   index,
   onLoad,
@@ -100,6 +105,7 @@ function Attempt({
 }: {
   attempt: AdAttempt;
   format: ResolvedPlacement['format'];
+  compact: boolean;
   isDark: boolean;
   index: number;
   onLoad: () => void;
@@ -112,20 +118,27 @@ function Attempt({
     case 'adx':
       // Ad Manager: GPT on the web, the Mobile Ads SDK in the apps.
       return AD_PLATFORM === 'web' ? (
-        <GamDisplay unit={unit} format={format} testMode={network.testMode} onLoad={onLoad} onFail={onFail} />
+        <GamDisplay unit={unit} format={format} compact={compact} testMode={network.testMode} onLoad={onLoad} onFail={onFail} />
       ) : (
-        <AdmobInline unit={unit} format={format} networkType="gam" testMode={network.testMode} onLoad={onLoad} onFail={onFail} onClick={onClick} />
+        <AdmobInline unit={unit} format={format} compact={compact} networkType="gam" testMode={network.testMode} onLoad={onLoad} onFail={onFail} onClick={onClick} />
       );
     case 'admob':
-      return <AdmobInline unit={unit} format={format} networkType="admob" testMode={network.testMode} onLoad={onLoad} onFail={onFail} onClick={onClick} />;
+      return <AdmobInline unit={unit} format={format} compact={compact} networkType="admob" testMode={network.testMode} onLoad={onLoad} onFail={onFail} onClick={onClick} />;
     case 'adsense':
-      return <AdSenseDisplay unit={unit} format={format} testMode={network.testMode} client={network.publisherId} onLoad={onLoad} onFail={onFail} />;
+      return <AdSenseDisplay unit={unit} format={format} compact={compact} testMode={network.testMode} client={network.publisherId} onLoad={onLoad} onFail={onFail} />;
     case 'house':
+      // A full sponsored card does not fit a one-line banner slot.
+      if (compact) return <Skip onFail={onFail} />;
       return <HouseAd isDark={isDark} index={index} onLoad={onLoad} onFail={onFail} />;
     default:
-      onFail('unsupported');
-      return null;
+      return <Skip onFail={onFail} />;
   }
+}
+
+/** A step that cannot run here: hand over to the next network after render. */
+function Skip({ onFail }: { onFail: (reason: string) => void }) {
+  useEffect(() => onFail('unsupported'), [onFail]);
+  return null;
 }
 
 /** TopHunt's own sponsored campaigns, the last-resort fallback. */
@@ -146,5 +159,6 @@ function HouseAd({ isDark, index, onLoad, onFail }: { isDark: boolean; index: nu
 
 const styles = StyleSheet.create({
   box: { alignSelf: 'center', width: '100%', maxWidth: 480, borderWidth: 1, borderRadius: 16, paddingTop: 6, paddingBottom: 8, marginVertical: 12, alignItems: 'center', overflow: 'hidden' },
+  compact: { marginVertical: 8, paddingTop: 3, paddingBottom: 4, borderRadius: 12 },
   label: { fontFamily: 'Urbanist-SemiBold', fontSize: 10, letterSpacing: 0.8, marginBottom: 4 },
 });

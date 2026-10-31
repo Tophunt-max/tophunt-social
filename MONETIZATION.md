@@ -240,6 +240,9 @@ area next to vote buttons have no slot on purpose.
 | `blog_list` | Between blog articles | native, banner |
 | `blog_article` | After the article text | banner, native |
 | `leaderboard` | After the top 10 | banner, native |
+| `share_sheet` | Share sheet of every battle (VS image), below the preview | small banner 320×50 |
+| `entry_share` | After contest entry (share VS image screen), below Go to Home | small banner 320×50 |
+| `referral_share` | Refer & earn page, at the bottom | small banner 320×50 |
 | `earn_rewarded` | Earn page, watch & earn | rewarded |
 | `contest_join_rewarded` | Contest join when Diamonds are short | rewarded |
 | `result_exit_interstitial` | Leaving the result page (apps only) | interstitial |

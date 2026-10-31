@@ -10,6 +10,8 @@ export interface AdmobInlineProps {
   format: AdFormat;
   networkType: 'admob' | 'gam';
   testMode: boolean;
+  /** One-line 320×50 banner. */
+  compact?: boolean;
   onLoad: () => void;
   onFail: (reason: string) => void;
   onClick?: () => void;
