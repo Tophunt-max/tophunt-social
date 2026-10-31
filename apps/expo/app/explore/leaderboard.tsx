@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } from 'react-native';
+import { AdSlot } from '@/src/ads/AdSlot';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -97,7 +98,15 @@ export default function LeaderboardScreen() {
             )
           }
           renderItem={({ item, index }) => (
-            <Row user={item} rank={restStartRank + index} score={leaderboardScore(item, by)} unit={unit} palette={p} isMe={item.uid === user?.uid} onOpen={open} />
+            <>
+              <Row user={item} rank={restStartRank + index} score={leaderboardScore(item, by)} unit={unit} palette={p} isMe={item.uid === user?.uid} onOpen={open} />
+              {/* One ad after the top 10 (Monetization → Ad platform → Leaderboard). */}
+              {restStartRank + index === 10 ? (
+                <View style={{ paddingHorizontal: 16 }}>
+                  <AdSlot slot="leaderboard" isDark={p.isDark} />
+                </View>
+              ) : null}
+            </>
           )}
           initialNumToRender={12}
         />

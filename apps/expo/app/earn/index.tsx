@@ -19,7 +19,7 @@ import { balancesOf, hasLiveBalance } from '@/src/lib/balances';
 import { useDesignWindow } from '@/src/lib/layout';
 import { useAppConfig } from '@/src/services/appSettings';
 import { walletService } from '@/src/services/wallet/walletService';
-import { getAdProvider } from '@/src/services/ads/adProvider';
+import { useRewardedAd } from '@/src/ads/fullscreen';
 import { newRequestId, useMonetizationConfig } from '@/src/services/monetization';
 import { useConvertXp, useXpConversion } from '@/src/services/shop';
 
@@ -50,6 +50,8 @@ const freeRewardsOut = (e: any) => typeof e?.message === 'string' && e.message.t
 const dailyFreeLimit = (e: any): string | null => (e?.reason === 'daily_free_limit' && typeof e?.message === 'string' ? e.message : null);
 const errorText = (e: any, fallback: string) =>
   dailyFreeLimit(e) ?? (freeRewardsOut(e) ? 'Aaj ke free rewards khatam ho gaye hain. Thodi der baad try karo.' : e?.message || fallback);
+
+const IS_WEB = Platform.OS === 'web';
 
 type DailySlot = { day: number; amount: number; status: 'claimed' | 'ready' | 'upcoming' };
 type Task = { id: string; title: string; reward: number; xp: number; target: number; type: string; progress: number; claimed: boolean; claimable: boolean; endsAt: number | null };
@@ -85,13 +87,15 @@ export default function EarnScreen() {
   const checkinReady = checkinOn && d.claimedToday !== true;
 
   const tr: any = tasksQ.data ?? {};
-  const adInfo = {
-    enabled: tr.ads?.enabled ?? mon.ads.rewarded.enabled,
-    reward: Number(tr.ads?.rewardDiamonds ?? mon.ads.rewarded.rewardDiamonds) || 0,
-    cap: Number(tr.ads?.dailyCap ?? mon.ads.rewarded.dailyCap) || 0,
-    watched: Number(tr.ads?.watchedToday ?? 0),
-  };
-  const adsLeft = Math.max(0, adInfo.cap - adInfo.watched);
+  // Rewarded ads through the ad platform's "earn_rewarded" slot (src/ads/fullscreen.ts):
+  // AdMob with SSV in the apps, Ad Manager + watch token on the web. Amounts,
+  // caps and today's counter come from the server.
+  const rewarded = useRewardedAd('earn_rewarded', () => {
+    void refetchMe();
+    void tasksQ.refetch();
+  });
+  const adInfo = { enabled: rewarded.enabled, reward: rewarded.reward, cap: rewarded.cap, watched: rewarded.watched };
+  const adsLeft = rewarded.left;
   const allTasks: Task[] = useMemo(() => tr.tasks ?? [], [tr.tasks]);
   // The legacy single "ad" row is paid by the ad itself; the ad card covers it.
   // "ads" bonus tasks only make sense while rewarded ads are on.
@@ -112,6 +116,7 @@ export default function EarnScreen() {
     (checkinReady ? Number(d.todayReward) || 0 : 0) +
     (adInfo.enabled ? adsLeft * adInfo.reward : 0);
   const referral = (config as any)?.referral;
+
 
   const refreshAll = () => {
     void refetchMe();
@@ -160,41 +165,13 @@ export default function EarnScreen() {
     }
   };
 
-  /**
-   * Show a rewarded ad. The SDK only reports that the ad finished; the reward is
-   * paid by the ad network's server-side callback to the Worker, so we refetch a
-   * moment later instead of crediting anything here.
-   */
   const watchAd = async () => {
-    if (busy) return;
-    const provider = getAdProvider();
-    if (!adInfo.enabled || !provider.isAvailable()) {
+    if (busy || rewarded.busy) return;
+    if (!rewarded.enabled) {
       setAdSheet(true);
       return;
     }
-    if (adsLeft <= 0) {
-      emitToast('Aaj ke saare ads ho gaye. Kal phir aao!', 'info');
-      return;
-    }
-    setBusy('ad');
-    try {
-      if (!(await provider.ensureConsent())) {
-        emitToast('Ads ke liye consent chahiye.', 'info');
-        return;
-      }
-      const unit = mon.ads.units[Platform.OS === 'ios' ? 'ios' : 'android']?.rewarded;
-      const res = unit && user?.uid ? await provider.showRewarded(unit, user.uid) : { earned: false };
-      if (res.earned) {
-        success(`Ad poora hua! +${adInfo.reward} Diamond aa rahe hain`);
-        setTimeout(refreshAll, 2500);
-      } else {
-        emitToast('Ad poora nahi hua, reward nahi mila.', 'info');
-      }
-    } catch {
-      fail('Ad load nahi hua. Thodi der baad try karo.');
-    } finally {
-      setBusy(null);
-    }
+    await rewarded.watch();
   };
 
   const goTask = (t: Task) => {
@@ -221,7 +198,7 @@ export default function EarnScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 48, width: contentW, alignSelf: 'center' }}
+        contentContainerStyle={{ paddingBottom: IS_WEB && adInfo.enabled ? 120 : 48, width: contentW, alignSelf: 'center' }}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refreshAll} tintColor={BRAND} />}
       >
         {/* Balance + today's potential */}
@@ -276,7 +253,7 @@ export default function EarnScreen() {
           p={p}
           info={adInfo}
           left={adsLeft}
-          busy={busy === 'ad'}
+          busy={rewarded.busy}
           bonus={adBonus}
           claimBusy={busy}
           onWatch={() => void watchAd()}
@@ -346,6 +323,30 @@ export default function EarnScreen() {
         </View>
         {mon.earning.xpConversion.enabled ? <XpCard p={p} status={xp.data} loading={xp.isLoading} onDone={() => void refetchMe()} /> : null}
       </ScrollView>
+
+      {/* Web: the ad is the main way to earn, so it stays one tap away while scrolling. */}
+      {IS_WEB && adInfo.enabled && adsLeft > 0 ? (
+        <View style={[styles.floatWrap, { width: contentW }]} pointerEvents="box-none">
+          <TouchableOpacity
+            onPress={() => void watchAd()}
+            disabled={rewarded.busy}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel={`Watch an ad for ${adInfo.reward} Diamonds, ${adsLeft} left today`}
+          >
+            <LinearGradient colors={['#8B5CF6', '#FF4D67', '#FF8A4D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.float}>
+              <View style={styles.floatPlay}>
+                {rewarded.busy ? <ActivityIndicator color="#FF4D67" size="small" /> : <Ionicons name="play" size={18} color="#FF4D67" />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.floatTitle}>{rewarded.busy ? 'Ad chal raha hai…' : `Ad dekho, +${adInfo.reward} Diamond pao`}</Text>
+                <Text style={styles.floatSub}>Aaj {adsLeft} ad baaki · {(adsLeft * adInfo.reward).toLocaleString()} Diamond</Text>
+              </View>
+              <DiamondIcon size={20} color="#FFF" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* Ads not available in this build / switched off */}
       <Modal visible={adSheet} transparent animationType="fade" onRequestClose={() => setAdSheet(false)}>
@@ -743,6 +744,24 @@ const styles = StyleSheet.create({
 
   empty: { marginHorizontal: PAD, borderRadius: 18, borderWidth: 1.5, borderStyle: 'dashed', padding: 18, alignItems: 'center', gap: 8 },
   emptyText: { fontFamily: 'Urbanist-Medium', fontSize: 13, textAlign: 'center' },
+
+  floatWrap: { position: 'absolute', bottom: 16, alignSelf: 'center', paddingHorizontal: PAD },
+  float: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 22,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    shadowColor: '#FF4D67',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  floatPlay: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center' },
+  floatTitle: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 14.5 },
+  floatSub: { color: 'rgba(255,255,255,0.88)', fontFamily: 'Urbanist-SemiBold', fontSize: 11.5, marginTop: 1 },
 
   sheetBack: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   sheet: { width: '100%', maxWidth: 380, borderRadius: 26, padding: 22, gap: 12, alignItems: 'center' },

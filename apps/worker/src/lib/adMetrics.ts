@@ -13,7 +13,9 @@
  */
 import type { Env } from "../types";
 import { httpsError } from "./http";
-import { AD_PLACEMENTS, AD_PROVIDERS } from "./monetizationConfig";
+import { AD_PLACEMENTS, AD_PROVIDERS, parseMonetizationConfig } from "./monetizationConfig";
+import { AD_NETWORK_TYPES } from "./adPlatform";
+import { getAppConfig } from "./settings";
 
 export const AD_EVENTS = ["request", "fill", "impression", "click", "fail", "reward_complete"] as const;
 export const AD_PLATFORMS = ["android", "ios", "web"] as const;
@@ -35,12 +37,16 @@ export async function recordAdEvents(env: Env, raw: unknown, ts = Date.now()): P
   if (!Array.isArray(raw) || raw.length === 0) throw httpsError("invalid-argument", "events must be a non-empty list.");
   if (raw.length > MAX_EVENTS_PER_CALL) throw httpsError("invalid-argument", `At most ${MAX_EVENTS_PER_CALL} events per call.`);
   const day = utcDay(ts);
+  // Providers: the SDK types, or an ad platform network id the admin created
+  // (so the report can tell two networks of the same type apart).
+  const providers = new Set<string>([...AD_PROVIDERS, ...AD_NETWORK_TYPES, "direct"]);
+  for (const n of parseMonetizationConfig(await getAppConfig(env)).adPlatform.networks) providers.add(n.id);
   const merged = new Map<string, { e: AdEventInput; n: number }>();
   for (const e of raw as AdEventInput[]) {
     if (!e || typeof e !== "object") throw httpsError("invalid-argument", "Malformed event.");
     if (!(AD_PLACEMENTS as readonly string[]).includes(e.placement)) throw httpsError("invalid-argument", "Unknown placement.");
     if (!(AD_EVENTS as readonly string[]).includes(e.event)) throw httpsError("invalid-argument", "Unknown event.");
-    if (!(AD_PROVIDERS as readonly string[]).includes(e.provider) && e.provider !== "direct") throw httpsError("invalid-argument", "Unknown provider.");
+    if (typeof e.provider !== "string" || !providers.has(e.provider)) throw httpsError("invalid-argument", "Unknown provider.");
     if (!(AD_PLATFORMS as readonly string[]).includes(e.platform)) throw httpsError("invalid-argument", "Unknown platform.");
     const n = e.count === undefined ? 1 : Number(e.count);
     if (!Number.isInteger(n) || n < 1 || n > MAX_COUNT_PER_EVENT) throw httpsError("invalid-argument", `count must be 1-${MAX_COUNT_PER_EVENT}.`);
@@ -88,7 +94,7 @@ export async function importRevenueRows(env: Env, raw: unknown, actor: string, t
   const stmts = (raw as RevenueRowInput[]).map((r, i) => {
     if (!r || typeof r !== "object") throw httpsError("invalid-argument", `Row ${i + 1} is malformed.`);
     if (!DAY_RE.test(String(r.day)) || Number.isNaN(Date.parse(`${r.day}T00:00:00Z`))) throw httpsError("invalid-argument", `Row ${i + 1}: day must be YYYY-MM-DD.`);
-    if (!(AD_PROVIDERS as readonly string[]).includes(r.provider) || r.provider === "none") throw httpsError("invalid-argument", `Row ${i + 1}: unknown provider.`);
+    if (!([...AD_PROVIDERS, ...AD_NETWORK_TYPES] as readonly string[]).includes(r.provider) || r.provider === "none" || r.provider === "house") throw httpsError("invalid-argument", `Row ${i + 1}: unknown provider.`);
     const placement = r.placement ?? "all";
     if (placement !== "all" && !(AD_PLACEMENTS as readonly string[]).includes(placement)) throw httpsError("invalid-argument", `Row ${i + 1}: unknown placement.`);
     const platform = r.platform ?? "all";
