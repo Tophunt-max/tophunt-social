@@ -24,16 +24,34 @@ import { AdSenseDisplay, GamDisplay } from './providers/web';
 
 const RESERVED_H = 250;
 /** Small banner slots (share screens): one 320×50 line. */
-const COMPACT_SLOTS = new Set<AdSlotKey>(['share_sheet', 'entry_share', 'referral_share']);
+const COMPACT_SLOTS = new Set<AdSlotKey>(['share_sheet', 'entry_share', 'referral_share', 'notifications', 'prizes']);
 const RESERVED_H_COMPACT = 60;
 
-export function AdSlot({ slot, isDark, index = 0, style }: { slot: AdSlotKey; isDark: boolean; index?: number; style?: StyleProp<ViewStyle> }) {
+export function AdSlot({
+  slot,
+  isDark,
+  index = 0,
+  style,
+  onResult,
+}: {
+  slot: AdSlotKey;
+  isDark: boolean;
+  index?: number;
+  style?: StyleProp<ViewStyle>;
+  /** Told once whether an ad filled the slot (false = nothing to show). */
+  onResult?: (filled: boolean) => void;
+}) {
   const placement = useAdPlacement(slot);
-  if (!placement || placement.format === 'interstitial' || placement.format === 'rewarded') return null;
-  return <Waterfall key={`${slot}:${index}`} placement={placement} isDark={isDark} index={index} style={style} compact={COMPACT_SLOTS.has(slot)} />;
+  const usable = !!placement && placement.format !== 'interstitial' && placement.format !== 'rewarded';
+  useEffect(() => {
+    if (!usable) onResult?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usable]);
+  if (!usable) return null;
+  return <Waterfall key={`${slot}:${index}`} placement={placement!} isDark={isDark} index={index} style={style} compact={COMPACT_SLOTS.has(slot)} onResult={onResult} />;
 }
 
-function Waterfall({ placement, isDark, index, style, compact }: { placement: ResolvedPlacement; isDark: boolean; index: number; style?: StyleProp<ViewStyle>; compact: boolean }) {
+function Waterfall({ placement, isDark, index, style, compact, onResult }: { placement: ResolvedPlacement; isDark: boolean; index: number; style?: StyleProp<ViewStyle>; compact: boolean; onResult?: (filled: boolean) => void }) {
   // Decided once per mount: a slot that is over its cap stays empty.
   const [allowed] = useState(() => canShowAd(placement.slot, placement.rules));
   const [step, setStep] = useState(0);
@@ -59,8 +77,9 @@ function Waterfall({ placement, isDark, index, style, compact }: { placement: Re
       queueAdEvent({ placement: placement.slot, event: 'impression', provider: placement.attempts[i].network.id });
       recordAdShown(placement.slot);
       setFilled(true);
+      onResult?.(true);
     },
-    [placement],
+    [placement, onResult],
   );
 
   // Request + timeout for the current step.
@@ -71,7 +90,13 @@ function Waterfall({ placement, isDark, index, style, compact }: { placement: Re
     return () => clearTimeout(t);
   }, [allowed, attempt, step, filled, placement.slot, fail]);
 
-  if (!allowed || !attempt) return null;
+  // Nothing left to try (or over the cap): say so once.
+  const exhausted = !allowed || !attempt;
+  useEffect(() => {
+    if (exhausted) onResult?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exhausted]);
+  if (exhausted) return null;
   return (
     <View
       style={[styles.box, { borderColor: isDark ? '#2A2D35' : '#ECEDF1', backgroundColor: isDark ? '#16171E' : '#FAFAFB' }, !filled && { minHeight: compact ? RESERVED_H_COMPACT : RESERVED_H }, compact && styles.compact, style]}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
+import { AdSlot } from '@/src/ads/AdSlot';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { BackButton } from '@/src/components/ui/BackButton';
@@ -53,6 +54,10 @@ export default function HallOfFameScreen() {
               <Person key={`${r.period}:${r.uid}`} p={p} rank={r.rank} name={r.username} avatar={r.profileImageUrlThumb || r.profileImageUrl} verified={r.verified} right={r.period} onPress={() => open(r.uid)} />
             )) : <SectionEmpty palette={p} icon="trophy-outline" text="No monthly winners yet." />}
           </Section>
+          {/* Ad platform → Hall of fame. */}
+          <View style={{ paddingHorizontal: 16 }}>
+            <AdSlot slot="hall_of_fame" isDark={p.isDark} />
+          </View>
         </ScrollView>
       )}
     </SafeAreaView>

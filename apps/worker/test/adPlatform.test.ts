@@ -95,6 +95,10 @@ describe('ad platform: validation', () => {
     // Rewarded in the apps must go through AdMob (SSV).
     expectBad(one({ slot: 'earn_rewarded', format: 'rewarded', waterfall: [{ networkId: 'gam', units: { android: GAM } }] }), /AdMob/);
     expectBad(one({ ...FEED, startsAt: 2000, endsAt: 1000 }), /after the start/);
+    // Story video ads are apps-only interstitials; the story card works everywhere.
+    expectBad(one({ slot: 'story_between', format: 'interstitial', platforms: { web: true } }), /apps only/);
+    expect(() => validateAdPlatformPatch(clone(one({ slot: 'story_card', format: 'native', platforms: { web: true, android: true }, waterfall: [{ networkId: 'gam', units: { web: GAM } }], rules: { firstPosition: 3, interval: 5 } })))).not.toThrow();
+    expect(() => validateAdPlatformPatch(clone(one({ slot: 'notifications', format: 'banner', waterfall: [{ networkId: 'gam', units: { web: GAM } }] })))).not.toThrow();
     expectBad({ ...VALID, surprise: 1 }, /unknown setting/);
     expectBad({ adsTxt: '<script>' }, /characters/);
   });

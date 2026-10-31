@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,9 @@ import {
   FlatList,
   ActivityIndicator,
 } from 'react-native';
+import { AdSlot } from '@/src/ads/AdSlot';
+import { useAdPlacement } from '@/src/ads/placements';
+import { interleaveAdRows, isAdSlotRow } from '@/src/lib/adSlots';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@/src/lib/icons';
@@ -33,6 +36,10 @@ export default function WinsScreen() {
   // Only the on-screen card plays, as on Home.
   const { listProps, isPlaying } = useListPlayback();
 
+  // Ad rows between won battles (Ad platform → Profile: wins).
+  const winsAd = useAdPlacement('profile_wins');
+  const winRows = useMemo(() => interleaveAdRows(wins ?? [], 'profile_wins', winsAd?.rules ?? null), [wins, winsAd]);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]}>
       <View style={[styles.header, { borderBottomColor: isDark ? '#23262D' : '#EEF0F4' }]}>
@@ -48,9 +55,17 @@ export default function WinsScreen() {
         <View style={styles.center}><ActivityIndicator size="large" color="#FF4D67" /></View>
       ) : (
         <FlatList
-          data={wins ?? []}
+          data={winRows}
           keyExtractor={(item: any) => item.id}
-          renderItem={({ item }) => <PostCard item={item} isDark={isDark} playActive={isPlaying(item.id)} />}
+          renderItem={({ item }) =>
+            isAdSlotRow(item) ? (
+              <View style={{ paddingHorizontal: 16 }}>
+                <AdSlot slot="profile_wins" index={item.index} isDark={isDark} />
+              </View>
+            ) : (
+              <PostCard item={item} isDark={isDark} playActive={isPlaying(item.id)} />
+            )
+          }
           {...listProps}
           refreshing={isRefetching}
           onRefresh={refetch}

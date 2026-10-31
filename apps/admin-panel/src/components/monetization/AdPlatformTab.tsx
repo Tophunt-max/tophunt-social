@@ -361,10 +361,10 @@ export function AdPlatformTab() {
                     </div>
 
                     <div className="grid sm:grid-cols-5 gap-2">
-                      {slot.list && !full && (
+                      {slot.list && (
                         <>
-                          <Num label="First at row" value={p.rules.firstPosition} onChange={(v) => setPl(p.slot, (x) => ({ ...x, rules: { ...x.rules, firstPosition: v } }))} />
-                          <Num label="Then every N rows" value={p.rules.interval} onChange={(v) => setPl(p.slot, (x) => ({ ...x, rules: { ...x.rules, interval: v } }))} />
+                          <Num label={full || slot.key.startsWith("story_") ? "First after N people" : "First at row"} value={p.rules.firstPosition} onChange={(v) => setPl(p.slot, (x) => ({ ...x, rules: { ...x.rules, firstPosition: v } }))} />
+                          <Num label={full || slot.key.startsWith("story_") ? "Then every N people" : "Then every N rows"} value={p.rules.interval} onChange={(v) => setPl(p.slot, (x) => ({ ...x, rules: { ...x.rules, interval: v } }))} />
                         </>
                       )}
                       <Num label="Max per session" value={p.rules.maxPerSession} onChange={(v) => setPl(p.slot, (x) => ({ ...x, rules: { ...x.rules, maxPerSession: v } }))} />

@@ -69,6 +69,15 @@ export const AD_SLOTS = {
   // Small 320×50 banners where people share. Never inside the VS / winner image.
   share_sheet: { label: "Share sheet (VS image)", hint: "Small banner in the share sheet of every battle (feed, battle page, both players), below the VS preview.", formats: ["banner"], list: false },
   entry_share: { label: "After contest entry", hint: "Small banner on the 'entry done, share your VS image' screen, below Go to Home.", formats: ["banner"], list: false },
+  notifications: { label: "Notifications", hint: "Small banner after the first 5 notifications.", formats: ["banner"], list: false },
+  profile_wins: { label: "Profile: wins", hint: "Between won battles on a profile's Wins list.", formats: ["native", "banner"], list: true },
+  prizes: { label: "My prizes", hint: "Small banner below the prize list.", formats: ["banner"], list: false },
+  hall_of_fame: { label: "Hall of fame", hint: "At the bottom of the Hall of fame.", formats: ["banner", "native"], list: false },
+  // Stories: "every N" = after every N people's stories. Apps show a full-screen
+  // video interstitial; when none is ready (and on the web) the story card slot
+  // shows an ad page inside the viewer that can be skipped.
+  story_between: { label: "Stories: video ad between people", hint: "Apps only. Full-screen (video) ad when moving to the next person's stories.", formats: ["interstitial"], list: true },
+  story_card: { label: "Stories: ad page between people", hint: "An ad page inside the story viewer, skippable after 3 s. Web and apps.", formats: ["native", "banner"], list: true },
   referral_share: { label: "Invite friends page", hint: "Small banner at the bottom of Refer & earn.", formats: ["banner"], list: false },
   earn_rewarded: { label: "Earn page: watch & earn", hint: "The user chooses to watch for Diamonds.", formats: ["rewarded"], list: false },
   contest_join_rewarded: { label: "Contest join: not enough Diamonds", hint: "Offered when the entry fee is short.", formats: ["rewarded"], list: false },

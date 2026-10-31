@@ -243,6 +243,12 @@ area next to vote buttons have no slot on purpose.
 | `share_sheet` | Share sheet of every battle (VS image), below the preview | small banner 320×50 |
 | `entry_share` | After contest entry (share VS image screen), below Go to Home | small banner 320×50 |
 | `referral_share` | Refer & earn page, at the bottom | small banner 320×50 |
+| `notifications` | After the first 5 notifications | small banner 320×50 |
+| `profile_wins` | Between won battles on a profile's Wins list | native, banner |
+| `prizes` | Below My prizes | small banner 320×50 |
+| `hall_of_fame` | Bottom of Hall of fame | banner, native |
+| `story_between` | Stories: full-screen (video) ad when moving to the next person; apps only, only if preloaded; "every N people" = first position / interval | interstitial |
+| `story_card` | Stories: ad page between people (web + apps; fallback when no interstitial is ready), skip after 3 s, closes after 10 s | native, banner |
 | `earn_rewarded` | Earn page, watch & earn | rewarded |
 | `contest_join_rewarded` | Contest join when Diamonds are short | rewarded |
 | `result_exit_interstitial` | Leaving the result page (apps only) | interstitial |
