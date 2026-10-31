@@ -103,7 +103,7 @@ export function useRewardedAd(slot: AdSlotKey, onRewarded?: () => void): Rewarde
   // Networks to try, in order, for this platform.
   const attempts = useMemo(() => {
     if (AD_PLATFORM === 'web') {
-      const fromPlatform = (placement?.attempts ?? []).filter((a) => a.network.type === 'gam').map((a) => ({ id: a.network.id, unit: a.network.testMode ? GAM_REWARDED_TEST_UNIT : a.unit, testMode: a.network.testMode, timeoutMs: a.timeoutMs }));
+      const fromPlatform = (placement?.attempts ?? []).filter((a) => a.network.type === 'gam' || a.network.type === 'adx').map((a) => ({ id: a.network.id, unit: a.network.testMode ? GAM_REWARDED_TEST_UNIT : a.unit, testMode: a.network.testMode, timeoutMs: a.timeoutMs }));
       // Older setup: the single unit in "Ads & rewards", handed out by startWebAd.
       return fromPlatform.length ? fromPlatform : [{ id: 'gam', unit: '', testMode: false, timeoutMs: FULLSCREEN_MIN_TIMEOUT }];
     }

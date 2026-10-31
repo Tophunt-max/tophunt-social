@@ -57,6 +57,7 @@ interface Registry {
 const UNIT_PLACEHOLDER: Record<string, string> = {
   admob: "ca-app-pub-0000000000000000/0000000000",
   gam: "/1234567/tophunt_feed",
+  adx: "/1234567/tophunt_adx_feed",
   adsense: "1234567890 (ad slot id)",
 };
 const FULLSCREEN = new Set(["interstitial", "rewarded"]);
@@ -175,7 +176,7 @@ export function AdPlatformTab() {
         action={<Toggle label="All ads on" checked={cfg.enabled} onChange={(v) => setCfg({ ...cfg, enabled: v })} hint="Master switch. Off = no network ad anywhere." />}
       >
         <Notice tone="info">
-          Web / PWA: Ad Manager (AdX demand comes through it), AdSense and house ads work right away. Android / iOS: AdMob works in app builds that include the AdMob SDK
+          Web / PWA: Ad Manager, AdX (served through Ad Manager ad units), AdSense and house ads work right away. Android / iOS: AdMob works in app builds that include the AdMob SDK
           (released from GitHub, see APP_RELEASE.md). Rewards are paid only through AdMob verification (apps) and the web watch token; set amounts in "Ads & rewards".
         </Notice>
       </Card>
@@ -327,7 +328,7 @@ export function AdPlatformTab() {
                               <p className="text-xs text-muted-foreground">Shows an approved sponsored campaign (Sponsorships tab). No ad unit needed.</p>
                             ) : (
                               <div className="grid sm:grid-cols-3 gap-2">
-                                {PLATFORMS.filter((k) => t?.platforms.includes(k) && !(p.format === "rewarded" && n?.type === "gam" && k !== "web")).map((k) => (
+                                {PLATFORMS.filter((k) => t?.platforms.includes(k) && !(p.format === "rewarded" && (n?.type === "gam" || n?.type === "adx") && k !== "web")).map((k) => (
                                   <Text
                                     key={k}
                                     label={`${PLATFORM_LABEL[k]} unit`}

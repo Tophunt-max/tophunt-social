@@ -109,6 +109,7 @@ function Attempt({
   const { network, unit } = attempt;
   switch (network.type) {
     case 'gam':
+    case 'adx':
       // Ad Manager: GPT on the web, the Mobile Ads SDK in the apps.
       return AD_PLATFORM === 'web' ? (
         <GamDisplay unit={unit} format={format} testMode={network.testMode} onLoad={onLoad} onFail={onFail} />

@@ -222,8 +222,9 @@ violations after enabling.
 Admin → Monetization → **Ad platform**. Stored as `appConfig.monetization.adPlatform`
 (`apps/worker/src/lib/adPlatform.ts`), served to the app in `/read/app-config`, used by `apps/expo/src/ads/`.
 
-**Networks** (max 20): Google AdMob (Android / iOS), Google Ad Manager (web and apps; AdX demand is set up
-inside Ad Manager), AdSense (web, needs the `ca-pub-` id) and House ads (approved sponsored campaigns). Each
+**Networks** (max 20): Google AdMob (Android / iOS), Google Ad Manager (web and apps), Google Ad Exchange
+(AdX: no tag of its own, served through Ad Manager ad unit paths of an AdX-linked / MCM network; its own type so
+it is named and reported separately), AdSense (web, needs the `ca-pub-` id) and House ads (approved sponsored campaigns). Each
 has on/off, platforms and **test mode** (Google's published test ads, never real ones).
 
 **Placements**: one per slot the app has in code. The panel can switch a slot on per platform and configure

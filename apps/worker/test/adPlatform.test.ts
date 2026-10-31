@@ -100,6 +100,24 @@ describe('ad platform: validation', () => {
   });
 });
 
+describe('ad platform: AdX', () => {
+  const ADX = { id: 'adx', type: 'adx', name: 'Google AdX', enabled: true, platforms: { web: true, android: true, ios: true }, testMode: false };
+  it('takes Ad Manager unit paths, runs everywhere and is served first in the waterfall', () => {
+    const cfg = { enabled: true, networks: [ADX, ...NETWORKS], placements: [{ ...FEED, waterfall: [{ networkId: 'adx', units: { web: '/1234567/tophunt_adx_feed', android: '/1234567/tophunt_adx_app' } }, ...FEED.waterfall] }] };
+    expect(() => validateAdPlatformPatch(clone(cfg))).not.toThrow();
+    const feed = publicAdPlatform(parseAdPlatform(cfg)).placements[0];
+    expect(feed.waterfall.map((w) => w.networkId)).toEqual(['adx', 'gam', 'adsense', 'admob', 'house']);
+    expect(feed.waterfall[0].units).toEqual({ web: '/1234567/tophunt_adx_feed', android: '/1234567/tophunt_adx_app' });
+  });
+  it('refuses AdMob-style units and app rewarded, and feeds the web rewarded flow', () => {
+    const one = (pl: any) => ({ networks: [ADX], placements: [pl] });
+    expectBad(one({ ...FEED, waterfall: [{ networkId: 'adx', units: { web: ADMOB_UNIT } }] }), /AdX demand/);
+    expectBad(one({ slot: 'earn_rewarded', format: 'rewarded', waterfall: [{ networkId: 'adx', units: { android: '/1/x' } }] }), /AdMob/);
+    const cfg = parseAdPlatform({ enabled: true, networks: [ADX], placements: [{ slot: 'earn_rewarded', enabled: true, platforms: { web: true }, format: 'rewarded', waterfall: [{ networkId: 'adx', units: { web: '/1234567/adx_rewarded' } }] }] });
+    expect(webRewardedUnitFrom(cfg)).toBe('/1234567/adx_rewarded');
+  });
+});
+
 describe('ad platform: what the app sees', () => {
   it('only live networks and placements, with the waterfall for each platform', () => {
     const pub = publicAdPlatform(parseAdPlatform(VALID));

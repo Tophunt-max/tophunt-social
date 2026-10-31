@@ -30,7 +30,10 @@
  */
 import { httpsError } from "./http";
 
-export const AD_NETWORK_TYPES = ["admob", "gam", "adsense", "house"] as const;
+export const AD_NETWORK_TYPES = ["admob", "gam", "adx", "adsense", "house"] as const;
+/** Types served through Ad Manager's tags / SDK (GPT on the web, GAM in the apps). */
+export const GAM_FAMILY: readonly AdNetworkType[] = ["gam", "adx"];
+const isGamFamily = (t: AdNetworkType) => t === "gam" || t === "adx";
 export type AdNetworkType = (typeof AD_NETWORK_TYPES)[number];
 export const AD_FORMATS = ["banner", "native", "interstitial", "rewarded"] as const;
 export type AdFormat = (typeof AD_FORMATS)[number];
@@ -42,7 +45,11 @@ type PlatformFlags = Record<AdPlatformKey, boolean>;
 /** Where each network type can run, and which formats it can serve. */
 export const NETWORK_TYPE_RULES: Record<AdNetworkType, { label: string; platforms: AdPlatformKey[]; formats: AdFormat[] }> = {
   admob: { label: "Google AdMob", platforms: ["android", "ios"], formats: ["banner", "native", "interstitial", "rewarded"] },
-  gam: { label: "Google Ad Manager (incl. AdX)", platforms: ["web", "android", "ios"], formats: ["banner", "native", "rewarded"] },
+  gam: { label: "Google Ad Manager", platforms: ["web", "android", "ios"], formats: ["banner", "native", "rewarded"] },
+  // AdX has no tag or SDK of its own: its demand is served through Ad Manager
+  // ad units (Ad Manager 360, or an MCM partner's network). Same code path as
+  // "gam"; a separate type so it is named and reported on its own.
+  adx: { label: "Google Ad Exchange (AdX)", platforms: ["web", "android", "ios"], formats: ["banner", "native", "rewarded"] },
   adsense: { label: "Google AdSense", platforms: ["web"], formats: ["banner", "native"] },
   house: { label: "House ads (sponsored campaigns)", platforms: ["web", "android", "ios"], formats: ["banner", "native"] },
 };
@@ -158,7 +165,7 @@ export function unitValid(type: AdNetworkType, unit: unknown): boolean {
   const u = unit.trim();
   if (type === "admob") return ADMOB_UNIT_RE.test(u);
   // An Ad Manager unit is a path on the web and in apps alike.
-  if (type === "gam") return GAM_PATH_RE.test(u);
+  if (isGamFamily(type)) return GAM_PATH_RE.test(u);
   if (type === "adsense") return ADSENSE_SLOT_RE.test(u);
   return false;
 }
@@ -166,6 +173,7 @@ export function unitValid(type: AdNetworkType, unit: unknown): boolean {
 const UNIT_HINT: Record<AdNetworkType, string> = {
   admob: 'an AdMob unit id like "ca-app-pub-0000000000000000/0000000000"',
   gam: 'an Ad Manager ad unit path like "/1234567/tophunt_feed"',
+  adx: 'an Ad Manager ad unit path carrying AdX demand, like "/1234567/tophunt_adx_feed"',
   adsense: 'an AdSense ad slot id (8-12 digits)',
   house: "nothing (house ads use the sponsored campaigns)",
 };
@@ -293,7 +301,7 @@ export function webRewardedUnitFrom(cfg: AdPlatformConfig, slot: AdSlotKey = "ea
   const pub = publicAdPlatform(cfg);
   const p = pub.placements.find((x) => x.slot === slot && x.format === "rewarded" && x.platforms.web);
   const nets = new Map(pub.networks.map((n) => [n.id, n]));
-  for (const w of p?.waterfall ?? []) if (nets.get(w.networkId)?.type === "gam" && w.units.web) return w.units.web;
+  for (const w of p?.waterfall ?? []) { const t = nets.get(w.networkId)?.type; if (t && isGamFamily(t) && w.units.web) return w.units.web; }
   return "";
 }
 
@@ -379,7 +387,7 @@ export function validateAdPlatformPatch(p: any): void {
           inFall.add(nid);
           for (const k of Object.keys(w)) if (!["networkId", "units", "timeoutMs"].includes(k)) bad(`${slot} / ${nid}: unknown setting ${k}.`);
           if (!NETWORK_TYPE_RULES[type!].formats.includes(format)) bad(`${slot}: ${NETWORK_TYPE_RULES[type!].label} cannot serve ${format} ads.`);
-          if (format === "rewarded" && type === "gam" && Object.keys(w.units ?? {}).some((k) => k !== "web")) {
+          if (format === "rewarded" && isGamFamily(type!) && Object.keys(w.units ?? {}).some((k) => k !== "web")) {
             bad(`${slot}: rewarded ads in the apps are paid through AdMob's verification; use an AdMob network there.`);
           }
           isInt(w.timeoutMs, `${slot} / ${nid}.timeoutMs`, RULE_BOUNDS.timeoutMs);

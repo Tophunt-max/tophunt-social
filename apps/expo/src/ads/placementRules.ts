@@ -17,7 +17,7 @@ export const AD_SLOT_KEYS = [
 ] as const;
 export type AdSlotKey = (typeof AD_SLOT_KEYS)[number];
 
-export type AdNetworkType = 'admob' | 'gam' | 'adsense' | 'house';
+export type AdNetworkType = 'admob' | 'gam' | 'adx' | 'adsense' | 'house';
 export type AdFormat = 'banner' | 'native' | 'interstitial' | 'rewarded';
 export type AdPlatformKey = 'web' | 'android' | 'ios';
 
