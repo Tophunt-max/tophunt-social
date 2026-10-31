@@ -20,6 +20,7 @@ export const AD_SLOT_KEYS = [
   'hall_of_fame',
   'story_between',
   'story_card',
+  'app_open',
   'earn_rewarded',
   'contest_join_rewarded',
   'result_exit_interstitial',
@@ -27,7 +28,7 @@ export const AD_SLOT_KEYS = [
 export type AdSlotKey = (typeof AD_SLOT_KEYS)[number];
 
 export type AdNetworkType = 'admob' | 'gam' | 'adx' | 'adsense' | 'house';
-export type AdFormat = 'banner' | 'native' | 'interstitial' | 'rewarded';
+export type AdFormat = 'banner' | 'native' | 'interstitial' | 'rewarded' | 'app_open';
 export type AdPlatformKey = 'web' | 'android' | 'ios';
 
 export interface PublicAdNetwork {
@@ -44,6 +45,8 @@ export interface PlacementRules {
   maxPerSession: number;
   maxPerDay: number;
   minIntervalSec: number;
+  /** Web Ad Manager banners: reload while on screen (0 = never). */
+  refreshSec?: number;
 }
 
 export interface PublicPlacement {
@@ -54,12 +57,16 @@ export interface PublicPlacement {
   waterfall: { networkId: string; units: Partial<Record<AdPlatformKey, string>>; timeoutMs: number }[];
   rules: PlacementRules;
   audience: { guests: boolean; newUserGraceDays: number };
+  autoOptimize?: boolean;
+  experiment?: { enabled: boolean; variants: { id: string; weight: number; rules: Partial<PlacementRules> }[] };
 }
 
 export interface PublicAdPlatform {
   enabled: boolean;
   networks: PublicAdNetwork[];
   placements: PublicPlacement[];
+  /** Web consent message (Google Funding Choices) to show before any web ad. */
+  webConsent?: { enabled: boolean; publisherId: string };
 }
 
 /** One step of a waterfall, resolved for this platform. */
@@ -75,6 +82,9 @@ export interface ResolvedPlacement {
   format: AdFormat;
   rules: PlacementRules;
   attempts: AdAttempt[];
+  /** Experiment variant this viewer is in ('-' = none), sent with every ad event. */
+  variant?: string;
+  experiment?: PublicPlacement['experiment'];
 }
 
 const DAY_MS = 86_400_000;
@@ -103,6 +113,6 @@ export function resolvePlacement(
     attempts.push({ network, unit, timeoutMs: Math.max(500, Number(w.timeoutMs) || 3000) });
   }
   if (!attempts.length) return null;
-  return { slot, format: p.format, rules: p.rules, attempts };
+  return { slot, format: p.format, rules: p.rules, attempts, experiment: p.experiment };
 }
 

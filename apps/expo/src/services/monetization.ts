@@ -11,6 +11,7 @@ import { useMemo } from 'react';
 import { Platform } from 'react-native';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { callApi, readApi } from '@/src/services/api';
+import { setAdsSuppressedUntil } from '@/src/ads/optimizer';
 import { useAppConfig } from '@/src/services/appSettings';
 import type { SlotRule, SponsoredCampaign } from '@/src/lib/adSlots';
 import { GAMIFICATION_KEYS } from '@/src/services/gamification';
@@ -223,7 +224,19 @@ export function recordSponsoredEvent(campaignId: string, event: 'impression' | '
   callApi('recordSponsoredEvent', { campaignId, event }).catch(() => undefined);
 }
 
-type AdEvent = { placement: string; event: string; provider: string; count?: number };
+type AdEvent = {
+  placement: string;
+  event: string;
+  provider: string;
+  count?: number;
+  /** fill: load time in ms. */
+  latencyMs?: number;
+  /** Experiment variant ('-' = none). */
+  variant?: string;
+  /** paid: impression-level revenue from the SDK. */
+  valueMicros?: number;
+  currency?: string;
+};
 let pending: AdEvent[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -240,5 +253,7 @@ export async function flushAdEvents(): Promise<void> {
   const batch = pending.splice(0, 25);
   if (!batch.length) return;
   const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
-  await callApi('recordAdEvents', { platform, events: batch }).catch(() => undefined);
+  const res: any = await callApi('recordAdEvents', { platform, events: batch }).catch(() => undefined);
+  // The server switched this account's ads off (invalid-traffic guard, worker lib/adStats.ts).
+  if (res?.adsSuppressedUntil) setAdsSuppressedUntil(Number(res.adsSuppressedUntil));
 }

@@ -16,8 +16,9 @@ import { httpsError } from "./http";
 import { AD_PLACEMENTS, AD_PROVIDERS, parseMonetizationConfig } from "./monetizationConfig";
 import { AD_NETWORK_TYPES } from "./adPlatform";
 import { getAppConfig } from "./settings";
+import { statStatements } from "./adStats";
 
-export const AD_EVENTS = ["request", "fill", "impression", "click", "fail", "reward_complete"] as const;
+export const AD_EVENTS = ["request", "fill", "impression", "click", "fail", "reward_complete", "timeout", "paid"] as const;
 export const AD_PLATFORMS = ["android", "ios", "web"] as const;
 const MAX_EVENTS_PER_CALL = 25;
 const MAX_COUNT_PER_EVENT = 10;
@@ -30,10 +31,21 @@ export interface AdEventInput {
   provider: string;
   platform: string;
   count?: number;
+  /** fill: how long the network took. */
+  latencyMs?: number;
+  /** Experiment variant the slot ran (src/ads on the app). */
+  variant?: string;
+  /** paid: impression-level revenue from the SDK. */
+  valueMicros?: number;
+  currency?: string;
 }
 
-/** Validate and upsert a batch of client diagnostic events. Returns how many were recorded. */
-export async function recordAdEvents(env: Env, raw: unknown, ts = Date.now()): Promise<number> {
+/**
+ * Validate and upsert a batch of client diagnostic events into ad_event_counters
+ * (the existing report) and ad_stats / ad_ilrd (optimizer + dashboard).
+ * Returns how many counter rows were written.
+ */
+export async function recordAdEvents(env: Env, raw: unknown, ts = Date.now(), opts: { country?: string | null } = {}): Promise<number> {
   if (!Array.isArray(raw) || raw.length === 0) throw httpsError("invalid-argument", "events must be a non-empty list.");
   if (raw.length > MAX_EVENTS_PER_CALL) throw httpsError("invalid-argument", `At most ${MAX_EVENTS_PER_CALL} events per call.`);
   const day = utcDay(ts);
@@ -54,15 +66,17 @@ export async function recordAdEvents(env: Env, raw: unknown, ts = Date.now()): P
     const prev = merged.get(k);
     merged.set(k, { e, n: Math.min(MAX_COUNT_PER_EVENT, (prev?.n ?? 0) + n) });
   }
-  await env.DB.batch(
-    [...merged.values()].map(({ e, n }) =>
+  const counters = [...merged.values()].filter(({ e }) => e.event !== "paid");
+  await env.DB.batch([
+    ...counters.map(({ e, n }) =>
       env.DB.prepare(
         `INSERT INTO ad_event_counters (day, platform, placement, provider, event, count) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (day, platform, placement, provider, event) DO UPDATE SET count = count + excluded.count`,
       ).bind(day, e.platform, e.placement, e.provider, e.event, n),
     ),
-  );
-  return merged.size;
+    ...statStatements(env, raw as AdEventInput[], opts.country ?? null, ts),
+  ]);
+  return counters.length;
 }
 
 export interface RevenueRowInput {

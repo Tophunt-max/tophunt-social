@@ -10,7 +10,11 @@
  * - Reserves its height while loading so the page does not jump.
  * - Labelled "Advertisement"; never placed next to vote or share buttons.
  * - Frequency caps (per session / per day) are counted on fill.
- * - Diagnostics (request / fill / fail per network) go to the ad report.
+ * - Lazy: on the web nothing is requested until the slot is within ~1 screen.
+ * - Every attempt feeds this device's circuit breaker and latency estimate
+ *   (src/ads/optimizer.ts); events carry the experiment variant, the load
+ *   time, and (AdMob) the impression's revenue.
+ * - Web Ad Manager banners refresh while on screen if the slot sets refreshSec.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
@@ -18,6 +22,7 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { SponsoredCard } from '@/src/components/home/SponsoredCard';
 import { queueAdEvent, useSponsoredCampaigns } from '@/src/services/monetization';
 import { canShowAd, recordAdShown } from './frequency';
+import { noteAdShown, recordNetworkResult } from './optimizer';
 import { AD_PLATFORM, useAdPlacement, type AdAttempt, type AdSlotKey, type ResolvedPlacement } from './placements';
 import { AdmobInline } from './providers/admob';
 import { AdSenseDisplay, GamDisplay } from './providers/web';
@@ -51,44 +56,77 @@ export function AdSlot({
   return <Waterfall key={`${slot}:${index}`} placement={placement!} isDark={isDark} index={index} style={style} compact={COMPACT_SLOTS.has(slot)} onResult={onResult} />;
 }
 
+/** Web: true once the slot is within `margin` px of the viewport. Apps: true (lists are virtualized). */
+function useNearViewport(ref: React.RefObject<View | null>, margin = 600): boolean {
+  const [near, setNear] = useState(AD_PLATFORM !== 'web' || typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    if (near) return;
+    const el = ref.current as unknown as Element | null;
+    if (!el || typeof (el as any).getBoundingClientRect !== 'function') {
+      setNear(true);
+      return;
+    }
+    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), { rootMargin: `${margin}px 0px` });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near, ref, margin]);
+  return near;
+}
+
 function Waterfall({ placement, isDark, index, style, compact, onResult }: { placement: ResolvedPlacement; isDark: boolean; index: number; style?: StyleProp<ViewStyle>; compact: boolean; onResult?: (filled: boolean) => void }) {
   // Decided once per mount: a slot that is over its cap stays empty.
   const [allowed] = useState(() => canShowAd(placement.slot, placement.rules));
   const [step, setStep] = useState(0);
   const [filled, setFilled] = useState(false);
   const settled = useRef<number>(-1);
+  const startedAt = useRef(0);
+  const boxRef = useRef<View>(null);
+  const near = useNearViewport(boxRef);
   const attempt = placement.attempts[step];
+  const variant = placement.variant ?? '-';
+  const ev = useCallback(
+    (event: string, provider: string, extra: Record<string, unknown> = {}) => queueAdEvent({ placement: placement.slot, event, provider, variant, ...extra }),
+    [placement.slot, variant],
+  );
 
   const fail = useCallback(
     (i: number, reason: string) => {
       if (settled.current >= i) return;
       settled.current = i;
-      queueAdEvent({ placement: placement.slot, event: 'fail', provider: placement.attempts[i].network.id });
-      if (__DEV__) console.log(`[ads] ${placement.slot}: ${placement.attempts[i].network.id} ${reason}, trying next`);
+      const id = placement.attempts[i].network.id;
+      ev(reason === 'timeout' ? 'timeout' : 'fail', id);
+      // "unsupported" (a network that cannot run here) says nothing about its health.
+      if (reason !== 'unsupported') recordNetworkResult(id, false, null);
+      if (__DEV__) console.log(`[ads] ${placement.slot}: ${id} ${reason}, trying next`);
       setStep(i + 1);
     },
-    [placement],
+    [placement, ev],
   );
   const load = useCallback(
     (i: number) => {
       if (settled.current >= i) return;
       settled.current = i;
-      queueAdEvent({ placement: placement.slot, event: 'fill', provider: placement.attempts[i].network.id });
-      queueAdEvent({ placement: placement.slot, event: 'impression', provider: placement.attempts[i].network.id });
+      const id = placement.attempts[i].network.id;
+      const latencyMs = startedAt.current ? Date.now() - startedAt.current : undefined;
+      ev('fill', id, latencyMs !== undefined ? { latencyMs } : {});
+      ev('impression', id);
+      recordNetworkResult(id, true, latencyMs ?? null);
       recordAdShown(placement.slot);
+      noteAdShown();
       setFilled(true);
       onResult?.(true);
     },
-    [placement, onResult],
+    [placement, onResult, ev],
   );
 
-  // Request + timeout for the current step.
+  // Request + timeout for the current step, once the slot is near the screen.
   useEffect(() => {
-    if (!allowed || !attempt || filled) return;
-    queueAdEvent({ placement: placement.slot, event: 'request', provider: attempt.network.id });
+    if (!allowed || !attempt || filled || !near) return;
+    startedAt.current = Date.now();
+    ev('request', attempt.network.id);
     const t = setTimeout(() => fail(step, 'timeout'), attempt.timeoutMs);
     return () => clearTimeout(t);
-  }, [allowed, attempt, step, filled, placement.slot, fail]);
+  }, [allowed, attempt, step, filled, near, ev, fail]);
 
   // Nothing left to try (or over the cap): say so once.
   const exhausted = !allowed || !attempt;
@@ -99,21 +137,27 @@ function Waterfall({ placement, isDark, index, style, compact, onResult }: { pla
   if (exhausted) return null;
   return (
     <View
+      ref={boxRef}
       style={[styles.box, { borderColor: isDark ? '#2A2D35' : '#ECEDF1', backgroundColor: isDark ? '#16171E' : '#FAFAFB' }, !filled && { minHeight: compact ? RESERVED_H_COMPACT : RESERVED_H }, compact && styles.compact, style]}
       accessibilityLabel="Advertisement"
     >
       <Text style={[styles.label, { color: isDark ? '#8B8F9A' : '#9A9AA0' }]}>Advertisement</Text>
-      <Attempt
-        key={step}
-        attempt={attempt}
-        format={placement.format}
-        compact={compact}
-        isDark={isDark}
-        index={index}
-        onLoad={() => load(step)}
-        onFail={(r) => fail(step, r)}
-        onClick={() => queueAdEvent({ placement: placement.slot, event: 'click', provider: attempt.network.id })}
-      />
+      {near ? (
+        <Attempt
+          key={step}
+          attempt={attempt}
+          format={placement.format}
+          compact={compact}
+          isDark={isDark}
+          index={index}
+          refreshSec={placement.format === 'banner' ? placement.rules.refreshSec ?? 0 : 0}
+          onLoad={() => load(step)}
+          onFail={(r) => fail(step, r)}
+          onClick={() => ev('click', attempt.network.id)}
+          onRefreshed={() => ev('impression', attempt.network.id)}
+          onPaid={(valueMicros, currency) => ev('paid', attempt.network.id, { valueMicros, currency })}
+        />
+      ) : null}
     </View>
   );
 }
@@ -127,7 +171,13 @@ function Attempt({
   onLoad,
   onFail,
   onClick,
+  refreshSec,
+  onRefreshed,
+  onPaid,
 }: {
+  refreshSec: number;
+  onRefreshed: () => void;
+  onPaid: (valueMicros: number, currency: string) => void;
   attempt: AdAttempt;
   format: ResolvedPlacement['format'];
   compact: boolean;
@@ -143,12 +193,12 @@ function Attempt({
     case 'adx':
       // Ad Manager: GPT on the web, the Mobile Ads SDK in the apps.
       return AD_PLATFORM === 'web' ? (
-        <GamDisplay unit={unit} format={format} compact={compact} testMode={network.testMode} onLoad={onLoad} onFail={onFail} />
+        <GamDisplay unit={unit} format={format} compact={compact} testMode={network.testMode} refreshSec={refreshSec} onRefreshed={onRefreshed} onLoad={onLoad} onFail={onFail} />
       ) : (
-        <AdmobInline unit={unit} format={format} compact={compact} networkType="gam" testMode={network.testMode} onLoad={onLoad} onFail={onFail} onClick={onClick} />
+        <AdmobInline unit={unit} format={format} compact={compact} networkType="gam" testMode={network.testMode} onLoad={onLoad} onFail={onFail} onClick={onClick} onPaid={onPaid} />
       );
     case 'admob':
-      return <AdmobInline unit={unit} format={format} compact={compact} networkType="admob" testMode={network.testMode} onLoad={onLoad} onFail={onFail} onClick={onClick} />;
+      return <AdmobInline unit={unit} format={format} compact={compact} networkType="admob" testMode={network.testMode} onLoad={onLoad} onFail={onFail} onClick={onClick} onPaid={onPaid} />;
     case 'adsense':
       return <AdSenseDisplay unit={unit} format={format} compact={compact} testMode={network.testMode} client={network.publisherId} onLoad={onLoad} onFail={onFail} />;
     case 'house':

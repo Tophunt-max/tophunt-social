@@ -25,6 +25,8 @@ Both run from **GitHub → Actions → (workflow) → Run workflow**.
    | Variable | `EXPO_OWNER` | Expo account or organisation name (optional) |
    | Variable | `ADMOB_ANDROID_APP_ID` | AdMob → Apps → Android app → App ID (`ca-app-pub-…~…`) |
    | Variable | `ADMOB_IOS_APP_ID` | AdMob → Apps → iOS app → App ID (`ca-app-pub-…~…`) |
+   | Variable | `ADMOB_MEDIATION` | optional: bidding partners' adapters, e.g. `{"meta":{"android":"6.20.0.0","ios":"6.20.0.0"}}` (versions from Google's mediation release notes) |
+   | Variable | `ADMOB_SKADNETWORK_IDS` | optional: the partners' SKAdNetwork ids, comma separated |
 
    Production builds refuse to start without the AdMob app id for their platform. Preview builds fall
    back to Google's sample AdMob app ids, which only ever serve test ads.

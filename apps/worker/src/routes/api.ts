@@ -4011,6 +4011,7 @@ apiRoute.post("/", async (c) => {
     case "getStore":
     case "buyStoreItem":
     case "recordAdEvents":
+    case "getAdStatus":
     case "recordSponsoredEvent":
     case "getShopProducts":
     case "placeShopOrder":
@@ -4027,6 +4028,7 @@ apiRoute.post("/", async (c) => {
           body,
           waitUntil: (p) => c.executionCtx.waitUntil(p),
           purgeProfile: () => c.executionCtx.waitUntil(purgeShared(c, userCacheKey(uid))),
+          country: c.req.raw.headers.get("cf-ipcountry"),
         }),
       );
 

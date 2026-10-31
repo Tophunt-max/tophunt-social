@@ -283,6 +283,52 @@ starts. Native-format slots render as a medium rectangle banner in the apps.
   Estimated revenue for planning = impressions × eCPM ÷ 1000 (`estimateRevenue`).
 - Not built: AdMob Reporting API sync (needs OAuth credentials), invalid-traffic alerts.
 
+## Ad optimization (production)
+
+**Optimizer** (`apps/worker/src/lib/adOptimizer.ts`, hourly). For placements with *Auto-optimize order*, networks
+are ranked by revenue per request = fill rate (Beta posterior over 7 days) × eCPM (AdMob impression-level revenue
+with 50+ paid events, else imported reports with 100+ impressions, else the median). Only networks with 50+
+requests move; house ads keep the admin's place. The app explores 10% of the time (a different network first),
+so a network that improves can climb back. Independently, a network whose fails + timeouts are 85%+ of today's
+requests (50+) is paused on that platform. Adaptive timeouts: ~2.5 × the mean fill latency, 1 s to the admin's
+value. Output in KV, served at `/read/ads/decisions` (edge-cached 5 min); without it the admin's order stands.
+
+**On the device** (`apps/expo/src/ads/optimizer.ts`): circuit breaker (5+ attempts in 10 min, 80%+ failing → skip
+10 min), local latency → tighter timeouts, stable experiment buckets (FNV hash of user or device + slot), fatigue
+(after 6 ads in a session, and per quick exit after a full-screen ad, intervals and gaps stretch, up to 2.5×),
+lazy loading on the web (a slot requests only within ~1 screen; GPT lazy load + single request), viewable refresh
+of web Ad Manager banners (`refreshSec`, 30-300 s, only while 50% on screen and the tab is visible; AdMob banner
+refresh is set in the AdMob console), app open ads (preloaded, shown after 30+ s in the background, never on a
+cold start, default ≤3/day and 4 h apart), ATT prompt on iOS after the UMP consent form, Google's consent message on
+the web (Ad platform → Web consent).
+
+**Data**: `ad_stats` (day × platform × slot × network × country × variant: requests, fills, impressions, clicks,
+fails, timeouts, rewards, latency) and `ad_ilrd` (AdMob paid events, by currency), migration 0078. Dashboard:
+Admin → Monetization → **Ad performance** (slots × networks, decisions with scores, experiments, countries,
+alerts, run optimizer / import now, invalid-traffic lookup).
+
+**Revenue import** (`lib/adRevenueImport.ts`, 6-hourly): AdMob API and AdSense Management API, USD, last 3 days,
+units mapped to slots; finalized rows are never overwritten. Worker secrets: `GOOGLE_ADS_CLIENT_ID`,
+`GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN` (one OAuth client, offline refresh token with
+`admob.readonly` + `adsense.readonly`), and `ADMOB_PUBLISHER_ID` / `ADSENSE_ACCOUNT_ID` (`pub-…`). Ad Manager / AdX
+stay on the CSV import. Then **reconciliation**: app-counted vs network impressions per type, 2 days back; >10%
+apart raises an alert.
+
+**Alerts** (`ad_alerts` + admin notification, 24 h dedupe): fill rate < half the 7-day level, SDK eCPM < 60% of it,
+network paused, reconciliation gap, import failure.
+
+**Invalid traffic** (`lib/adStats.ts`): an account with more than 15 ad clicks in a day, or CTR above 25% over 20+
+impressions, gets no ads for 7 days (the app stops requesting). Lift it in Ad performance.
+
+**Mediation / bidding (apps)**: `apps/expo/plugins/withAdMediation.js` adds partners' AdMob adapters from the
+GitHub variable `ADMOB_MEDIATION` (JSON, pinned versions per platform: meta, applovin, unity, liftoff, inmobi,
+pangle, ironsource, mintegral) and `ADMOB_SKADNETWORK_IDS`. Partners and bidding are switched on in the AdMob
+console. Needs an app release.
+
+**Not in code, set in the networks' consoles**: Open Bidding / AdX demand and Unified Pricing Rules (floors) in
+Ad Manager; eCPM floors and banner refresh in AdMob; Prebid / Amazon TAM need those partners' accounts and are
+not wired.
+
 ## Sponsorships
 
 - `advertisers`, `sponsored_campaigns` (dates, flat or CPM, budget, impression cap, weight, creative,

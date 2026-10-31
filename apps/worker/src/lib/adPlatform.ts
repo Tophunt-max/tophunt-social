@@ -35,7 +35,7 @@ export const AD_NETWORK_TYPES = ["admob", "gam", "adx", "adsense", "house"] as c
 export const GAM_FAMILY: readonly AdNetworkType[] = ["gam", "adx"];
 const isGamFamily = (t: AdNetworkType) => t === "gam" || t === "adx";
 export type AdNetworkType = (typeof AD_NETWORK_TYPES)[number];
-export const AD_FORMATS = ["banner", "native", "interstitial", "rewarded"] as const;
+export const AD_FORMATS = ["banner", "native", "interstitial", "rewarded", "app_open"] as const;
 export type AdFormat = (typeof AD_FORMATS)[number];
 export const AD_PLATFORM_KEYS = ["web", "android", "ios"] as const;
 export type AdPlatformKey = (typeof AD_PLATFORM_KEYS)[number];
@@ -44,7 +44,7 @@ type PlatformFlags = Record<AdPlatformKey, boolean>;
 
 /** Where each network type can run, and which formats it can serve. */
 export const NETWORK_TYPE_RULES: Record<AdNetworkType, { label: string; platforms: AdPlatformKey[]; formats: AdFormat[] }> = {
-  admob: { label: "Google AdMob", platforms: ["android", "ios"], formats: ["banner", "native", "interstitial", "rewarded"] },
+  admob: { label: "Google AdMob", platforms: ["android", "ios"], formats: ["banner", "native", "interstitial", "rewarded", "app_open"] },
   gam: { label: "Google Ad Manager", platforms: ["web", "android", "ios"], formats: ["banner", "native", "rewarded"] },
   // AdX has no tag or SDK of its own: its demand is served through Ad Manager
   // ad units (Ad Manager 360, or an MCM partner's network). Same code path as
@@ -82,6 +82,7 @@ export const AD_SLOTS = {
   earn_rewarded: { label: "Earn page: watch & earn", hint: "The user chooses to watch for Diamonds.", formats: ["rewarded"], list: false },
   contest_join_rewarded: { label: "Contest join: not enough Diamonds", hint: "Offered when the entry fee is short.", formats: ["rewarded"], list: false },
   result_exit_interstitial: { label: "Leaving the result page", hint: "Full screen, apps only, strict caps.", formats: ["interstitial"], list: false },
+  app_open: { label: "App open", hint: "Apps only. When the app comes back after 30+ s in the background; never on the first launch of a new account. Keep the gap long (4 h+).", formats: ["app_open"], list: false },
 } as const satisfies Record<string, { label: string; hint: string; formats: readonly AdFormat[]; list: boolean }>;
 export type AdSlotKey = keyof typeof AD_SLOTS;
 export const AD_SLOT_KEYS = Object.keys(AD_SLOTS) as AdSlotKey[];
@@ -117,6 +118,16 @@ export interface AdPlacementRules {
   maxPerDay: number;
   /** Full-screen: seconds between two of these ads. */
   minIntervalSec: number;
+  /** Web Ad Manager banners: reload while on screen every N seconds (0 = never, else 30-300). */
+  refreshSec: number;
+}
+
+export interface ExperimentVariant {
+  id: string;
+  /** Share of users (relative to the other variants' weights). */
+  weight: number;
+  /** Rule overrides for this variant. */
+  rules: Partial<Pick<AdPlacementRules, "firstPosition" | "interval" | "maxPerSession" | "maxPerDay" | "minIntervalSec" | "refreshSec">>;
 }
 
 export interface AdPlacement {
@@ -135,6 +146,10 @@ export interface AdPlacement {
   /** Optional window (epoch ms). */
   startsAt: number | null;
   endsAt: number | null;
+  /** Let the optimizer reorder this waterfall by measured revenue per request (lib/adOptimizer.ts). */
+  autoOptimize: boolean;
+  /** A/B test of the rules: users are split by a stable hash. */
+  experiment: { enabled: boolean; variants: ExperimentVariant[] };
 }
 
 export interface AdPlatformConfig {
@@ -145,12 +160,24 @@ export interface AdPlatformConfig {
   /** Served at https://tophunt.in/ads.txt and /app-ads.txt (lines, as entered). */
   adsTxt: string;
   appAdsTxt: string;
+  /** Web consent message (Google Funding Choices / Privacy & messaging), shown before any web ad loads. */
+  webConsent: { enabled: boolean; publisherId: string };
 }
 
-export const AD_PLATFORM_DEFAULTS: AdPlatformConfig = { enabled: false, networks: [], placements: [], adsTxt: "", appAdsTxt: "" };
+export const AD_PLATFORM_DEFAULTS: AdPlatformConfig = {
+  enabled: false,
+  networks: [],
+  placements: [],
+  adsTxt: "",
+  appAdsTxt: "",
+  webConsent: { enabled: false, publisherId: "" },
+};
 
 export const MAX_NETWORKS = 20;
 export const MAX_WATERFALL = 6;
+export const MAX_VARIANTS = 4;
+const VARIANT_ID_RE = /^[a-z0-9_-]{1,16}$/;
+const PUB_ID_RE = /^pub-\d{16}$/;
 const TXT_MAX = 20_000;
 
 const RULE_BOUNDS = {
@@ -161,10 +188,16 @@ const RULE_BOUNDS = {
   minIntervalSec: [0, 86_400],
   timeoutMs: [500, 15_000],
   newUserGraceDays: [0, 90],
+  refreshSec: [0, 300],
+  weight: [1, 100],
 } as const;
 
-const DEFAULT_RULES: AdPlacementRules = { firstPosition: 4, interval: 8, maxPerSession: 6, maxPerDay: 0, minIntervalSec: 0 };
-const FULLSCREEN_RULES: AdPlacementRules = { firstPosition: 1, interval: 8, maxPerSession: 2, maxPerDay: 10, minIntervalSec: 300 };
+const DEFAULT_RULES: AdPlacementRules = { firstPosition: 4, interval: 8, maxPerSession: 6, maxPerDay: 0, minIntervalSec: 0, refreshSec: 0 };
+const FULLSCREEN_RULES: AdPlacementRules = { firstPosition: 1, interval: 8, maxPerSession: 2, maxPerDay: 10, minIntervalSec: 300, refreshSec: 0 };
+const APP_OPEN_RULES: AdPlacementRules = { firstPosition: 1, interval: 8, maxPerSession: 1, maxPerDay: 3, minIntervalSec: 14_400, refreshSec: 0 };
+const RULE_KEYS = ["firstPosition", "interval", "maxPerSession", "maxPerDay", "minIntervalSec", "refreshSec"] as const;
+/** refreshSec is 0 or at least 30 (Google: refresh only viewable ads, not faster than 30 s). */
+const refreshOk = (n: number) => n === 0 || (n >= 30 && n <= 300);
 
 const NETWORK_ID_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
 const ADMOB_UNIT_RE = /^ca-app-pub-\d{16}\/\d{10}$/;
@@ -191,7 +224,7 @@ const UNIT_HINT: Record<AdNetworkType, string> = {
   house: "nothing (house ads use the sponsored campaigns)",
 };
 
-const isFullscreen = (f: AdFormat) => f === "interstitial" || f === "rewarded";
+const isFullscreen = (f: AdFormat) => f === "interstitial" || f === "rewarded" || f === "app_open";
 const flags = (v: any, fallback: boolean): PlatformFlags => ({
   web: typeof v?.web === "boolean" ? v.web : fallback,
   android: typeof v?.android === "boolean" ? v.android : fallback,
@@ -239,7 +272,7 @@ export function parseAdPlatform(raw: any): AdPlatformConfig {
     slots.add(slot);
     const formats = AD_SLOTS[slot].formats as readonly AdFormat[];
     const format = formats.includes(pl.format) ? (pl.format as AdFormat) : formats[0];
-    const d = isFullscreen(format) ? FULLSCREEN_RULES : DEFAULT_RULES;
+    const d = format === "app_open" ? APP_OPEN_RULES : isFullscreen(format) ? FULLSCREEN_RULES : DEFAULT_RULES;
     const waterfall: WaterfallEntry[] = [];
     for (const w of Array.isArray(pl.waterfall) ? pl.waterfall.slice(0, MAX_WATERFALL) : []) {
       const net = byId.get(String(w?.networkId ?? ""));
@@ -260,6 +293,10 @@ export function parseAdPlatform(raw: any): AdPlatformConfig {
         maxPerSession: int(pl.rules?.maxPerSession, d.maxPerSession, RULE_BOUNDS.maxPerSession),
         maxPerDay: int(pl.rules?.maxPerDay, d.maxPerDay, RULE_BOUNDS.maxPerDay),
         minIntervalSec: int(pl.rules?.minIntervalSec, d.minIntervalSec, RULE_BOUNDS.minIntervalSec),
+        refreshSec: (() => {
+          const r = int(pl.rules?.refreshSec, 0, RULE_BOUNDS.refreshSec);
+          return refreshOk(r) ? r : 0;
+        })(),
       },
       audience: {
         guests: pl.audience?.guests !== false,
@@ -267,9 +304,38 @@ export function parseAdPlatform(raw: any): AdPlatformConfig {
       },
       startsAt: optionalMs(pl.startsAt),
       endsAt: optionalMs(pl.endsAt),
+      autoOptimize: pl.autoOptimize === true,
+      experiment: parseExperiment(pl.experiment),
     });
   }
-  return { enabled: r.enabled === true, networks, placements, adsTxt: cleanTxt(r.adsTxt), appAdsTxt: cleanTxt(r.appAdsTxt) };
+  const wc = r.webConsent ?? {};
+  const pub = String(wc.publisherId ?? "").trim();
+  return {
+    enabled: r.enabled === true,
+    networks,
+    placements,
+    adsTxt: cleanTxt(r.adsTxt),
+    appAdsTxt: cleanTxt(r.appAdsTxt),
+    webConsent: { enabled: wc.enabled === true && PUB_ID_RE.test(pub), publisherId: PUB_ID_RE.test(pub) ? pub : "" },
+  };
+}
+
+function parseExperiment(e: any): AdPlacement["experiment"] {
+  const variants: ExperimentVariant[] = [];
+  const seen = new Set<string>();
+  for (const v of Array.isArray(e?.variants) ? e.variants.slice(0, MAX_VARIANTS) : []) {
+    const id = String(v?.id ?? "");
+    if (!VARIANT_ID_RE.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    const rules: ExperimentVariant["rules"] = {};
+    for (const k of RULE_KEYS) {
+      if (v.rules?.[k] === undefined) continue;
+      const n = int(v.rules[k], NaN, RULE_BOUNDS[k]);
+      if (Number.isFinite(n) && (k !== "refreshSec" || refreshOk(n))) rules[k] = n;
+    }
+    variants.push({ id, weight: int(v.weight, 50, RULE_BOUNDS.weight), rules });
+  }
+  return { enabled: e?.enabled === true && variants.length >= 2, variants };
 }
 
 /**
@@ -278,7 +344,7 @@ export function parseAdPlatform(raw: any): AdPlatformConfig {
  * there (house ads need none). ads.txt stays server-side.
  */
 export function publicAdPlatform(cfg: AdPlatformConfig, nowMs = Date.now()) {
-  if (!cfg.enabled) return { enabled: false, networks: [], placements: [] };
+  if (!cfg.enabled) return { enabled: false, networks: [], placements: [], webConsent: { enabled: false, publisherId: "" } };
   const live = cfg.networks.filter((n) => n.enabled);
   const byId = new Map(live.map((n) => [n.id, n]));
   const placements = cfg.placements
@@ -306,6 +372,7 @@ export function publicAdPlatform(cfg: AdPlatformConfig, nowMs = Date.now()) {
       .filter((n) => used.has(n.id))
       .map((n) => ({ id: n.id, type: n.type, platforms: n.platforms, testMode: n.testMode, publisherId: n.publisherId })),
     placements,
+    webConsent: cfg.webConsent,
   };
 }
 
@@ -335,7 +402,15 @@ export function validateAdPlatformPatch(p: any): void {
     throw httpsError("invalid-argument", `adPlatform: ${m}`);
   };
   if (!p || typeof p !== "object" || Array.isArray(p)) bad("must be an object.");
-  for (const k of Object.keys(p)) if (!["enabled", "networks", "placements", "adsTxt", "appAdsTxt"].includes(k)) bad(`unknown setting ${k}.`);
+  for (const k of Object.keys(p)) if (!["enabled", "networks", "placements", "adsTxt", "appAdsTxt", "webConsent"].includes(k)) bad(`unknown setting ${k}.`);
+  if (p.webConsent !== undefined) {
+    const wc = p.webConsent;
+    if (!wc || typeof wc !== "object") bad("webConsent must be { enabled, publisherId }.");
+    for (const k of Object.keys(wc)) if (!["enabled", "publisherId"].includes(k)) bad(`webConsent: unknown setting ${k}.`);
+    if (wc.enabled !== undefined && typeof wc.enabled !== "boolean") bad("webConsent.enabled must be true or false.");
+    if (wc.publisherId !== undefined && wc.publisherId !== "" && !PUB_ID_RE.test(String(wc.publisherId).trim())) bad('webConsent.publisherId must look like "pub-" + 16 digits.');
+    if (wc.enabled === true && !PUB_ID_RE.test(String(wc.publisherId ?? "").trim())) bad("webConsent needs the publisher id to be switched on.");
+  }
   if (p.enabled !== undefined && typeof p.enabled !== "boolean") bad("enabled must be true or false.");
   for (const k of ["adsTxt", "appAdsTxt"] as const) {
     if (p[k] === undefined) continue;
@@ -382,13 +457,14 @@ export function validateAdPlatformPatch(p: any): void {
       if (!AD_SLOTS[slot]) bad(`unknown slot "${slot}". The app has: ${AD_SLOT_KEYS.join(", ")}.`);
       if (seen.has(slot)) bad(`slot "${slot}" is listed twice.`);
       seen.add(slot);
-      for (const k of Object.keys(pl)) if (!["slot", "enabled", "platforms", "format", "waterfall", "rules", "audience", "startsAt", "endsAt"].includes(k)) bad(`${slot}: unknown setting ${k}.`);
+      for (const k of Object.keys(pl)) if (!["slot", "enabled", "platforms", "format", "waterfall", "rules", "audience", "startsAt", "endsAt", "autoOptimize", "experiment"].includes(k)) bad(`${slot}: unknown setting ${k}.`);
+      if (pl.autoOptimize !== undefined && typeof pl.autoOptimize !== "boolean") bad(`${slot}: autoOptimize must be true or false.`);
       if (pl.enabled !== undefined && typeof pl.enabled !== "boolean") bad(`${slot}: enabled must be true or false.`);
       isFlags(pl.platforms, `${slot}.platforms`);
       const formats = AD_SLOTS[slot].formats as readonly AdFormat[];
       const format = (pl.format ?? formats[0]) as AdFormat;
       if (!formats.includes(format)) bad(`${slot}: format must be ${formats.join(" or ")}.`);
-      if (format === "interstitial" && pl.platforms?.web === true) bad(`${slot}: interstitials run in the apps only.`);
+      if ((format === "interstitial" || format === "app_open") && pl.platforms?.web === true) bad(`${slot}: ${format === "app_open" ? "app open ads" : "interstitials"} run in the apps only.`);
       if (pl.waterfall !== undefined) {
         if (!Array.isArray(pl.waterfall) || pl.waterfall.length > MAX_WATERFALL) bad(`${slot}: waterfall has at most ${MAX_WATERFALL} networks.`);
         const inFall = new Set<string>();
@@ -419,9 +495,34 @@ export function validateAdPlatformPatch(p: any): void {
       }
       if (pl.rules !== undefined) {
         if (!pl.rules || typeof pl.rules !== "object") bad(`${slot}: rules must be an object.`);
-        for (const k of Object.keys(pl.rules)) if (!["firstPosition", "interval", "maxPerSession", "maxPerDay", "minIntervalSec"].includes(k)) bad(`${slot}: unknown rule ${k}.`);
-        for (const k of ["firstPosition", "interval", "maxPerSession", "maxPerDay", "minIntervalSec"] as const) isInt(pl.rules[k], `${slot}.rules.${k}`, RULE_BOUNDS[k]);
+        for (const k of Object.keys(pl.rules)) if (!(RULE_KEYS as readonly string[]).includes(k)) bad(`${slot}: unknown rule ${k}.`);
+        for (const k of RULE_KEYS) isInt(pl.rules[k], `${slot}.rules.${k}`, RULE_BOUNDS[k]);
+        if (pl.rules.refreshSec !== undefined && !refreshOk(pl.rules.refreshSec)) bad(`${slot}: refreshSec must be 0 (off) or 30-300 seconds.`);
+        if (pl.rules.refreshSec > 0 && format !== "banner") bad(`${slot}: only banner placements can refresh.`);
+        if (format === "app_open" && pl.rules.minIntervalSec !== undefined && pl.rules.minIntervalSec < 3600) bad(`${slot}: app open ads need at least 1 hour between them.`);
         if (format === "interstitial" && pl.rules.minIntervalSec !== undefined && pl.rules.minIntervalSec < 60) bad(`${slot}: interstitials need at least 60 seconds between them.`);
+      }
+      if (pl.experiment !== undefined) {
+        const e = pl.experiment;
+        if (!e || typeof e !== "object") bad(`${slot}: experiment must be an object.`);
+        for (const k of Object.keys(e)) if (!["enabled", "variants"].includes(k)) bad(`${slot}: unknown experiment setting ${k}.`);
+        if (e.enabled !== undefined && typeof e.enabled !== "boolean") bad(`${slot}: experiment.enabled must be true or false.`);
+        if (e.variants !== undefined && (!Array.isArray(e.variants) || e.variants.length > MAX_VARIANTS)) bad(`${slot}: an experiment has at most ${MAX_VARIANTS} variants.`);
+        const ids = new Set<string>();
+        for (const v of e.variants ?? []) {
+          const id = String(v?.id ?? "");
+          if (!VARIANT_ID_RE.test(id)) bad(`${slot}: variant id "${id}" must be 1-16 lowercase letters, digits, _ or -.`);
+          if (ids.has(id)) bad(`${slot}: variant "${id}" is listed twice.`);
+          ids.add(id);
+          for (const k of Object.keys(v)) if (!["id", "weight", "rules"].includes(k)) bad(`${slot} / ${id}: unknown setting ${k}.`);
+          isInt(v.weight, `${slot} / ${id}.weight`, RULE_BOUNDS.weight);
+          for (const k of Object.keys(v.rules ?? {})) {
+            if (!(RULE_KEYS as readonly string[]).includes(k)) bad(`${slot} / ${id}: unknown rule ${k}.`);
+            isInt(v.rules[k], `${slot} / ${id}.rules.${k}`, RULE_BOUNDS[k as (typeof RULE_KEYS)[number]]);
+          }
+          if (v.rules?.refreshSec !== undefined && !refreshOk(v.rules.refreshSec)) bad(`${slot} / ${id}: refreshSec must be 0 or 30-300.`);
+        }
+        if (e.enabled === true && ids.size < 2) bad(`${slot}: an experiment needs at least 2 variants.`);
       }
       if (pl.audience !== undefined) {
         if (!pl.audience || typeof pl.audience !== "object") bad(`${slot}: audience must be an object.`);

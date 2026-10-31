@@ -14,6 +14,7 @@ import { walletService } from '@/src/services/wallet/walletService';
 import { useAppConfig } from '@/src/services/appSettings';
 import { showWebRewarded, preloadWebRewarded, type WebRewardedOutcome } from '@/src/services/ads/webRewarded';
 import { canShowAd, recordAdShown } from './frequency';
+import { noteAdShown, noteFullscreenClosed, recordNetworkResult } from './optimizer';
 import { AD_PLATFORM, useAdPlacement, type AdSlotKey, type ResolvedPlacement } from './placements';
 import { admobInterstitialReady, preloadAdmobInterstitial, showAdmobInterstitial, showAdmobRewarded } from './providers/admob';
 
@@ -35,14 +36,22 @@ export async function showInterstitial(placement: ResolvedPlacement | null, opts
   for (const a of placement.attempts) {
     if (a.network.type !== 'admob') continue;
     if (opts.onlyIfReady && !admobInterstitialReady(a.unit, a.network.testMode)) continue;
-    queueAdEvent({ placement: placement.slot, event: 'request', provider: a.network.id });
-    const o = await showAdmobInterstitial(a.unit, a.network.testMode, Math.max(a.timeoutMs, FULLSCREEN_MIN_TIMEOUT));
+    const variant = placement.variant ?? '-';
+    queueAdEvent({ placement: placement.slot, event: 'request', provider: a.network.id, variant });
+    const t0 = Date.now();
+    const o = await showAdmobInterstitial(a.unit, a.network.testMode, Math.max(a.timeoutMs, FULLSCREEN_MIN_TIMEOUT), (valueMicros, currency) =>
+      queueAdEvent({ placement: placement.slot, event: 'paid', provider: a.network.id, variant, valueMicros, currency }),
+    );
     if (o === 'shown') {
-      queueAdEvent({ placement: placement.slot, event: 'impression', provider: a.network.id });
+      queueAdEvent({ placement: placement.slot, event: 'impression', provider: a.network.id, variant });
+      recordNetworkResult(a.network.id, true, Date.now() - t0);
       recordAdShown(placement.slot);
+      noteAdShown();
+      noteFullscreenClosed();
       return true;
     }
-    queueAdEvent({ placement: placement.slot, event: 'fail', provider: a.network.id });
+    queueAdEvent({ placement: placement.slot, event: 'fail', provider: a.network.id, variant });
+    if (o !== 'unsupported') recordNetworkResult(a.network.id, false, null);
     if (o === 'unsupported') return false;
   }
   return false;
@@ -184,8 +193,12 @@ export function useRewardedAd(slot: AdSlotKey, onRewarded?: () => void): Rewarde
       }
       for (const a of attempts) {
         queueAdEvent({ placement: slot, event: 'request', provider: a.id });
-        const o = await showAdmobRewarded(a.unit, a.testMode, Math.max(a.timeoutMs, FULLSCREEN_MIN_TIMEOUT), user.uid);
+        const o = await showAdmobRewarded(a.unit, a.testMode, Math.max(a.timeoutMs, FULLSCREEN_MIN_TIMEOUT), user.uid, (valueMicros, currency) =>
+          queueAdEvent({ placement: slot, event: 'paid', provider: a.id, valueMicros, currency }),
+        );
+        if (o === 'earned' || o === 'closed') noteFullscreenClosed();
         if (o === 'earned') {
+          noteAdShown();
           queueAdEvent({ placement: slot, event: 'reward_complete', provider: a.id });
           if (placement) recordAdShown(placement.slot);
           succeed(`Ad poora hua! +${reward} Diamond aa rahe hain`);

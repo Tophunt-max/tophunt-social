@@ -36,10 +36,12 @@ interface Placement {
   platforms: Flags;
   format: string;
   waterfall: Entry[];
-  rules: { firstPosition: number; interval: number; maxPerSession: number; maxPerDay: number; minIntervalSec: number };
+  rules: { firstPosition: number; interval: number; maxPerSession: number; maxPerDay: number; minIntervalSec: number; refreshSec: number };
   audience: { guests: boolean; newUserGraceDays: number };
   startsAt: number | null;
   endsAt: number | null;
+  autoOptimize: boolean;
+  experiment: { enabled: boolean; variants: { id: string; weight: number; rules: Partial<Placement["rules"]> }[] };
 }
 interface Config {
   enabled: boolean;
@@ -47,6 +49,7 @@ interface Config {
   placements: Placement[];
   adsTxt: string;
   appAdsTxt: string;
+  webConsent: { enabled: boolean; publisherId: string };
 }
 interface Registry {
   slots: { key: string; label: string; hint: string; formats: string[]; list: boolean }[];
@@ -60,7 +63,7 @@ const UNIT_PLACEHOLDER: Record<string, string> = {
   adx: "/1234567/tophunt_adx_feed",
   adsense: "1234567890 (ad slot id)",
 };
-const FULLSCREEN = new Set(["interstitial", "rewarded"]);
+const FULLSCREEN = new Set(["interstitial", "rewarded", "app_open"]);
 
 const toLocal = (ms: number | null) => {
   if (!ms) return "";
@@ -76,15 +79,20 @@ function emptyPlacement(slot: Registry["slots"][number]): Placement {
   return {
     slot: slot.key,
     enabled: false,
-    platforms: { web: format !== "interstitial", android: true, ios: true },
+    platforms: { web: format !== "interstitial" && format !== "app_open", android: true, ios: true },
     format,
     waterfall: [],
-    rules: full
-      ? { firstPosition: 1, interval: 8, maxPerSession: 2, maxPerDay: 10, minIntervalSec: 300 }
-      : { firstPosition: 4, interval: 8, maxPerSession: 6, maxPerDay: 0, minIntervalSec: 0 },
-    audience: { guests: true, newUserGraceDays: 0 },
+    rules:
+      format === "app_open"
+        ? { firstPosition: 1, interval: 8, maxPerSession: 1, maxPerDay: 3, minIntervalSec: 14400, refreshSec: 0 }
+        : full
+          ? { firstPosition: 1, interval: 8, maxPerSession: 2, maxPerDay: 10, minIntervalSec: 300, refreshSec: 0 }
+          : { firstPosition: 4, interval: 8, maxPerSession: 6, maxPerDay: 0, minIntervalSec: 0, refreshSec: 0 },
+    audience: { guests: true, newUserGraceDays: format === "app_open" ? 1 : 0 },
     startsAt: null,
     endsAt: null,
+    autoOptimize: false,
+    experiment: { enabled: false, variants: [] },
   };
 }
 
@@ -98,6 +106,7 @@ export function AdPlatformTab() {
   useEffect(() => {
     if (cfgQ.data && reg && !cfg) {
       const eff: Config = structuredClone(cfgQ.data.effective.adPlatform ?? { enabled: false, networks: [], placements: [], adsTxt: "", appAdsTxt: "" });
+      eff.webConsent = eff.webConsent ?? { enabled: false, publisherId: "" };
       // One row per slot the app has, in registry order.
       const bySlot = new Map(eff.placements.map((p) => [p.slot, p]));
       eff.placements = reg.slots.map((s) => bySlot.get(s.key) ?? emptyPlacement(s));
@@ -280,11 +289,11 @@ export function AdPlatformTab() {
                       </label>
                       <div className="flex flex-wrap gap-4 items-end">
                         {PLATFORMS.map((k) => (
-                          <label key={k} className={`flex items-center gap-2 text-sm ${p.format === "interstitial" && k === "web" ? "opacity-40" : ""}`}>
+                          <label key={k} className={`flex items-center gap-2 text-sm ${(p.format === "interstitial" || p.format === "app_open") && k === "web" ? "opacity-40" : ""}`}>
                             <input
                               type="checkbox"
                               checked={!!p.platforms[k]}
-                              disabled={p.format === "interstitial" && k === "web"}
+                              disabled={(p.format === "interstitial" || p.format === "app_open") && k === "web"}
                               onChange={(e) => setPl(p.slot, (x) => ({ ...x, platforms: { ...x.platforms, [k]: e.target.checked } }))}
                             />
                             {PLATFORM_LABEL[k]}
@@ -385,11 +394,90 @@ export function AdPlatformTab() {
                         <input type="datetime-local" className={field} value={toLocal(p.endsAt)} onChange={(e) => setPl(p.slot, (x) => ({ ...x, endsAt: fromLocal(e.target.value) }))} />
                       </label>
                     </div>
+
+                    <div className="grid sm:grid-cols-3 gap-3">
+                      <Toggle
+                        label="Auto-optimize order"
+                        checked={p.autoOptimize}
+                        onChange={(v) => setPl(p.slot, (x) => ({ ...x, autoOptimize: v }))}
+                        hint="Every hour the order is re-ranked by fill rate × eCPM (7 days). Failing networks are paused either way."
+                      />
+                      {p.format === "banner" && (
+                        <Num
+                          label="Refresh (sec, web Ad Manager; 0 = off, 30-300)"
+                          value={p.rules.refreshSec}
+                          onChange={(v) => setPl(p.slot, (x) => ({ ...x, rules: { ...x.rules, refreshSec: v } }))}
+                        />
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-border p-2 space-y-2">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Toggle
+                          label="A/B experiment"
+                          checked={p.experiment.enabled}
+                          onChange={(v) =>
+                            setPl(p.slot, (x) => ({
+                              ...x,
+                              experiment: {
+                                enabled: v,
+                                variants: x.experiment.variants.length >= 2 ? x.experiment.variants : [{ id: "a", weight: 50, rules: {} }, { id: "b", weight: 50, rules: { interval: x.rules.interval + 4 } }],
+                              },
+                            }))
+                          }
+                          hint="Users are split by a stable hash. Compare variants in Ad performance."
+                        />
+                        {p.experiment.variants.length < 4 && (
+                          <button type="button" className="text-xs text-primary" onClick={() => setPl(p.slot, (x) => ({ ...x, experiment: { ...x.experiment, variants: [...x.experiment.variants, { id: `v${x.experiment.variants.length + 1}`, weight: 50, rules: {} }] } }))}>
+                            + Variant
+                          </button>
+                        )}
+                      </div>
+                      {p.experiment.variants.map((v, vi) => (
+                        <div key={vi} className="grid grid-cols-6 gap-2 items-end">
+                          <Text label="Variant id" value={v.id} onChange={(val) => setPl(p.slot, (x) => ({ ...x, experiment: { ...x.experiment, variants: x.experiment.variants.map((e, j) => (j === vi ? { ...e, id: val.toLowerCase() } : e)) } }))} />
+                          <Num label="Weight" value={v.weight} onChange={(val) => setPl(p.slot, (x) => ({ ...x, experiment: { ...x.experiment, variants: x.experiment.variants.map((e, j) => (j === vi ? { ...e, weight: val } : e)) } }))} />
+                          {(["interval", "maxPerSession", "maxPerDay", "minIntervalSec"] as const).map((rk) => (
+                            <Num
+                              key={rk}
+                              label={`${rk} (blank = same)`}
+                              value={v.rules[rk] ?? ""}
+                              onChange={(val) =>
+                                setPl(p.slot, (x) => ({
+                                  ...x,
+                                  experiment: {
+                                    ...x.experiment,
+                                    variants: x.experiment.variants.map((e, j) => {
+                                      if (j !== vi) return e;
+                                      const rules = { ...e.rules };
+                                      if (Number.isFinite(val) && val > 0) rules[rk] = val;
+                                      else delete rules[rk];
+                                      return { ...e, rules };
+                                    }),
+                                  },
+                                }))
+                              }
+                            />
+                          ))}
+                          <button type="button" className="p-1.5 rounded text-red-600 hover:bg-secondary justify-self-start" title="Remove variant"
+                            onClick={() => setPl(p.slot, (x) => ({ ...x, experiment: { ...x.experiment, variants: x.experiment.variants.filter((_, j) => j !== vi) } }))}>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
             );
           })}
+        </div>
+      </Card>
+
+      <Card title="Web consent (Google Privacy & messaging)" subtitle="Shows Google's consent message (IAB TCF) on the website before any ad loads. Create the message in AdSense / Ad Manager → Privacy & messaging. Apps use Google UMP (AdMob → Privacy & messaging) and, on iOS, the tracking prompt.">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Toggle label="Show consent message on the web" checked={cfg.webConsent.enabled} onChange={(v) => setCfg({ ...cfg, webConsent: { ...cfg.webConsent, enabled: v } })} />
+          <Text label="Publisher id" value={cfg.webConsent.publisherId} placeholder="pub-0000000000000000" onChange={(v) => setCfg({ ...cfg, webConsent: { ...cfg.webConsent, publisherId: v.trim() } })} />
         </div>
       </Card>
 

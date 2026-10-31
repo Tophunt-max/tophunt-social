@@ -15,6 +15,8 @@ export interface AdmobInlineProps {
   onLoad: () => void;
   onFail: (reason: string) => void;
   onClick?: () => void;
+  /** Impression-level revenue (AdMob onPaid), in micros of `currency`. */
+  onPaid?: (valueMicros: number, currency: string) => void;
 }
 
 /** Inline banner / native slot. */
@@ -29,14 +31,15 @@ export async function ensureMobileAds(): Promise<boolean> {
 }
 
 export type FullscreenOutcome = 'shown' | 'earned' | 'closed' | 'no_fill' | 'unsupported' | 'error';
+export type PaidCallback = (valueMicros: number, currency: string) => void;
 
 /** Load and show one interstitial. */
-export async function showAdmobInterstitial(_unit: string, _testMode: boolean, _timeoutMs: number): Promise<FullscreenOutcome> {
+export async function showAdmobInterstitial(_unit: string, _testMode: boolean, _timeoutMs: number, _onPaid?: PaidCallback): Promise<FullscreenOutcome> {
   return 'unsupported';
 }
 
 /** Load and show one rewarded ad; the reward is paid by AdMob SSV to the Worker for `userId`. */
-export async function showAdmobRewarded(_unit: string, _testMode: boolean, _timeoutMs: number, _userId: string): Promise<FullscreenOutcome> {
+export async function showAdmobRewarded(_unit: string, _testMode: boolean, _timeoutMs: number, _userId: string, _onPaid?: PaidCallback): Promise<FullscreenOutcome> {
   return 'unsupported';
 }
 
@@ -46,4 +49,10 @@ export function preloadAdmobInterstitial(_unit: string, _testMode: boolean): voi
 /** True when a preloaded interstitial for this unit is ready to show. */
 export function admobInterstitialReady(_unit: string, _testMode: boolean): boolean {
   return false;
+}
+
+/** App open ads: apps only. */
+export function preloadAdmobAppOpen(_unit: string, _testMode: boolean): void {}
+export async function showAdmobAppOpen(_onPaid?: PaidCallback): Promise<FullscreenOutcome> {
+  return 'unsupported';
 }

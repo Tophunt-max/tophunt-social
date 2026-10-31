@@ -139,6 +139,12 @@ export interface Env {
    * IN ADDITION to the panel's `monetization.ads.web.enabled` (lib/webAdReward.ts).
    */
   ALLOW_WEB_AD_REWARDS?: string;
+  /** Revenue import from the AdMob / AdSense APIs (lib/adRevenueImport.ts). Secrets. */
+  GOOGLE_ADS_CLIENT_ID?: string;
+  GOOGLE_ADS_CLIENT_SECRET?: string;
+  GOOGLE_ADS_REFRESH_TOKEN?: string;
+  ADMOB_PUBLISHER_ID?: string;
+  ADSENSE_ACCOUNT_ID?: string;
   /** Optional dedicated HMAC key for web ad watch tokens (else derived from ADMIN_PROXY_SECRET). */
   WEB_AD_TOKEN_SECRET?: string;
 

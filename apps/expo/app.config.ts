@@ -8,6 +8,8 @@
  *   EXPO_OWNER              Expo account / organisation that owns the project
  *   ADMOB_ANDROID_APP_ID    AdMob app id "ca-app-pub-…~…" (Android)
  *   ADMOB_IOS_APP_ID        AdMob app id "ca-app-pub-…~…" (iOS)
+ *   ADMOB_MEDIATION         bidding partners' adapters, JSON (plugins/withAdMediation.js)
+ *   ADMOB_SKADNETWORK_IDS   extra SKAdNetwork ids for those partners, comma separated
  *
  * The AdMob APP id is compiled into the binary (AndroidManifest / Info.plist),
  * so changing it needs a new build. Ad UNIT ids are not: they come from the
@@ -34,9 +36,17 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         userTrackingUsageDescription:
           'TopHunt uses this to show ads that are more relevant to you. You can say no and still use the app.',
         // Google's own SKAdNetwork id; add partners' ids here when mediation is added.
-        skAdNetworkItems: ['cstr6suwn9.skadnetwork'],
+        skAdNetworkItems: [
+          'cstr6suwn9.skadnetwork',
+          ...(process.env.ADMOB_SKADNETWORK_IDS ?? '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => /^[a-z0-9]+\.skadnetwork$/.test(s)),
+        ],
       },
     ],
+    // Mediation adapters (bidding partners), only when ADMOB_MEDIATION is set.
+    './plugins/withAdMediation',
   ] as ExpoConfig['plugins'];
 
   return {

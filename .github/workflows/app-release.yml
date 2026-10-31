@@ -9,6 +9,8 @@ name: App release (Android / iOS)
 #   variable EXPO_OWNER            Expo account / organisation (optional)
 #   variable ADMOB_ANDROID_APP_ID  AdMob app id for Android (required for production)
 #   variable ADMOB_IOS_APP_ID      AdMob app id for iOS (required for production)
+#   variable ADMOB_MEDIATION       bidding partners' adapter versions, JSON (optional)
+#   variable ADMOB_SKADNETWORK_IDS partners' SKAdNetwork ids, comma separated (optional)
 # Store credentials (signing keys, Play service account, App Store Connect API
 # key) live in EAS, set up once with `eas credentials`.
 
@@ -50,6 +52,8 @@ jobs:
       EXPO_OWNER: ${{ vars.EXPO_OWNER }}
       ADMOB_ANDROID_APP_ID: ${{ vars.ADMOB_ANDROID_APP_ID }}
       ADMOB_IOS_APP_ID: ${{ vars.ADMOB_IOS_APP_ID }}
+      ADMOB_MEDIATION: ${{ vars.ADMOB_MEDIATION }}
+      ADMOB_SKADNETWORK_IDS: ${{ vars.ADMOB_SKADNETWORK_IDS }}
     steps:
       - name: Check setup
         run: |
@@ -88,6 +92,10 @@ jobs:
       - name: Tests
         run: npm test
 
+      - name: Check mediation config
+        if: env.ADMOB_MEDIATION != ''
+        run: node -e "require('./plugins/withAdMediation').parseMediation(process.env.ADMOB_MEDIATION); console.log('mediation ok')"
+
       - uses: expo/expo-github-action@v8
         with:
           eas-version: latest
@@ -101,10 +109,13 @@ jobs:
           jq --arg p "${{ inputs.profile }}" \
              --arg id "$EAS_PROJECT_ID" --arg owner "$EXPO_OWNER" \
              --arg a "$ADMOB_ANDROID_APP_ID" --arg i "$ADMOB_IOS_APP_ID" \
+             --arg med "$ADMOB_MEDIATION" --arg sk "$ADMOB_SKADNETWORK_IDS" \
              '.build[$p].env += ({EAS_PROJECT_ID: $id}
                + (if $owner != "" then {EXPO_OWNER: $owner} else {} end)
                + (if $a != "" then {ADMOB_ANDROID_APP_ID: $a} else {} end)
-               + (if $i != "" then {ADMOB_IOS_APP_ID: $i} else {} end))' \
+               + (if $i != "" then {ADMOB_IOS_APP_ID: $i} else {} end)
+               + (if $med != "" then {ADMOB_MEDIATION: $med} else {} end)
+               + (if $sk != "" then {ADMOB_SKADNETWORK_IDS: $sk} else {} end))' \
              eas.json > eas.tmp.json && mv eas.tmp.json eas.json
           jq ".build[\"${{ inputs.profile }}\"].env | keys" eas.json
 

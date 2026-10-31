@@ -61,6 +61,7 @@ import { liveCampaigns } from "../lib/sponsored";
 import { profileGiftSummary } from "../lib/gifts";
 import { adsAllowedIn, parseMonetizationConfig } from "../lib/monetizationConfig";
 import { adsTxtBody } from "../lib/adPlatform";
+import { publicDecisions, readDecisions } from "../lib/adOptimizer";
 import { contestPrizeCoins, economyConfig } from "../lib/economyLimits";
 
 const APP_CONFIG_EDGE_TTL_SEC = 30;
@@ -2016,6 +2017,15 @@ readRoute.get("/ads-txt", async (c) => {
     status: body ? 200 : 404,
     headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=300" },
   });
+});
+
+/**
+ * The ad optimizer's current decisions (lib/adOptimizer.ts): waterfall order
+ * per slot and platform, paused networks, adaptive timeouts. Public and the
+ * same for everyone, so it is edge-cached; per-user signals stay in the app.
+ */
+readRoute.get("/ads/decisions", async (c) => {
+  return c.json(publicDecisions(await readDecisions(c.env)), 200, { "Cache-Control": "public, max-age=300" });
 });
 
 /**
