@@ -53,6 +53,7 @@ import {
 import { useBattleShareAsset } from '@/src/hooks/useBattleShareAsset';
 import { useAuthGate } from '@/src/hooks/useAuthGate';
 import { auth } from '@/src/services/firebase/initFirebase';
+import { AdSlot } from '@/src/ads/AdSlot';
 import { createShareCounter, platformShareMode, shareOutcomeMessage, type ShareImageStatus } from '@/src/lib/vsShareAsset';
 import { useRouter } from 'expo-router';
 import { battleResultPath } from '@/src/lib/battleResult';
@@ -419,6 +420,11 @@ export const ShareSheet = ({ visible, onDismiss, isDark, matchId, match: matchPr
                   <Text style={styles.previewRetryText}>Retry</Text>
                 </TouchableOpacity>
               ) : null}
+            </View>
+
+            {/* Small banner, apart from the VS preview and the share buttons (Ad platform → Share sheet). */}
+            <View style={{ marginHorizontal: 16 }}>
+              <AdSlot slot="share_sheet" isDark={isDark} />
             </View>
 
             <View style={styles.searchContainer}>

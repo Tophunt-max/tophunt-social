@@ -12,6 +12,7 @@ import { consumeRateLimit, rateLimit } from "./rateLimit";
 import { giftHistory, listLiveGifts, sendGift } from "./gifts";
 import { buyStoreItem, listStore } from "./store";
 import { recordAdEvents } from "./adMetrics";
+import { adsSuppressedUntil, ivtCheck } from "./adStats";
 import { recordCampaignEvent } from "./sponsored";
 import { createNotification } from "./notify";
 import { listProducts, loadOrder, placeOrder, transitionOrder } from "./shop";
@@ -32,6 +33,7 @@ export const MONETIZATION_ACTIONS = new Set([
   "getStore",
   "buyStoreItem",
   "recordAdEvents",
+  "getAdStatus",
   "recordSponsoredEvent",
   "getShopProducts",
   "placeShopOrder",
@@ -49,6 +51,8 @@ interface Ctx {
   body: any;
   waitUntil: (p: Promise<unknown>) => void;
   purgeProfile: () => void;
+  /** Two-letter country of the request (Cloudflare), for ad stats. */
+  country?: string | null;
 }
 
 export async function handleMonetizationAction(action: string, ctx: Ctx): Promise<unknown> {
@@ -115,7 +119,16 @@ export async function handleMonetizationAction(action: string, ctx: Ctx): Promis
       if (!(await consumeRateLimit(env, `adev:${uid}`, 30, 60))) return { recorded: 0, throttled: true };
       const platform = typeof body.platform === "string" ? body.platform : "";
       const events = Array.isArray(body.events) ? body.events.map((e: any) => ({ ...e, platform: e?.platform ?? platform })) : body.events;
-      return { recorded: await recordAdEvents(env, events) };
+      const recorded = await recordAdEvents(env, events, Date.now(), { country: ctx.country ?? null });
+      // Invalid-traffic guard: an account clicking far more than people do gets
+      // no ads for a while (lib/adStats.ts). The app stops requesting on this.
+      const { suppressedUntil } = await ivtCheck(env, uid, Array.isArray(events) ? events : []);
+      return { recorded, ...(suppressedUntil ? { adsSuppressedUntil: suppressedUntil } : {}) };
+    }
+
+    case "getAdStatus": {
+      // Per-account ad state the public, edge-cached config cannot carry.
+      return { adsSuppressedUntil: await adsSuppressedUntil(env, uid) };
     }
 
     case "recordSponsoredEvent": {

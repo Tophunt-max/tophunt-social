@@ -25,6 +25,8 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { goToCongratulations } from '@/src/lib/contestSuccess';
 import { RulesModal } from '@/src/components/modals/RulesModal';
 import { useProfile } from '@/src/hooks/useProfileData'; 
+import { NeedDiamondsSheet } from '@/src/ads/NeedDiamondsSheet';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { BackButton } from '@/src/components/ui/BackButton';
 import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
@@ -64,7 +66,10 @@ export default function BattleSetupScreen() {
   const router = useRouter();
   const { contestId, matchId, mode } = useLocalSearchParams(); 
   const { user } = useAuth();
-  const { data: profile } = useProfile(user?.uid || ''); 
+  const { data: profile, refetch: refetchProfile } = useProfile(user?.uid || ''); 
+  // Entry fee short: offer a rewarded ad in place (src/ads/NeedDiamondsSheet.tsx).
+  const [needDiamonds, setNeedDiamonds] = useState(false);
+  const isDark = useColorScheme() === 'dark';
   const { addToast } = useToast();
   
   const backgroundColor = useThemeColor({}, 'background');
@@ -286,8 +291,7 @@ export default function BattleSetupScreen() {
 
     // Logic for "Get Coins" flow
     if (userCoins < fee) {
-      addToast(`Entry ke liye ${fee} Diamond chahiye. Free Diamond kamao...`, 'info');
-      router.push('/earn' as any);
+      setNeedDiamonds(true);
       return;
     }
 
@@ -696,6 +700,14 @@ export default function BattleSetupScreen() {
           onRequestClose={() => setIsImageViewVisible(false)}
         />
       )}
+      <NeedDiamondsSheet
+        visible={needDiamonds}
+        fee={fee}
+        have={userCoins}
+        isDark={isDark}
+        onClose={() => setNeedDiamonds(false)}
+        onRewarded={() => void refetchProfile()}
+      />
     </SafeAreaView>
   );
 }

@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
+import { AdSlot } from '@/src/ads/AdSlot';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { emitToast } from '@/src/lib/toastBridge';
 import { reportError } from '@/src/lib/reportError';
@@ -317,6 +318,21 @@ export default function NotificationsScreen() {
 
     const keyExtractor = useCallback((item: NotificationItem) => item.id, []);
 
+    // One small banner after the first 5 (Ad platform → Notifications).
+    const renderWithAd = useCallback(
+        (info: { item: any; index: number }) => (
+            <>
+                {renderItem(info as any)}
+                {info.index === 4 ? (
+                    <View style={{ paddingHorizontal: 16 }}>
+                        <AdSlot slot="notifications" isDark={isDark} />
+                    </View>
+                ) : null}
+            </>
+        ),
+        [renderItem, isDark],
+    );
+
     // "Follow requests (N)" at the top, as on Instagram — only when something
     // is pending (private accounts). Refreshed with the list.
     const { data: requestCount = 0, refetch: refetchRequestCount } = useFollowRequestCount();
@@ -389,7 +405,7 @@ export default function NotificationsScreen() {
                 <FlatList
                     data={notifications}
                     keyExtractor={keyExtractor}
-                    renderItem={renderItem}
+                    renderItem={renderWithAd}
                     ListHeaderComponent={requestsHeader}
                     refreshControl={
                         <RefreshControl

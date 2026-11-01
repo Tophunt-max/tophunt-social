@@ -50,6 +50,8 @@ import {
   winnerShareMessage,
 } from '@/src/lib/battleResult';
 import { formatClock } from '@/src/lib/countdown';
+import { AdSlot } from '@/src/ads/AdSlot';
+import { useInterstitial } from '@/src/ads/fullscreen';
 
 /**
  * `/battle/<id>/result` — the winner page.
@@ -275,8 +277,14 @@ export default function BattleResult() {
   }, [url, addToast]);
 
   const goBattle = () => router.replace(`/battle/${encodeURIComponent(id)}` as any);
-  const goHome = () => router.replace('/home');
-  const startBattle = () => router.push('/contest/photo' as any);
+  // Apps only: at most one interstitial when leaving, inside the slot's caps,
+  // and only if it is already loaded or loads within its timeout.
+  const exitAd = useInterstitial('result_exit_interstitial');
+  const leaveWithAd = (go: () => void) => {
+    void exitAd().finally(go);
+  };
+  const goHome = () => leaveWithAd(() => router.replace('/home'));
+  const startBattle = () => leaveWithAd(() => router.push('/contest/photo' as any));
 
   // ---- render -----------------------------------------------------------------
   const header = (
@@ -382,6 +390,9 @@ export default function BattleResult() {
           onClaim={() => router.push(`/prizes/${encodeURIComponent(id)}` as any)}
           onWallet={() => router.push('/shop' as any)}
         />
+
+        {/* Outside the winner card, so it is never in the shared image. */}
+        <AdSlot slot="result_page" isDark={isDark} />
 
         <TouchableOpacity style={[styles.cta, styles.newBattle]} onPress={startBattle} accessibilityRole="button">
           <Text style={styles.ctaText}>{role === 'loser' ? 'Naya battle shuru karo 💪' : 'Apna battle shuru karo'}</Text>

@@ -14,6 +14,7 @@ import { BackButton } from '@/src/components/ui/BackButton';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useWebSeo } from '@/src/lib/webSeo';
 import { useScreenPlayback } from '@/src/hooks/useListPlayback';
+import { AdSlot } from '@/src/ads/AdSlot';
 
 /**
  * A shared battle: `https://tophunt.in/battle/<id>` — the post-detail page.
@@ -114,6 +115,10 @@ export default function BattleDetail() {
             return trip after a sign-in that the vote/like prompt started.
           */}
           <PostCard key={`${user?.uid ?? 'guest'}:${dataUpdatedAt}`} item={match} isDark={isDark} playActive={playActive} />
+          {/* Below the whole card, never next to the vote buttons (src/ads). */}
+          <View style={{ paddingHorizontal: 16 }}>
+            <AdSlot slot="battle_page" isDark={isDark} />
+          </View>
           <TouchableOpacity style={[styles.cta, styles.more]} onPress={goHome} accessibilityRole="button" accessibilityLabel="See more battles">
             <Text style={styles.ctaText}>See more battles</Text>
           </TouchableOpacity>

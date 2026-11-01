@@ -11,6 +11,7 @@ import { useMemo } from 'react';
 import { Platform } from 'react-native';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { callApi, readApi } from '@/src/services/api';
+import { setAdsSuppressedUntil } from '@/src/ads/optimizer';
 import { useAppConfig } from '@/src/services/appSettings';
 import type { SlotRule, SponsoredCampaign } from '@/src/lib/adSlots';
 import { GAMIFICATION_KEYS } from '@/src/services/gamification';
@@ -29,6 +30,8 @@ export interface MonetizationPublicConfig {
     shortVideo: { enabled: boolean; interval: number; maxPerSession: number };
     interstitial: { enabled: boolean; minIntervalSec: number; maxPerSession: number; maxPerHour: number };
     rewarded: { enabled: boolean; rewardDiamonds: number; dailyCap: number };
+    /** Rewarded ads on the web build (Google Ad Manager). Paid by the Worker against a watch token. */
+    web: { enabled: boolean; adUnitPath: string; rewardDiamonds: number; dailyCap: number; minWatchSec: number; requireVerifiedPhone: boolean };
   };
   sponsored: SlotRule & { enabled: boolean };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number };
@@ -50,6 +53,7 @@ const OFF: MonetizationPublicConfig = {
     shortVideo: { enabled: false, interval: 6, maxPerSession: 0 },
     interstitial: { enabled: false, minIntervalSec: 300, maxPerSession: 0, maxPerHour: 0 },
     rewarded: { enabled: false, rewardDiamonds: 0, dailyCap: 0 },
+    web: { enabled: false, adUnitPath: '', rewardDiamonds: 0, dailyCap: 0, minWatchSec: 15, requireVerifiedPhone: true },
   },
   sponsored: { enabled: false, firstPosition: 3, interval: 12, maxPerSession: 0 },
   gifts: { enabled: false, maxQuantity: 1, maxCoinsPerSend: 0 },
@@ -65,7 +69,7 @@ export function useMonetizationConfig(): MonetizationPublicConfig {
   return useMemo(
     () =>
       m && typeof m === 'object'
-        ? { ...OFF, ...m, ads: { ...OFF.ads, ...(m.ads ?? {}) }, earning: { xpConversion: { ...OFF.earning.xpConversion, ...(m.earning?.xpConversion ?? {}) } } }
+        ? { ...OFF, ...m, ads: { ...OFF.ads, ...(m.ads ?? {}), web: { ...OFF.ads.web, ...(m.ads?.web ?? {}) } }, earning: { xpConversion: { ...OFF.earning.xpConversion, ...(m.earning?.xpConversion ?? {}) } } }
         : OFF,
     [m],
   );
@@ -220,7 +224,19 @@ export function recordSponsoredEvent(campaignId: string, event: 'impression' | '
   callApi('recordSponsoredEvent', { campaignId, event }).catch(() => undefined);
 }
 
-type AdEvent = { placement: string; event: string; provider: string; count?: number };
+type AdEvent = {
+  placement: string;
+  event: string;
+  provider: string;
+  count?: number;
+  /** fill: load time in ms. */
+  latencyMs?: number;
+  /** Experiment variant ('-' = none). */
+  variant?: string;
+  /** paid: impression-level revenue from the SDK. */
+  valueMicros?: number;
+  currency?: string;
+};
 let pending: AdEvent[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -237,5 +253,7 @@ export async function flushAdEvents(): Promise<void> {
   const batch = pending.splice(0, 25);
   if (!batch.length) return;
   const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
-  await callApi('recordAdEvents', { platform, events: batch }).catch(() => undefined);
+  const res: any = await callApi('recordAdEvents', { platform, events: batch }).catch(() => undefined);
+  // The server switched this account's ads off (invalid-traffic guard, worker lib/adStats.ts).
+  if (res?.adsSuppressedUntil) setAdsSuppressedUntil(Number(res.adsSuppressedUntil));
 }

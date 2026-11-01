@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   RefreshControl,
 } from 'react-native';
+import { AdSlot } from '@/src/ads/AdSlot';
 import { router } from 'expo-router';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Ionicons } from '@/src/lib/icons';
@@ -96,6 +97,8 @@ export default function PrizesScreen() {
               colors={['#FF4D67']}
             />
           }
+          // One small banner below the list (Ad platform → My prizes).
+          ListFooterComponent={<AdSlot slot="prizes" isDark={isDark} />}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews

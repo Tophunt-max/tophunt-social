@@ -13,11 +13,13 @@
  * Every default is the safe one: everything off, test mode, consent required.
  */
 import { httpsError } from "./http";
+import { AD_PLATFORM_DEFAULTS, AD_SLOT_KEYS, parseAdPlatform, publicAdPlatform, validateAdPlatformPatch, webRewardedUnitFrom, type AdPlatformConfig } from "./adPlatform";
 
 export const AD_PROVIDERS = ["none", "admob"] as const;
 export type AdProvider = (typeof AD_PROVIDERS)[number];
 export const AD_MODES = ["test", "production"] as const;
-export const AD_PLACEMENTS = ["feed_native", "short_video", "interstitial", "rewarded", "sponsored_feed"] as const;
+/** Placements an ad event may name: the legacy ones plus every ad platform slot (lib/adPlatform.ts). */
+export const AD_PLACEMENTS = ["feed_native", "short_video", "interstitial", "rewarded", "sponsored_feed", ...AD_SLOT_KEYS] as const;
 export type AdPlacement = (typeof AD_PLACEMENTS)[number];
 
 export interface PlatformUnits {
@@ -42,7 +44,17 @@ export interface MonetizationConfig {
     shortVideo: { enabled: boolean; interval: number; maxPerSession: number };
     interstitial: { enabled: boolean; minIntervalSec: number; maxPerSession: number; maxPerHour: number };
     rewarded: { enabled: boolean; rewardDiamonds: number; dailyCap: number };
+    /**
+     * Rewarded ads on the WEB build (Google Ad Manager / GPT). GPT has no
+     * server-side verification, so these are paid on the client's word,
+     * limited by a server-signed watch token (lib/webAdReward.ts), their own
+     * daily cap, the verified-phone rule and the deploy switch
+     * ALLOW_WEB_AD_REWARDS. Keep the reward small.
+     */
+    web: WebRewardedConfig;
   };
+  /** Networks, placements and waterfalls (lib/adPlatform.ts). */
+  adPlatform: AdPlatformConfig;
   sponsored: { enabled: boolean; firstPosition: number; interval: number; maxPerSession: number };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number; creatorShareBps: number };
   store: { enabled: boolean };
@@ -57,6 +69,19 @@ export interface MonetizationConfig {
   earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
   /** Economy guardrails (lib/economyLimits.ts). Every knob: 0 = off. */
   economy: EconomyConfig;
+}
+
+export interface WebRewardedConfig {
+  enabled: boolean;
+  /** Ad Manager ad unit path, e.g. "/1234567/tophunt_rewarded". Public, not a secret. */
+  adUnitPath: string;
+  rewardDiamonds: number;
+  /** Paid web ad views per account per reward day (separate from the app cap). */
+  dailyCap: number;
+  /** Seconds between asking for a watch token and claiming it. */
+  minWatchSec: number;
+  /** Only accounts with a verified mobile number are paid. */
+  requireVerifiedPhone: boolean;
 }
 
 export interface EconomyConfig {
@@ -102,7 +127,9 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
     shortVideo: { enabled: false, interval: 6, maxPerSession: 4 },
     interstitial: { enabled: false, minIntervalSec: 300, maxPerSession: 2, maxPerHour: 3 },
     rewarded: { enabled: false, rewardDiamonds: 5, dailyCap: 5 },
+    web: { enabled: false, adUnitPath: "", rewardDiamonds: 2, dailyCap: 3, minWatchSec: 15, requireVerifiedPhone: true },
   },
+  adPlatform: AD_PLATFORM_DEFAULTS,
   sponsored: { enabled: false, firstPosition: 3, interval: 12, maxPerSession: 3 },
   gifts: { enabled: false, maxQuantity: 99, maxCoinsPerSend: 5000, creatorShareBps: 0 },
   store: { enabled: false },
@@ -133,6 +160,7 @@ const BOUNDS = {
   maxPerHour: [0, 20],
   rewardDiamonds: [1, 100],
   dailyCap: [1, 50],
+  minWatchSec: [5, 120],
   maxQuantity: [1, 999],
   maxCoinsPerSend: [1, 1_000_000],
   creatorShareBps: [0, 10_000],
@@ -155,6 +183,8 @@ const ECONOMY_KEYS = ["contestPlatformFeePercent", "dailyFreeDiamondCap", "month
 const AD_UNIT_RE = /^ca-app-pub-\d{16}\/\d{10}$/;
 const APP_ID_RE = /^ca-app-pub-\d{16}~\d{10}$/;
 const REGION_RE = /^[A-Z]{2}$/;
+/** Ad Manager ad unit path: "/<network code>/<unit>[/<child>...]". */
+export const GAM_UNIT_PATH_RE = /^\/\d{2,15}(\/[A-Za-z0-9_.\-]{1,100}){1,5}$/;
 
 function int(v: unknown, fallback: number, [min, max]: readonly [number, number]): number {
   const n = Number(v);
@@ -216,7 +246,16 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
         rewardDiamonds: int(a.rewarded?.rewardDiamonds, d.ads.rewarded.rewardDiamonds, BOUNDS.rewardDiamonds),
         dailyCap: int(a.rewarded?.dailyCap, d.ads.rewarded.dailyCap, BOUNDS.dailyCap),
       },
+      web: {
+        enabled: bool(a.web?.enabled, false),
+        adUnitPath: str(a.web?.adUnitPath, GAM_UNIT_PATH_RE),
+        rewardDiamonds: int(a.web?.rewardDiamonds, d.ads.web.rewardDiamonds, BOUNDS.rewardDiamonds),
+        dailyCap: int(a.web?.dailyCap, d.ads.web.dailyCap, BOUNDS.dailyCap),
+        minWatchSec: int(a.web?.minWatchSec, d.ads.web.minWatchSec, BOUNDS.minWatchSec),
+        requireVerifiedPhone: bool(a.web?.requireVerifiedPhone, true),
+      },
     },
+    adPlatform: parseAdPlatform(m.adPlatform),
     sponsored: {
       enabled: bool(m.sponsored?.enabled, false),
       firstPosition: int(m.sponsored?.firstPosition, d.sponsored.firstPosition, BOUNDS.firstPosition),
@@ -272,6 +311,16 @@ export function providerReady(cfg: MonetizationConfig): boolean {
   return Boolean(a.androidAppId || a.iosAppId);
 }
 
+/** Web rewarded ads are switched on in the panel and have an ad unit (the deploy switch is separate). */
+export function webRewardedReady(cfg: MonetizationConfig): boolean {
+  return cfg.ads.enabled && cfg.ads.web.enabled && webRewardedUnit(cfg) !== "";
+}
+
+/** The web rewarded unit: the one set here, else the Earn slot's first Ad Manager web unit. */
+export function webRewardedUnit(cfg: MonetizationConfig): string {
+  return cfg.ads.web.adUnitPath || webRewardedUnitFrom(cfg.adPlatform);
+}
+
 /** What the app may see. Ad unit ids are public by design (they ship in the app binary). */
 export function publicMonetizationConfig(cfg: any) {
   const m = parseMonetizationConfig(cfg);
@@ -288,7 +337,19 @@ export function publicMonetizationConfig(cfg: any) {
       shortVideo: m.ads.shortVideo,
       interstitial: m.ads.interstitial,
       rewarded: { enabled: ready && m.ads.rewarded.enabled, rewardDiamonds: m.ads.rewarded.rewardDiamonds, dailyCap: m.ads.rewarded.dailyCap },
+      // The deploy switch is checked by the server when a token is asked for;
+      // getDailyTasks reports the combined state to the Earn screen.
+      web: {
+        enabled: webRewardedReady(m),
+        adUnitPath: webRewardedUnit(m),
+        rewardDiamonds: m.ads.web.rewardDiamonds,
+        dailyCap: m.ads.web.dailyCap,
+        minWatchSec: m.ads.web.minWatchSec,
+        requireVerifiedPhone: m.ads.web.requireVerifiedPhone,
+      },
     },
+    // Networks + placements the app may request from (lib/adPlatform.ts).
+    adPlatform: publicAdPlatform(m.adPlatform),
     sponsored: m.sponsored,
     gifts: { enabled: m.gifts.enabled, maxQuantity: m.gifts.maxQuantity, maxCoinsPerSend: m.gifts.maxCoinsPerSend },
     store: m.store,
@@ -336,11 +397,12 @@ export function validateMonetizationPatch(patch: any): void {
   };
 
   if (!obj(patch, "monetization")) return;
-  only(patch, ["ads", "sponsored", "gifts", "store", "shop", "earning", "economy"], "monetization");
+  only(patch, ["ads", "sponsored", "gifts", "store", "shop", "earning", "economy", "adPlatform"], "monetization");
+  validateAdPlatformPatch(patch.adPlatform);
 
   const a = patch.ads;
   if (obj(a, "ads")) {
-    only(a, ["enabled", "mode", "provider", "admob", "sessionMaxAds", "requireConsent", "blockedRegions", "feedNative", "shortVideo", "interstitial", "rewarded"], "ads");
+    only(a, ["enabled", "mode", "provider", "admob", "sessionMaxAds", "requireConsent", "blockedRegions", "feedNative", "shortVideo", "interstitial", "rewarded", "web"], "ads");
     isBool(a.enabled, "ads.enabled");
     isBool(a.requireConsent, "ads.requireConsent");
     if (a.requireConsent === false) bad("ads.requireConsent cannot be turned off; consent is required where the law requires it.");
@@ -389,6 +451,20 @@ export function validateMonetizationPatch(patch: any): void {
       isBool(a.rewarded.enabled, "ads.rewarded.enabled");
       isInt(a.rewarded.rewardDiamonds, "ads.rewarded.rewardDiamonds", BOUNDS.rewardDiamonds);
       isInt(a.rewarded.dailyCap, "ads.rewarded.dailyCap", BOUNDS.dailyCap);
+    }
+    if (obj(a.web, "ads.web")) {
+      only(a.web, ["enabled", "adUnitPath", "rewardDiamonds", "dailyCap", "minWatchSec", "requireVerifiedPhone"], "ads.web");
+      isBool(a.web.enabled, "ads.web.enabled");
+      isBool(a.web.requireVerifiedPhone, "ads.web.requireVerifiedPhone");
+      if (a.web.adUnitPath !== undefined && a.web.adUnitPath !== "") {
+        if (typeof a.web.adUnitPath !== "string" || !GAM_UNIT_PATH_RE.test(a.web.adUnitPath.trim())) {
+          bad('ads.web.adUnitPath must be an Ad Manager ad unit path like "/1234567/tophunt_rewarded".');
+        }
+        a.web.adUnitPath = a.web.adUnitPath.trim();
+      }
+      isInt(a.web.rewardDiamonds, "ads.web.rewardDiamonds", BOUNDS.rewardDiamonds);
+      isInt(a.web.dailyCap, "ads.web.dailyCap", BOUNDS.dailyCap);
+      isInt(a.web.minWatchSec, "ads.web.minWatchSec", BOUNDS.minWatchSec);
     }
   }
 
