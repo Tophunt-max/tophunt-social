@@ -875,6 +875,16 @@ describe('visual layer contract', () => {
     expect(xp40.status).toBe(200);
   });
 
+  it('catalog accepts the mythic rarity and refuses unknown ones', async () => {
+    const env = env0();
+    const mythic = await admin(env, 'PUT', '/gamification/catalog/frame_mythic_x', { type: 'frame', name: 'Mythic X', rarity: 'mythic', asset: { key: 'frame.gold' } });
+    expect(mythic.status).toBe(200);
+    const row = await env.DB.prepare(`SELECT rarity FROM reward_catalog WHERE id = 'frame_mythic_x'`).first<any>();
+    expect(row.rarity).toBe('mythic');
+    const ultra = await admin(env, 'PUT', '/gamification/catalog/frame_ultra_x', { type: 'frame', name: 'Ultra X', rarity: 'ultra', asset: { key: 'frame.gold' } });
+    expect(ultra.status).toBe(400);
+  });
+
   it('public profiles expose levelInfo and resolved cosmetics but no XP history', async () => {
     const env = env0();
     await seedUser(env, 'bob', { xp: 1000 });

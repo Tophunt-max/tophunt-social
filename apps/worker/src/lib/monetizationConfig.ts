@@ -57,7 +57,7 @@ export interface MonetizationConfig {
   adPlatform: AdPlatformConfig;
   sponsored: { enabled: boolean; firstPosition: number; interval: number; maxPerSession: number };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number; creatorShareBps: number };
-  store: { enabled: boolean };
+  store: { enabled: boolean; featured: StoreFeaturedConfig };
   /** Physical shop (lib/shop.ts) and its fraud rules (lib/shopRisk.ts). */
   /**
    * `monthlyBudgetInr`: the platform's spend limit. Physical products are the
@@ -70,6 +70,30 @@ export interface MonetizationConfig {
   /** Economy guardrails (lib/economyLimits.ts). Every knob: 0 = off. */
   economy: EconomyConfig;
 }
+
+/**
+ * The Shop's featured drop: an admin-picked set of store items shown as the
+ * banner on the Shop home. It only points at listings; price, stock and the
+ * sale window still come from `store_listings`, so it cannot invent scarcity.
+ * The countdown is `endsAt`, a real time the admin sets (or none).
+ */
+export interface StoreFeaturedConfig {
+  enabled: boolean;
+  badge: string;
+  title: string;
+  subtitle: string;
+  /** reward_catalog ids, 1-12, in display order. */
+  itemIds: string[];
+  /** The item drawn large on the banner; must be one of itemIds (null = the first). */
+  heroItemId: string | null;
+  /** ms epoch; the banner disappears from the app after it. null = no end. */
+  endsAt: number | null;
+  ctaLabel: string;
+}
+
+export const FEATURED_LIMITS = { badge: 24, title: 60, subtitle: 140, ctaLabel: 24, minItems: 1, maxItems: 12 } as const;
+/** Same id format as reward_catalog / store_listings (lib/store.ts). */
+const ITEM_ID_RE = /^[a-z0-9_-]{2,40}$/;
 
 export interface WebRewardedConfig {
   enabled: boolean;
@@ -132,7 +156,10 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
   adPlatform: AD_PLATFORM_DEFAULTS,
   sponsored: { enabled: false, firstPosition: 3, interval: 12, maxPerSession: 3 },
   gifts: { enabled: false, maxQuantity: 99, maxCoinsPerSend: 5000, creatorShareBps: 0 },
-  store: { enabled: false },
+  store: {
+    enabled: false,
+    featured: { enabled: false, badge: "Legendary Drop", title: "", subtitle: "", itemIds: [], heroItemId: null, endsAt: null, ctaLabel: "Explore Now" },
+  },
   shop: {
     enabled: false,
     monthlyBudgetInr: 0,
@@ -268,7 +295,7 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
       maxCoinsPerSend: int(m.gifts?.maxCoinsPerSend, d.gifts.maxCoinsPerSend, BOUNDS.maxCoinsPerSend),
       creatorShareBps: int(m.gifts?.creatorShareBps, d.gifts.creatorShareBps, BOUNDS.creatorShareBps),
     },
-    store: { enabled: bool(m.store?.enabled, false) },
+    store: { enabled: bool(m.store?.enabled, false), featured: parseFeatured(m.store?.featured) },
     shop: {
       enabled: bool(m.shop?.enabled, false),
       monthlyBudgetInr: int(m.shop?.monthlyBudgetInr, 0, BOUNDS.monthlyBudgetInr),
@@ -299,6 +326,50 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
   };
 }
 
+/** The stored featured block with defaults; never throws. Bad pieces fall back, they don't break the Shop. */
+function parseFeatured(raw: any): StoreFeaturedConfig {
+  const d = MONETIZATION_DEFAULTS.store.featured;
+  const f = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const text = (v: unknown, max: number, fallback: string) => {
+    const t = typeof v === "string" ? v.trim() : "";
+    return t && t.length <= max ? t : fallback;
+  };
+  const itemIds = Array.isArray(f.itemIds)
+    ? [...new Set<string>(f.itemIds.filter((x: unknown): x is string => typeof x === "string" && ITEM_ID_RE.test(x)))].slice(0, FEATURED_LIMITS.maxItems)
+    : [];
+  const endsAt = typeof f.endsAt === "number" && Number.isInteger(f.endsAt) && f.endsAt > 0 ? f.endsAt : null;
+  return {
+    enabled: bool(f.enabled, false),
+    badge: text(f.badge, FEATURED_LIMITS.badge, d.badge),
+    title: text(f.title, FEATURED_LIMITS.title, ""),
+    subtitle: text(f.subtitle, FEATURED_LIMITS.subtitle, ""),
+    itemIds,
+    heroItemId: typeof f.heroItemId === "string" && itemIds.includes(f.heroItemId) ? f.heroItemId : null,
+    endsAt,
+    ctaLabel: text(f.ctaLabel, FEATURED_LIMITS.ctaLabel, d.ctaLabel),
+  };
+}
+
+/**
+ * The featured drop as the app may see it, or null: only while the store is
+ * open, the drop is switched on, has items and a title, and has not ended
+ * (judged by server time).
+ */
+export function publicFeatured(m: MonetizationConfig, nowMs: number) {
+  const f = m.store.featured;
+  if (!m.store.enabled || !f.enabled || !f.itemIds.length || !f.title) return null;
+  if (f.endsAt !== null && f.endsAt <= nowMs) return null;
+  return {
+    badge: f.badge,
+    title: f.title,
+    subtitle: f.subtitle,
+    itemIds: f.itemIds,
+    heroItemId: f.heroItemId ?? f.itemIds[0],
+    endsAt: f.endsAt,
+    ctaLabel: f.ctaLabel,
+  };
+}
+
 /**
  * True when the SDK ad provider has everything it needs for the given mode.
  * Test mode uses Google's published test units on the client, so it only needs
@@ -322,8 +393,9 @@ export function webRewardedUnit(cfg: MonetizationConfig): string {
 }
 
 /** What the app may see. Ad unit ids are public by design (they ship in the app binary). */
-export function publicMonetizationConfig(cfg: any) {
+export function publicMonetizationConfig(cfg: any, nowMs: number = Date.now()) {
   const m = parseMonetizationConfig(cfg);
+  const featured = publicFeatured(m, nowMs);
   const ready = m.ads.enabled && providerReady(m);
   return {
     ads: {
@@ -352,7 +424,8 @@ export function publicMonetizationConfig(cfg: any) {
     adPlatform: publicAdPlatform(m.adPlatform),
     sponsored: m.sponsored,
     gifts: { enabled: m.gifts.enabled, maxQuantity: m.gifts.maxQuantity, maxCoinsPerSend: m.gifts.maxCoinsPerSend },
-    store: m.store,
+    // The featured block is sent only while it is live; the app shows nothing otherwise.
+    store: featured ? { enabled: m.store.enabled, featured } : { enabled: m.store.enabled },
     // Fraud thresholds stay server-side; the app only needs to know the shop is open.
     shop: { enabled: m.shop.enabled, requireVerifiedPhone: m.shop.fraud.requireVerifiedPhone },
     earning: m.earning,
@@ -371,7 +444,7 @@ export function adsAllowedIn(cfg: MonetizationConfig, country: string | null | u
  * so a typo cannot silently do nothing; out-of-range numbers are refused rather
  * than clamped, so the admin sees what was wrong.
  */
-export function validateMonetizationPatch(patch: any): void {
+export function validateMonetizationPatch(patch: any, nowMs: number = Date.now()): void {
   if (patch === undefined) return;
   const bad = (m: string): never => {
     throw httpsError("invalid-argument", `monetization: ${m}`);
@@ -488,8 +561,47 @@ export function validateMonetizationPatch(patch: any): void {
 
   const st = patch.store;
   if (obj(st, "store")) {
-    only(st, ["enabled"], "store");
+    only(st, ["enabled", "featured"], "store");
     isBool(st.enabled, "store.enabled");
+    const f = st.featured;
+    if (obj(f, "store.featured")) {
+      only(f, ["enabled", "badge", "title", "subtitle", "itemIds", "heroItemId", "endsAt", "ctaLabel"], "store.featured");
+      isBool(f.enabled, "store.featured.enabled");
+      const text = (k: "badge" | "title" | "subtitle" | "ctaLabel", required: boolean) => {
+        const v = f[k];
+        if (v === undefined) return;
+        const max = FEATURED_LIMITS[k];
+        if (typeof v !== "string") bad(`store.featured.${k} must be text.`);
+        const t = v.trim();
+        if (required && !t) bad(`store.featured.${k} cannot be empty.`);
+        if (t.length > max) bad(`store.featured.${k} must be at most ${max} characters.`);
+        f[k] = t;
+      };
+      text("badge", true);
+      text("title", true);
+      text("subtitle", false);
+      text("ctaLabel", true);
+      if (f.itemIds !== undefined) {
+        const ids = f.itemIds;
+        if (!Array.isArray(ids) || ids.some((x: unknown) => typeof x !== "string" || !ITEM_ID_RE.test(x))) {
+          bad("store.featured.itemIds must be a list of item ids (2-40 lowercase letters, digits, _ or -).");
+        }
+        if (new Set(ids).size !== ids.length) bad("store.featured.itemIds has the same item twice.");
+        if (ids.length < FEATURED_LIMITS.minItems || ids.length > FEATURED_LIMITS.maxItems) {
+          bad(`store.featured.itemIds must have ${FEATURED_LIMITS.minItems} to ${FEATURED_LIMITS.maxItems} items.`);
+        }
+      }
+      if (f.heroItemId !== undefined && f.heroItemId !== null) {
+        if (typeof f.heroItemId !== "string" || !ITEM_ID_RE.test(f.heroItemId)) bad("store.featured.heroItemId is not a valid item id.");
+        // Checked against the list sent with it, so a hero can never point outside the drop.
+        if (!Array.isArray(f.itemIds)) bad("store.featured.heroItemId must be sent together with itemIds.");
+        if (!f.itemIds.includes(f.heroItemId)) bad("store.featured.heroItemId must be one of itemIds.");
+      }
+      if (f.endsAt !== undefined && f.endsAt !== null) {
+        if (typeof f.endsAt !== "number" || !Number.isInteger(f.endsAt) || f.endsAt <= 0) bad("store.featured.endsAt must be a time (ms) or null.");
+        if (f.endsAt <= nowMs) bad("store.featured.endsAt is already in the past.");
+      }
+    }
   }
 
   const sh = patch.shop;

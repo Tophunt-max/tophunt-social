@@ -72,9 +72,16 @@ export const RARITY_COLORS: Record<string, string> = {
   rare: '#1E88E5',
   epic: '#8E24AA',
   legendary: '#FB8C00',
+  mythic: '#EC4899',
 };
 
 export const rarityColor = (r?: string | null) => RARITY_COLORS[r ?? ''] ?? RARITY_COLORS.common;
+
+/** Lowest to highest (worker lib/cosmetics.ts RARITIES). Unknown rarities rank 0. */
+export const RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'] as const;
+export const rarityRank = (r?: string | null): number => RARITY_ORDER.indexOf(String(r ?? '') as (typeof RARITY_ORDER)[number]) + 1;
+/** Legendary and above get the crown treatment. */
+export const isCrownRarity = (r?: string | null): boolean => rarityRank(r) >= rarityRank('legendary');
 
 export const rarityLabel = (r?: string | null) => {
   const s = String(r || 'common');

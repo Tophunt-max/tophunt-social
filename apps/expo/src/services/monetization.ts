@@ -15,6 +15,7 @@ import { setAdsSuppressedUntil } from '@/src/ads/optimizer';
 import { useAppConfig } from '@/src/services/appSettings';
 import type { SlotRule, SponsoredCampaign } from '@/src/lib/adSlots';
 import { GAMIFICATION_KEYS } from '@/src/services/gamification';
+import type { PublicFeaturedDrop } from '@/src/lib/shopModel';
 
 // ------------------------------------------------------------------ config
 
@@ -35,7 +36,8 @@ export interface MonetizationPublicConfig {
   };
   sponsored: SlotRule & { enabled: boolean };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number };
-  store: { enabled: boolean };
+  /** `featured` is sent only while the admin's featured drop is live (worker publicFeatured). */
+  store: { enabled: boolean; featured?: PublicFeaturedDrop };
   shop: { enabled: boolean };
   earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
 }
@@ -183,6 +185,10 @@ export interface StoreItemView {
   refundable: boolean;
   remaining: number | null;
   endsAt: number | null;
+  /** Sale start / listing time / units sold (for New arrivals and Popular). Missing from older servers. */
+  startsAt?: number | null;
+  createdAt?: number;
+  soldCount?: number;
   owned: boolean;
 }
 

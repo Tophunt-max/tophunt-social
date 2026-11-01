@@ -474,11 +474,15 @@ function RootLayoutNav() {
           screen is a phone layout. Blog posts opt out (/blog/[slug] and the
           root /[slug] permalink): BlogDetailScreen has its own 800px reading
           column. The blog LIST is a phone layout, so it stays framed.
+          The Shop home and the digital item detail opt out too: they lay out
+          responsively (2/3/4 columns, content capped at 1200px). Cart, product,
+          orders stay phone layouts and stay framed.
         */}
         <PhoneFrame
           disabled={
             segments[0] === '[slug]' ||
-            (segments[0] === 'blog' && (segments as string[])[1] === '[slug]')
+            (segments[0] === 'blog' && (segments as string[])[1] === '[slug]') ||
+            (segments[0] === 'shop' && [undefined, 'index', 'item'].includes((segments as string[])[1]))
           }
         >
           <Stack screenOptions={{ headerShown: false }}>

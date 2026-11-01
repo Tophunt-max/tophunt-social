@@ -234,7 +234,7 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
     explore: publicExploreConfig(cfg, nowMs),
     ads: { enabled: ads.enabled === true, reward: Number(ads.reward ?? 0), dailyCap: Number(ads.dailyCap ?? 0) },
     // Ad placements, sponsored posts, gifts and the store (lib/monetizationConfig.ts).
-    monetization: publicMonetizationConfig(cfg),
+    monetization: publicMonetizationConfig(cfg, nowMs),
     // ₹ value of one coin (Coin Economy → Values). Products are priced from dpCoinInr.
     coinValues: coinValuesFromConfig(cfg),
     supportEmail: cfg.supportEmail || "",
@@ -396,7 +396,7 @@ export function validateAppControlPatch(body: any, existing: any, nowMs: number 
   if (body.referralProgram !== undefined) validateReferralPatch(body.referralProgram);
   // Explore page banners + sections (lib/exploreConfig.ts).
   if (body.explore !== undefined) validateExplorePatch(body.explore);
-  if (body.monetization !== undefined) validateMonetizationPatch(body.monetization);
+  if (body.monetization !== undefined) validateMonetizationPatch(body.monetization, nowMs);
 }
 
 // ---------------------------------------------------------------- the gate

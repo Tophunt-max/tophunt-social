@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, describeError } from "@/lib/api";
+import { isFullAdminRole, useAuth } from "@/lib/auth";
 import { toast } from "@/lib/toast";
 import { Table } from "@/components/ui/Table";
 import { Modal } from "@/components/ui/Modal";
@@ -145,6 +146,8 @@ export function StoreTab() {
         )}
       </Card>
 
+      <FeaturedDropCard items={all} saved={cfgQ.data?.effective?.store?.featured} onSaved={() => qc.invalidateQueries({ queryKey: ["monetization-config"] })} />
+
       <Card
         title="Purchases"
         action={
@@ -174,6 +177,185 @@ export function StoreTab() {
       {editing && <ListingDialog item={editing} onClose={() => setEditing(null)} onDone={() => qc.invalidateQueries({ queryKey: ["mon-store"] })} />}
       {refunding && <RefundDialog purchase={refunding} onClose={() => setRefunding(null)} onDone={() => { qc.invalidateQueries({ queryKey: ["mon-purchases"] }); qc.invalidateQueries({ queryKey: ["mon-store"] }); }} />}
     </div>
+  );
+}
+
+/** Same limits as the Worker (lib/monetizationConfig.ts FEATURED_LIMITS). */
+const FEATURED = { badge: 24, title: 60, subtitle: 140, ctaLabel: 24, maxItems: 12 } as const;
+
+/**
+ * The Shop home's featured banner: which listed items, which one is drawn
+ * large, the copy, and an optional real end time (the app shows a countdown
+ * only when this is set). Saved through /admin/app-settings like "Store open".
+ */
+function FeaturedDropCard({ items, saved, onSaved }: { items: any[]; saved: any; onSaved: () => void }) {
+  const { user } = useAuth();
+  const full = !user?.role || isFullAdminRole(user.role);
+  const [f, setF] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pick, setPick] = useState("");
+
+  useEffect(() => {
+    if (saved && f === null) {
+      setF({
+        enabled: !!saved.enabled,
+        badge: saved.badge ?? "Legendary Drop",
+        title: saved.title ?? "",
+        subtitle: saved.subtitle ?? "",
+        itemIds: Array.isArray(saved.itemIds) ? saved.itemIds : [],
+        heroItemId: saved.heroItemId ?? null,
+        endsAt: toLocalInput(saved.endsAt),
+        ctaLabel: saved.ctaLabel ?? "Explore Now",
+      });
+    }
+  }, [saved, f]);
+
+  const listed = useMemo(() => items.filter((r) => r.listing), [items]);
+  const byId = useMemo(() => new Map(items.map((r) => [r.itemId, r])), [items]);
+
+  const save = useMutation({
+    mutationFn: () => {
+      const endsAt = fromLocalInput(f.endsAt);
+      const featured: Record<string, unknown> = {
+        enabled: f.enabled,
+        badge: f.badge.trim(),
+        subtitle: f.subtitle.trim(),
+        endsAt,
+        ctaLabel: f.ctaLabel.trim(),
+      };
+      // An empty list / title can only be saved while the banner is off; the
+      // Worker refuses them as values, so they are left out (kept as stored).
+      if (f.title.trim()) featured.title = f.title.trim();
+      if (f.itemIds.length) {
+        featured.itemIds = f.itemIds;
+        featured.heroItemId = f.heroItemId && f.itemIds.includes(f.heroItemId) ? f.heroItemId : null;
+      }
+      return api.saveAppSettings({ monetization: { store: { featured } } });
+    },
+    onSuccess: () => {
+      setError(null);
+      toast.success("Featured drop saved");
+      onSaved();
+    },
+    onError: (e: any) => {
+      const msg = describeError(e);
+      setError(msg);
+      toast.error(msg);
+    },
+  });
+
+  if (!f) return null;
+  const set = (patch: any) => setF({ ...f, ...patch });
+  const ends = fromLocalInput(f.endsAt);
+  const expired = ends !== null && ends <= Date.now();
+  const problems = [
+    f.enabled && !f.itemIds.length && "Pick at least one item.",
+    f.enabled && !f.title.trim() && "Title is required.",
+    !f.badge.trim() && "Badge is required.",
+    !f.ctaLabel.trim() && "Button label is required.",
+    expired && "The end time is in the past. Clear it or pick a future time.",
+  ].filter(Boolean) as string[];
+  const notOnSale = f.itemIds.filter((id: string) => listingStatus(byId.get(id) ?? {}) !== "on_sale");
+  const add = (id: string) => {
+    if (!id || f.itemIds.includes(id) || f.itemIds.length >= FEATURED.maxItems) return;
+    set({ itemIds: [...f.itemIds, id], heroItemId: f.heroItemId ?? id });
+    setPick("");
+  };
+  const remove = (id: string) => {
+    const next = f.itemIds.filter((x: string) => x !== id);
+    set({ itemIds: next, heroItemId: f.heroItemId === id ? next[0] ?? null : f.heroItemId });
+  };
+  const move = (i: number, d: -1 | 1) => {
+    const next = [...f.itemIds];
+    const j = i + d;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    set({ itemIds: next });
+  };
+
+  return (
+    <Card
+      title="Featured drop"
+      subtitle="The banner at the top of the Shop home. It only points at listings: price, stock and the sale window still come from each listing, so it can never show fake scarcity."
+      action={<Toggle label="Show banner" checked={f.enabled} onChange={(v) => set({ enabled: v })} />}
+    >
+      {!full && <Notice tone="warning">Only full admins can change the featured drop.</Notice>}
+      <Notice>
+        Users see it only while the store is open, the banner is on, it has a title and at least one item on sale, and the end time (if any) has not passed. Items that are hidden or sold out are skipped in the app.
+      </Notice>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Text label={`Badge (max ${FEATURED.badge})`} value={f.badge} onChange={(v) => set({ badge: v })} placeholder="Legendary Drop" />
+        <Text label={`Button label (max ${FEATURED.ctaLabel})`} value={f.ctaLabel} onChange={(v) => set({ ctaLabel: v })} placeholder="Explore Now" />
+        <Text label={`Title (max ${FEATURED.title})`} value={f.title} onChange={(v) => set({ title: v })} placeholder="Mythic Week" />
+        <label className="block">
+          <span className="text-xs text-muted-foreground mb-1 block">Ends at (optional; shows a countdown)</span>
+          <div className="flex gap-2">
+            <input type="datetime-local" className={field} value={f.endsAt} onChange={(e) => set({ endsAt: e.target.value })} />
+            {f.endsAt ? <Button variant="secondary" onClick={() => set({ endsAt: "" })}>Clear</Button> : null}
+          </div>
+        </label>
+      </div>
+      <label className="block">
+        <span className="text-xs text-muted-foreground mb-1 block">Subtitle (optional, max {FEATURED.subtitle})</span>
+        <textarea className={field} rows={2} value={f.subtitle} onChange={(e) => set({ subtitle: e.target.value })} />
+      </label>
+
+      <div>
+        <p className="text-xs text-muted-foreground mb-1">Items ({f.itemIds.length}/{FEATURED.maxItems}) · the starred one is drawn large</p>
+        <div className="flex gap-2 mb-2">
+          <select className={`${field} md:max-w-sm`} value={pick} onChange={(e) => setPick(e.target.value)} disabled={f.itemIds.length >= FEATURED.maxItems}>
+            <option value="">Add a listed item…</option>
+            {listed.filter((r) => !f.itemIds.includes(r.itemId)).map((r) => (
+              <option key={r.itemId} value={r.itemId}>
+                {r.name} · {r.rarity} · {TYPE_LABEL[r.type] ?? r.type}{listingStatus(r) === "on_sale" ? "" : " (not on sale)"}
+              </option>
+            ))}
+          </select>
+          <Button variant="secondary" onClick={() => add(pick)} disabled={!pick}>Add</Button>
+        </div>
+        {f.itemIds.length ? (
+          <ul className="space-y-1.5">
+            {f.itemIds.map((id: string, i: number) => {
+              const r = byId.get(id);
+              return (
+                <li key={id} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm">
+                  <button
+                    title="Draw this one large"
+                    aria-label={`Make ${r?.name ?? id} the hero item`}
+                    className={`text-lg leading-none ${f.heroItemId === id ? "text-amber-500" : "text-muted-foreground"}`}
+                    onClick={() => set({ heroItemId: id })}
+                  >
+                    {f.heroItemId === id ? "★" : "☆"}
+                  </button>
+                  <span className="font-semibold">{r?.name ?? id}</span>
+                  {r ? (
+                    <span className="text-[11px] font-bold uppercase px-2 py-0.5 rounded-full text-white" style={{ background: RARITY_COLOR[r.rarity] ?? RARITY_COLOR.common }}>{r.rarity}</span>
+                  ) : (
+                    <Badge variant="warning">not in catalogue</Badge>
+                  )}
+                  {r && listingStatus(r) !== "on_sale" ? <Badge variant="warning">not on sale</Badge> : null}
+                  <span className="flex-1" />
+                  <button className="text-xs text-muted-foreground disabled:opacity-30" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">▲</button>
+                  <button className="text-xs text-muted-foreground disabled:opacity-30" onClick={() => move(i, 1)} disabled={i === f.itemIds.length - 1} aria-label="Move down">▼</button>
+                  <button className="text-xs text-red-600 font-semibold" onClick={() => remove(id)}>Remove</button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">No items yet.</p>
+        )}
+      </div>
+
+      {notOnSale.length > 0 && <Notice tone="warning">{notOnSale.length} picked item(s) are not on sale right now; the app will skip them.</Notice>}
+      {problems.length > 0 && <Notice tone="warning">{problems.join(" ")}</Notice>}
+      {error && <Notice tone="danger">{error}</Notice>}
+      <div className="flex justify-end">
+        <Button onClick={() => save.mutate()} disabled={!full || save.isPending || problems.length > 0}>
+          {save.isPending ? "Saving…" : "Save featured drop"}
+        </Button>
+      </div>
+    </Card>
   );
 }
 

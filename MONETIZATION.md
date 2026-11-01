@@ -157,6 +157,46 @@ and re-checks price and availability inside the transaction.
   (e.g. abuse) cannot be bought back.
 - Not supported yet: time-limited items (needs an expiry on `user_inventory` honoured by equip and the public
   profile), bundles/collections, promotional pricing. No randomised paid items.
+- `getStore` items also carry `startsAt`, `createdAt` (listing time) and `soldCount` (the same counter the
+  stock limit uses). The Shop builds "New arrivals" (sale start, else listing time, last 30 days), "Popular"
+  (`soldCount > 0`) and "Limited edition" (real stock left or a future sale end) from them and omits a rail
+  with nothing in it (`apps/expo/src/lib/shopModel.ts`).
+
+### Featured drop (`appConfig.monetization.store.featured`)
+
+Admin: Monetization → Store → **Featured drop**, saved through `POST /admin/app-settings` (full admins only).
+
+```
+featured: { enabled, badge (≤24, "Legendary Drop"), title (≤60), subtitle (≤140),
+            itemIds (1-12 catalogue ids), heroItemId (one of itemIds, or null = first),
+            endsAt (ms epoch or null), ctaLabel (≤24, "Explore Now") }
+```
+
+- Off by default. Bad patches are refused, not clamped (unknown keys, empty/oversize text, duplicate or
+  malformed ids, a hero outside `itemIds`, an `endsAt` in the past).
+- Public app config carries `store.featured` only while the store is open, the drop is on, it has a title
+  and items, and `endsAt` (if set) is still ahead by server time. The app also hides the banner when its own
+  clock passes `endsAt`, and skips items that are not live listings; with none live, no banner.
+- It only points at listings: price, stock and sale window still come from `store_listings`. The countdown is
+  shown only for a real `endsAt`.
+
+### Mythic rarity
+
+`mythic` is a rarity above `legendary` (worker `RARITIES`, admin catalogue/achievement editors, app rarity
+colours and badges; Legendary and Mythic get the crown). `reward_catalog.rarity` has no CHECK, so no
+migration was needed.
+
+### App routes
+
+- `/shop`: tabs Shop (overview: featured drop, categories from the item types on sale, rails, grid), Digital
+  (search, category and rarity filters), Physical, and My Collection (links to `/rewards/inventory`).
+  `?tab=digital|physical` deep-links. On web the Shop home and item detail are not drawn in the phone column;
+  they lay out in 2/3/4 columns (≥700 / ≥1100 px), content capped at 1200 px.
+- `/shop/item/[id]`: one digital item from the `getStore` cache (live preview on the viewer, price, ownership,
+  real stock / sale end, refund note, where it equips). Not on sale → "Item available nahi hai".
+- Buying (Shop, item detail, `/rewards/store`) goes through `useDigitalPurchase`: a branded confirmation sheet
+  (balance before → after, server error states) and a success reveal. One request id per item is kept until
+  the server answers, so a network retry never charges twice.
 
 ## Ads
 
