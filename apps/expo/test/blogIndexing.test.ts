@@ -214,10 +214,29 @@ describe('status codes for urls that do not exist', () => {
     expect((await get(`${ORIGIN}/nope/nope`)).status).toBe(404);
     // Private screens are noindex, but they exist — a signed-in user is looking at
     // one, so answering 404 would be a lie in the other direction.
-    for (const path of ['/wallet/gifts', '/auth/login', '/messages/chat/abc', '/setting']) {
+    for (const path of [
+      '/wallet/gifts', '/auth/login', '/messages/chat/abc', '/setting',
+      '/shop', '/shop/orders', '/shop/order/abc', '/earn', '/rewards/xp-cosmetics', '/prizes/abc',
+    ]) {
       const res = await get(`${ORIGIN}${path}`);
       expect(res.status, path).toBe(200);
       expect(robotsOf(await head(res)), path).toBe('noindex, nofollow');
+    }
+  });
+
+  it('answers 200 for every top-level screen under app/ (RESERVED mirrors the folder)', async () => {
+    // A screen added under app/ but not to RESERVED is served with a 404 status:
+    // it still renders, but crawlers and the browser console treat it as missing.
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const roots = fs
+      .readdirSync(path.join(__dirname, '..', 'app'))
+      .map((f) => f.replace(/\.tsx$/, ''))
+      .filter((f) => !/^[_+[]/.test(f) && f !== 'index' && f !== 'blog');
+    expect(roots.length).toBeGreaterThan(10);
+    for (const root of roots) {
+      const res = await get(`${ORIGIN}/${root}/x`);
+      expect(res.status, `/${root}/x`).not.toBe(404);
     }
   });
 
