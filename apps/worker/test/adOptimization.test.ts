@@ -219,7 +219,7 @@ describe('revenue import', () => {
       calls.push(String(url));
       if (String(url).startsWith('https://oauth2.googleapis.com/token')) return new Response(JSON.stringify({ access_token: 'tok' }));
       expect(init?.headers?.Authorization).toBe('Bearer tok');
-      if (String(url).includes('admob.googleapis.com')) {
+      if (new URL(String(url)).hostname === 'admob.googleapis.com') {
         expect(JSON.parse(init.body).reportSpec.localizationSettings.currencyCode).toBe('USD');
         return new Response(JSON.stringify([{ row: { dimensionValues: { DATE: { value: '20261029' }, AD_UNIT: { value: ADMOB_A }, PLATFORM: { value: 'Android' } }, metricValues: { IMPRESSIONS: { integerValue: '100' }, ESTIMATED_EARNINGS: { microsValue: '500000' } } } }]));
       }
