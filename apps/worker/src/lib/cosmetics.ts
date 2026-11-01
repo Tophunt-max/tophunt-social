@@ -16,7 +16,8 @@ export type ItemType = (typeof ITEM_TYPES)[number];
 /** Slots a user can equip. Stickers and collectibles are shown in the showcase instead. */
 export const EQUIP_SLOTS = ["frame", "theme", "title", "badge", "accessory", "effect"] as const;
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
-export const RARITIES = ["common", "uncommon", "rare", "epic", "legendary"] as const;
+/** Lowest to highest. `mythic` sits above legendary (admin-only drops; no column CHECK, see adminGamification). */
+export const RARITIES = ["common", "uncommon", "rare", "epic", "legendary", "mythic"] as const;
 
 export interface CatalogItem {
   id: string;

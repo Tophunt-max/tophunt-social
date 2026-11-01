@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { PageHeader, fmtDateTime, fmtNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { isFullAdminRole, useAuth } from "@/lib/auth";
+import { RARITIES } from "@/lib/shopArt";
 import {
   MilestonesEditor, QuestsEditor, RanksEditor,
   type MilestoneRow, type QuestRow, type RankRow,
@@ -298,7 +299,7 @@ function Achievements() {
             <label className="text-sm">Category<input className={field} value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} /></label>
             <label className="text-sm">Rarity
               <select className={field} value={edit.rarity} onChange={(e) => setEdit({ ...edit, rarity: e.target.value })}>
-                {["common", "uncommon", "rare", "epic", "legendary"].map((r) => <option key={r} value={r}>{r}</option>)}
+                {RARITIES.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </label>
             <label className="text-sm">Reward item id<input className={field} value={edit.itemId ?? ""} onChange={(e) => setEdit({ ...edit, itemId: e.target.value })} /></label>
@@ -370,7 +371,7 @@ function Catalog() {
             <label className="text-sm sm:col-span-3">Description<input className={field} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></label>
             <label className="text-sm">Rarity
               <select className={field} value={edit.rarity} onChange={(e) => setEdit({ ...edit, rarity: e.target.value })}>
-                {["common", "uncommon", "rare", "epic", "legendary"].map((r) => <option key={r} value={r}>{r}</option>)}
+                {RARITIES.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </label>
             <label className="text-sm">Sort<input type="number" className={field} value={edit.sort} onChange={(e) => setEdit({ ...edit, sort: e.target.value })} /></label>

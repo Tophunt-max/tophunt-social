@@ -16,7 +16,7 @@ import { Ionicons, MaterialCommunityIcons } from '@/src/lib/icons';
 import { CosmeticPreview } from '@/src/components/gamification/RewardBits';
 import { CosmeticBadge, CosmeticTitleChip, FramedAvatar, ThemeBackdrop, TierPill } from '@/src/components/gamification/CosmeticBits';
 import { type ExplorePalette } from '@/src/components/explore/theme';
-import { assetColors, rarityColor, rarityLabel } from '@/src/lib/progression';
+import { assetColors, isCrownRarity, rarityColor, rarityLabel } from '@/src/lib/progression';
 import { timeLeftLabel } from '@/src/lib/shareCaptions';
 import type { StoreItemView } from '@/src/services/monetization';
 
@@ -27,7 +27,6 @@ export const DIGITAL_TYPE_LABEL: Record<string, string> = {
 
 /** Same pair as the battle vote buttons / VS orb. */
 export const VOTE_GRAD: [string, string] = ['#FF4D67', '#FF8A4D'];
-const STAGE_DARK: [string, string, string] = ['#1A1033', '#2D1B4E', '#14102A'];
 
 export interface Viewer {
   avatarUri: string | null;
@@ -90,7 +89,7 @@ function RarityTag({ rarity }: { rarity?: string | null }) {
   const color = rarityColor(rarity);
   return (
     <View style={styles.rarityTag}>
-      {rarity === 'legendary' ? (
+      {isCrownRarity(rarity) ? (
         <MaterialCommunityIcons name="crown" size={10} color={color} />
       ) : (
         <View style={[styles.rarityDot, { backgroundColor: color, shadowColor: color }]} />
@@ -187,69 +186,6 @@ export const DigitalItemCard = React.memo(function DigitalItemCard({
   );
 });
 
-/**
- * Full-width spotlight card, laid out like a DP battle: the viewer as they are
- * now ("ABHI") against the viewer with the item ("UPGRADE"), split by the VS orb.
- */
-export function FeaturedDigitalCard({
-  item, p, viewer, busy, affordable, onBuy, width = 340,
-}: { item: StoreItemView; p: ExplorePalette; viewer: Viewer; busy: boolean; affordable: boolean; onBuy: () => void; width?: number }) {
-  const color = rarityColor(item.rarity);
-  const inner = width - 28; // card padding 14 × 2
-  const panelW = (inner - 10) / 2;
-  const panelH = Math.round(panelW * 1.05);
-  const who = viewer.name || 'You';
-  return (
-    <LinearGradient colors={[color, '#FF4D67', '#8B5CF6']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.featuredBorder, { width }]}>
-      <LinearGradient colors={STAGE_DARK} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.featured}>
-        <View style={styles.featuredTop}>
-          <View style={styles.livePill}>
-            <View style={styles.liveDot} />
-            <Text style={styles.livePillText}>SPOTLIGHT DROP</Text>
-          </View>
-          <View style={{ flex: 1 }} />
-          <RarityTag rarity={item.rarity} />
-        </View>
-
-        <View style={styles.vsRow}>
-          <View style={[styles.panel, { width: panelW, height: panelH }]}>
-            <View style={[StyleSheet.absoluteFill, styles.center]}>
-              <Avatar uri={viewer.avatarUri} name={who} size={panelW * 0.5} />
-            </View>
-            <View style={[styles.corner, { backgroundColor: 'rgba(255,255,255,0.18)' }]}>
-              <Text style={styles.cornerText}>ABHI</Text>
-            </View>
-          </View>
-          <View style={[styles.panel, styles.panelWin, { width: panelW, height: panelH, borderColor: color }]}>
-            <ItemStage item={item} w={panelW} h={panelH} viewer={viewer} />
-            <View style={[styles.corner, { backgroundColor: color }]}>
-              <Text style={styles.cornerText}>UPGRADE</Text>
-            </View>
-            <View style={styles.crown} pointerEvents="none">
-              <MaterialCommunityIcons name="crown" size={18} color="#FFD700" />
-            </View>
-          </View>
-          <View style={[styles.vsWrap, { top: panelH / 2 - 21 }]} pointerEvents="none">
-            <LinearGradient colors={VOTE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.vsOrb}>
-              <Text style={styles.vsText}>VS</Text>
-            </LinearGradient>
-          </View>
-        </View>
-
-        <Text style={styles.featuredName} numberOfLines={1}>{item.name}</Text>
-        <View style={[styles.metaRow, { marginTop: 4 }]}>
-          <TierPill item={item} compact />
-          <Text style={styles.featuredType} numberOfLines={1}>{DIGITAL_TYPE_LABEL[item.type] ?? item.type}</Text>
-        </View>
-        {item.description ? <Text style={styles.featuredDesc} numberOfLines={2}>{item.description}</Text> : null}
-        <View style={{ marginTop: 12 }}>
-          <PriceButton item={item} busy={busy} affordable={affordable} onBuy={onBuy} p={{ ...p, chip: 'rgba(255,255,255,0.12)', text: '#FFF', sub: '#C9C2E0' }} big />
-        </View>
-      </LinearGradient>
-    </LinearGradient>
-  );
-}
-
 const styles = StyleSheet.create({
   center: { alignItems: 'center', justifyContent: 'center' },
   card: {
@@ -284,35 +220,4 @@ const styles = StyleSheet.create({
   nameDemo: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3, maxWidth: '90%' },
   nameDemoText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 11, flexShrink: 1 },
 
-  featuredBorder: { borderRadius: 24, padding: 1.5, alignSelf: 'center' },
-  featured: { borderRadius: 22.5, padding: 14 },
-  featuredTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  livePill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 100, paddingHorizontal: 9, paddingVertical: 4 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF4D67' },
-  livePillText: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 10, letterSpacing: 0.8 },
-  vsRow: { flexDirection: 'row', justifyContent: 'space-between', position: 'relative' },
-  panel: { borderRadius: 18, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.08)' },
-  panelWin: { backgroundColor: 'rgba(255,255,255,0.1)' },
-  corner: { position: 'absolute', top: 7, left: 7, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  cornerText: { color: '#FFF', fontSize: 9, fontFamily: 'Urbanist-Black', letterSpacing: 0.5 },
-  crown: { position: 'absolute', top: 6, right: 8 },
-  vsWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 5 },
-  vsOrb: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#FFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  vsText: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 14, fontStyle: 'italic' },
-  featuredName: { color: '#FFFFFF', fontFamily: 'Urbanist-Black', fontSize: 20, marginTop: 12 },
-  featuredType: { color: '#C9C2E0', fontFamily: 'Urbanist-SemiBold', fontSize: 12, flexShrink: 1 },
-  featuredDesc: { color: '#C9C2E0', fontFamily: 'Urbanist-Medium', fontSize: 12.5, marginTop: 6 },
 });

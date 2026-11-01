@@ -43,6 +43,12 @@ export interface StoreListingView {
   /** Remaining stock when the listing is limited; null = unlimited. */
   remaining: number | null;
   endsAt: number | null;
+  /** When the sale window opened (null = no start set). For "New arrivals". */
+  startsAt: number | null;
+  /** When the listing was first created. For "New arrivals". */
+  createdAt: number;
+  /** Real units sold through the store (the same counter the stock limit uses). For "Popular". */
+  soldCount: number;
   owned: boolean;
 }
 
@@ -67,6 +73,9 @@ export async function listStore(env: Env, uid: string, ts = Date.now()): Promise
     refundable: !!r.refundable,
     remaining: r.stock_limit == null ? null : Math.max(0, Number(r.stock_limit) - Number(r.sold_count)),
     endsAt: r.ends_at ?? null,
+    startsAt: r.starts_at ?? null,
+    createdAt: Number(r.created_at) || 0,
+    soldCount: Math.max(0, Number(r.sold_count) || 0),
     owned: !!r.owned,
   }));
 }

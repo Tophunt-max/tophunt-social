@@ -345,6 +345,80 @@ describe('digital store', () => {
     expect(res.body.error.reason).toBe('item_revoked');
     expect((await user(env, 'alice'))!.dpcoin).toBe(100);
   });
+  it('getStore reports startsAt, createdAt and the real soldCount for New arrivals / Popular', async () => {
+    const { env, item } = await setup(100);
+    const starts = Date.now() - 60_000;
+    await admin(env, 'PUT', `/monetization/store/${item.id}`, { priceCoins: 30, active: true, startsAt: starts });
+    await buy(env, item.id);
+    const row = (await call(env, 'alice', 'getStore')).body.items.find((i: any) => i.itemId === item.id);
+    expect(row).toMatchObject({ startsAt: starts, soldCount: 1, owned: true });
+    expect(row.createdAt).toBeGreaterThan(0);
+    const other = (await call(env, 'alice', 'getStore')).body.items.find((i: any) => i.itemId !== item.id);
+    if (other) expect(other.soldCount).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ===========================================================================
+describe('store featured drop', () => {
+  const NOW = 1_800_000_000_000;
+  const featured = (f: any = {}) => ({ enabled: true, title: 'Mythic Week', itemIds: ['frame_a', 'frame_b'], ...f });
+
+  it('defaults off with the default copy, and parses garbage back to safe values', () => {
+    const d = parseMonetizationConfig({}).store.featured;
+    expect(d).toEqual({ enabled: false, badge: 'Legendary Drop', title: '', subtitle: '', itemIds: [], heroItemId: null, endsAt: null, ctaLabel: 'Explore Now' });
+    const g = parseMonetizationConfig({ monetization: { store: { featured: { enabled: 'yes', itemIds: ['ok_1', 'BAD!', 'ok_1'], heroItemId: 'nope', endsAt: -4, badge: 'x'.repeat(40) } } } }).store.featured;
+    expect(g).toMatchObject({ enabled: false, itemIds: ['ok_1'], heroItemId: null, endsAt: null, badge: 'Legendary Drop' });
+  });
+
+  it('refuses bad patches instead of clamping them', () => {
+    const v = (f: any) => () => validateMonetizationPatch({ store: { featured: f } }, NOW);
+    expect(v({ bogus: 1 })).toThrow(/unknown setting store.featured.bogus/);
+    expect(v({ enabled: 1 })).toThrow(/true or false/);
+    expect(v({ title: 'x'.repeat(61) })).toThrow(/at most 60/);
+    expect(v({ title: '   ' })).toThrow(/cannot be empty/);
+    expect(v({ badge: 'x'.repeat(25) })).toThrow(/at most 24/);
+    expect(v({ subtitle: 'x'.repeat(141) })).toThrow(/at most 140/);
+    expect(v({ ctaLabel: 'x'.repeat(25) })).toThrow(/at most 24/);
+    expect(v({ itemIds: [] })).toThrow(/1 to 12/);
+    expect(v({ itemIds: Array.from({ length: 13 }, (_, i) => `item_${i}`) })).toThrow(/1 to 12/);
+    expect(v({ itemIds: ['Bad Id'] })).toThrow(/item ids/);
+    expect(v({ itemIds: ['a_1', 'a_1'] })).toThrow(/twice/);
+    expect(v({ itemIds: ['a_1'], heroItemId: 'b_2' })).toThrow(/one of itemIds/);
+    expect(v({ heroItemId: 'a_1' })).toThrow(/together with itemIds/);
+    expect(v({ endsAt: 'tomorrow' })).toThrow(/time/);
+    expect(v({ endsAt: NOW - 1 })).toThrow(/past/);
+    expect(() => validateMonetizationPatch({ store: { enabled: true, featured: featured({ heroItemId: 'frame_b', endsAt: NOW + 1000, subtitle: '', badge: 'Mythic Drop' }) } }, NOW)).not.toThrow();
+    expect(() => validateMonetizationPatch({ store: { featured: { enabled: false, heroItemId: null, endsAt: null } } }, NOW)).not.toThrow();
+  });
+
+  it('is public only while the store and the drop are on, and not after endsAt (server time)', () => {
+    const pub = (store: any, now = NOW) => publicMonetizationConfig({ monetization: { store } }, now).store as any;
+    expect(pub({ enabled: true, featured: featured({ enabled: false }) }).featured).toBeUndefined();
+    expect(pub({ enabled: false, featured: featured() }).featured).toBeUndefined();
+    expect(pub({ enabled: true, featured: featured({ title: '' }) }).featured).toBeUndefined();
+    const live = pub({ enabled: true, featured: featured({ endsAt: NOW + 60_000 }) });
+    expect(live).toEqual({
+      enabled: true,
+      featured: { badge: 'Legendary Drop', title: 'Mythic Week', subtitle: '', itemIds: ['frame_a', 'frame_b'], heroItemId: 'frame_a', endsAt: NOW + 60_000, ctaLabel: 'Explore Now' },
+    });
+    expect(pub({ enabled: true, featured: featured({ endsAt: NOW + 60_000 }) }, NOW + 60_000).featured).toBeUndefined();
+    expect(pub({ enabled: true, featured: featured({ heroItemId: 'frame_b' }) }).featured.heroItemId).toBe('frame_b');
+  });
+
+  it('is saved by a full admin through /admin/app-settings and served by /read/app-config', async () => {
+    const { env } = makeEnv();
+    await seedUser(env, 'boss', 0, 0, { role: 'admin' });
+    await seedUser(env, 'mod', 0, 0, { role: 'moderator' });
+    const endsAt = Date.now() + 3_600_000;
+    const body = { monetization: { store: { enabled: true, featured: featured({ endsAt, heroItemId: 'frame_b' }) } } };
+    expect((await admin(env, 'POST', '/app-settings', body, 'mod:moderator')).status).toBe(403);
+    expect((await admin(env, 'POST', '/app-settings', { monetization: { store: { featured: { itemIds: [] } } } })).status).toBe(400);
+    expect((await admin(env, 'POST', '/app-settings', body)).status).toBe(200);
+    const pub = await read(env, '/app-config');
+    expect(pub.body.monetization.store.featured).toMatchObject({ title: 'Mythic Week', heroItemId: 'frame_b', endsAt });
+    const cfg = await admin(env, 'GET', '/monetization/config');
+    expect(cfg.body.effective.store.featured).toMatchObject({ enabled: true, itemIds: ['frame_a', 'frame_b'] });
+  });
 });
 
 // ===========================================================================

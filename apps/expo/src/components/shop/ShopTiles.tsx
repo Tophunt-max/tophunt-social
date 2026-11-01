@@ -1,20 +1,18 @@
 /**
  * Tiles for the Shop screen (store layout v3): soft rounded stages, the price
  * on its own row and a round gradient action button, plus wide carousel cards
- * for the Spotlight (digital) and Hot deals (physical) rails.
+ * for the Hot deals rail (physical products). Digital items use
+ * src/components/shop/premium/.
  */
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons, MaterialCommunityIcons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/lib/icons';
 import { ScaleTouchable } from '@/src/components/explore/ScaleTouchable';
 import { BRAND_GRAD, GOLD, type ExplorePalette } from '@/src/components/explore/theme';
-import { assetColors, rarityColor, rarityLabel } from '@/src/lib/progression';
-import { timeLeftLabel } from '@/src/lib/shareCaptions';
-import type { StoreItemView } from '@/src/services/monetization';
-import { DIGITAL_TYPE_LABEL, ItemStage, VOTE_GRAD, type Viewer } from './DigitalItemCard';
+import { VOTE_GRAD } from './DigitalItemCard';
 
 export interface ShopProduct {
   id: string;
@@ -62,101 +60,6 @@ function Price({ coins, p, size = 15 }: { coins: number; p: ExplorePalette; size
       <CoinIcon size={size} />
       <Text style={[styles.priceText, { color: p.text, fontSize: size + 1 }]}>{coins.toLocaleString()}</Text>
     </View>
-  );
-}
-
-/** Grid tile for a digital item. */
-export const DigitalTile = React.memo(function DigitalTile({
-  item, width, p, viewer, busy, affordable, onBuy,
-}: { item: StoreItemView; width: number; p: ExplorePalette; viewer: Viewer; busy: boolean; affordable: boolean; onBuy: () => void }) {
-  const [c0, c1] = assetColors(item.asset);
-  const rc = rarityColor(item.rarity);
-  const stageW = width - 12;
-  const stageH = Math.round(stageW * 0.92);
-  const left = item.owned ? null : timeLeftLabel(item.endsAt);
-  const lowStock = item.remaining !== null && item.remaining <= 5;
-  return (
-    <View style={[styles.tile, { width, backgroundColor: p.card, borderColor: p.border }]}>
-      <LinearGradient
-        colors={[`${c0}${p.isDark ? '50' : '2E'}`, `${c1}${p.isDark ? '70' : '4D'}`]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.stage, { width: stageW, height: stageH }]}
-      >
-        <ItemStage item={item} w={stageW} h={stageH} viewer={viewer} />
-        <View style={[styles.rarity, { backgroundColor: p.isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.9)' }]}>
-          {item.rarity === 'legendary' ? <MaterialCommunityIcons name="crown" size={10} color={rc} /> : <View style={[styles.rarityDot, { backgroundColor: rc }]} />}
-          <Text style={[styles.rarityText, { color: rc }]}>{rarityLabel(item.rarity)}</Text>
-        </View>
-        {left || lowStock ? (
-          <View style={styles.urgent}>
-            <Ionicons name={left ? 'time' : 'flame'} size={10} color="#FFF" />
-            <Text style={styles.urgentText}>{left ?? `${item.remaining} left`}</Text>
-          </View>
-        ) : null}
-      </LinearGradient>
-      <View style={styles.tileBody}>
-        <Text style={[styles.tileName, { color: p.text }]} numberOfLines={1}>{item.name}</Text>
-        <Text style={[styles.tileType, { color: p.sub }]} numberOfLines={1}>{DIGITAL_TYPE_LABEL[item.type] ?? item.type}</Text>
-        <View style={styles.tileFoot}>
-          {item.owned ? <Text style={styles.ownedText}>Owned</Text> : <Price coins={item.priceCoins} p={p} />}
-          <View style={{ flex: 1 }} />
-          <RoundAction
-            p={p}
-            icon="add"
-            owned={item.owned}
-            locked={!item.owned && !affordable}
-            busy={busy}
-            onPress={onBuy}
-            label={item.owned ? `${item.name}, owned` : affordable ? `Buy ${item.name} for ${item.priceCoins} DP coin` : `${item.name} costs ${item.priceCoins} DP coin. Not enough DP coin`}
-          />
-        </View>
-      </View>
-    </View>
-  );
-});
-
-/** Wide carousel card for a spotlight digital item. */
-export function SpotlightCard({
-  item, width, p, viewer, busy, affordable, onBuy,
-}: { item: StoreItemView; width: number; p: ExplorePalette; viewer: Viewer; busy: boolean; affordable: boolean; onBuy: () => void }) {
-  const [c0, c1] = assetColors(item.asset);
-  const rc = rarityColor(item.rarity);
-  const stage = Math.round(width * 0.42);
-  return (
-    <LinearGradient colors={[c0, c1]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.spot, { width }]}>
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(10,8,25,0.55)' }]} />
-      <View style={styles.spotBlobA} />
-      <View style={styles.spotBlobB} />
-      <View style={[styles.spotStage, { width: stage, height: stage }]}>
-        <ItemStage item={item} w={stage} h={stage} viewer={viewer} />
-      </View>
-      <View style={{ flex: 1, gap: 5 }}>
-        <View style={[styles.spotTag, { borderColor: `${rc}AA` }]}>
-          <Ionicons name="sparkles" size={10} color={rc} />
-          <Text style={[styles.spotTagText, { color: rc }]}>{rarityLabel(item.rarity).toUpperCase()}</Text>
-        </View>
-        <Text style={styles.spotName} numberOfLines={2}>{item.name}</Text>
-        <Text style={styles.spotType} numberOfLines={1}>{DIGITAL_TYPE_LABEL[item.type] ?? item.type}</Text>
-        <View style={styles.spotFoot}>
-          <View style={styles.price}>
-            <CoinIcon size={15} />
-            <Text style={[styles.priceText, { color: '#FFF', fontSize: 16 }]}>{item.priceCoins.toLocaleString()}</Text>
-          </View>
-          <View style={{ flex: 1 }} />
-          <RoundAction
-            p={{ ...p, chip: 'rgba(255,255,255,0.18)', sub: '#E5E1F5' }}
-            icon="flash"
-            size={38}
-            owned={item.owned}
-            locked={!item.owned && !affordable}
-            busy={busy}
-            onPress={onBuy}
-            label={affordable ? `Buy ${item.name} for ${item.priceCoins} DP coin` : `${item.name} costs ${item.priceCoins} DP coin. Not enough DP coin`}
-          />
-        </View>
-      </View>
-    </LinearGradient>
   );
 }
 
@@ -249,9 +152,6 @@ const styles = StyleSheet.create({
 
   tile: { borderRadius: 24, borderWidth: 1, padding: 6 },
   stage: { borderRadius: 19, overflow: 'hidden' },
-  rarity: { position: 'absolute', top: 8, left: 8, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 100, paddingHorizontal: 7, paddingVertical: 3 },
-  rarityDot: { width: 6, height: 6, borderRadius: 3 },
-  rarityText: { fontFamily: 'Urbanist-Black', fontSize: 9.5, letterSpacing: 0.3 },
   urgent: { position: 'absolute', right: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(240,65,62,0.95)', borderRadius: 100, paddingHorizontal: 7, paddingVertical: 3 },
   urgentText: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 9.5, letterSpacing: 0.4 },
   soldOut: { backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
@@ -260,17 +160,7 @@ const styles = StyleSheet.create({
   tileName: { fontFamily: 'Urbanist-Bold', fontSize: 14 },
   tileType: { fontFamily: 'Urbanist-Medium', fontSize: 11.5 },
   tileFoot: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
-  ownedText: { color: '#22A559', fontFamily: 'Urbanist-Black', fontSize: 13 },
 
-  spot: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 26, padding: 12, overflow: 'hidden' },
-  spotBlobA: { position: 'absolute', width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(255,255,255,0.08)', top: -70, right: -40 },
-  spotBlobB: { position: 'absolute', width: 90, height: 90, borderRadius: 45, backgroundColor: 'rgba(255,255,255,0.06)', bottom: -40, right: 60 },
-  spotStage: { borderRadius: 20, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.1)' },
-  spotTag: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', borderWidth: 1, borderRadius: 100, paddingHorizontal: 7, paddingVertical: 2, backgroundColor: 'rgba(0,0,0,0.3)' },
-  spotTagText: { fontFamily: 'Urbanist-Black', fontSize: 9.5, letterSpacing: 0.8 },
-  spotName: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 18 },
-  spotType: { color: 'rgba(255,255,255,0.75)', fontFamily: 'Urbanist-SemiBold', fontSize: 12 },
-  spotFoot: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
 
   deal: { borderRadius: 26, overflow: 'hidden' },
   dealFoot: { position: 'absolute', left: 14, right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },

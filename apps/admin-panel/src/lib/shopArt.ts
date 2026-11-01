@@ -60,7 +60,11 @@ export const RARITY_COLOR: Record<string, string> = {
   rare: "#3B82F6",
   epic: "#A855F7",
   legendary: "#F59E0B",
+  mythic: "#EC4899",
 };
+
+/** Every rarity the Worker accepts, lowest to highest (worker lib/cosmetics.ts RARITIES). */
+export const RARITIES = ["common", "uncommon", "rare", "epic", "legendary", "mythic"] as const;
 
 /** Two hex colours from `asset.colors`, for items without artwork. */
 export function assetColors(asset: Record<string, unknown> | null | undefined): [string, string] {
