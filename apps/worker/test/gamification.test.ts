@@ -445,6 +445,118 @@ describe('cosmetics', () => {
 });
 
 // ===========================================================================
+describe('XP40 free cosmetics', () => {
+  it('contains exactly ten items per category and no paid listing', async () => {
+    const env = env0();
+    const rows = await env.DB.prepare(
+      `SELECT category, COUNT(*) AS n, COUNT(DISTINCT item_order) AS orders
+         FROM xp_cosmetic_unlocks WHERE collection = 'xp40' GROUP BY category ORDER BY category`,
+    ).all<any>();
+    expect(rows.results).toEqual([
+      { category: 'badge', n: 10, orders: 10 },
+      { category: 'frame', n: 10, orders: 10 },
+      { category: 'theme', n: 10, orders: 10 },
+      { category: 'title', n: 10, orders: 10 },
+    ]);
+    const paid = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM store_listings WHERE item_id IN (SELECT item_id FROM xp_cosmetic_unlocks)`,
+    ).first<any>();
+    expect(Number(paid.n)).toBe(0);
+    const blocked = await admin(env, 'PUT', '/monetization/store/xp40_frame_default', {
+      priceCoins: 1, stockLimit: null, refundable: true, active: true, startsAt: null, endsAt: null, sort: 0, ownership: 'permanent',
+    });
+    expect(blocked.status).toBe(412);
+    expect(JSON.stringify(blocked.body)).toMatch(/Free XP cosmetics/);
+  });
+
+  it.each([
+    [0, 4],
+    [5, 8],
+    [10, 12],
+    [25, 24],
+    [50, 40],
+  ])('server sync at display level %i permanently owns %i eligible items', async (displayLevel, expected) => {
+    const env = env0();
+    const computedLevel = Math.max(1, displayLevel);
+    await seedUser(env, `u${displayLevel}`, { xp: xpForLevel(computedLevel, CURVE) });
+    await syncProgression(env, `u${displayLevel}`, { full: true });
+    const count = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM user_inventory i JOIN xp_cosmetic_unlocks x ON x.item_id = i.item_id
+        WHERE i.uid = ? AND i.revoked_at IS NULL`,
+    ).bind(`u${displayLevel}`).first<any>();
+    expect(Number(count.n)).toBe(expected);
+  });
+
+  it('grants a multi-level jump once under concurrent device syncs', async () => {
+    const env = env0();
+    await on(env);
+    await seedUser(env, 'alice');
+    await syncProgression(env, 'alice');
+    await env.DB.prepare(`UPDATE users SET xp = ? WHERE uid = 'alice'`).bind(xpForLevel(25, CURVE)).run();
+    await Promise.all([
+      syncProgression(env, 'alice', { full: true }),
+      syncProgression(env, 'alice', { full: true }),
+      syncProgression(env, 'alice', { full: true }),
+    ]);
+    const rows = await env.DB.prepare(
+      `SELECT i.item_id, COUNT(*) AS n FROM user_inventory i JOIN xp_cosmetic_unlocks x ON x.item_id = i.item_id
+        WHERE i.uid = 'alice' GROUP BY i.item_id`,
+    ).all<any>();
+    expect(rows.results).toHaveLength(24);
+    expect(rows.results?.every((r) => Number(r.n) === 1)).toBe(true);
+  });
+
+  it('returns one authoritative XP-only collection with progress and ownership source', async () => {
+    const env = env0();
+    await seedUser(env, 'alice', { xp: xpForLevel(10, CURVE) });
+    const r = await call(env, 'alice', 'getXpCosmetics', { level: 50, owned: true });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ collection: 'xp40', total: 40, counts: { frame: 10, theme: 10, badge: 10, title: 10, unlocked: 12 } });
+    expect(r.body.levelInfo.level).toBe(10);
+    expect(r.body.nextUnlock).toMatchObject({ level: 15, requiredXp: xpForLevel(15, CURVE) });
+    expect(r.body.items.every((item: any) => item.collection === 'xp40' && item.asset.tier === 'xp')).toBe(true);
+    expect(r.body.items.some((item: any) => item.asset.tier === 'premium')).toBe(false);
+    expect(r.body.items.find((item: any) => item.id === 'xp40_frame_blue_wave')).toMatchObject({
+      state: 'unlocked', source: 'xp_level', sourceRef: 'level:10', unlocksAtLevel: 10, requiredXp: xpForLevel(10, CURVE), xpRemaining: 0,
+    });
+    expect(r.body.items.find((item: any) => item.id === 'xp40_frame_pink_heart').state).toBe('locked');
+  });
+
+  it('prevents a locked badge equip, then persists an unlocked badge across sessions', async () => {
+    const env = env0();
+    await seedUser(env, 'alice');
+    await call(env, 'alice', 'getXpCosmetics'); // grants the level-0 starter set
+    expect((await call(env, 'alice', 'equipCosmetic', { slot: 'badge', itemId: 'xp40_badge_active_user' })).status).toBe(403);
+    expect((await call(env, 'alice', 'equipCosmetic', { slot: 'badge', itemId: 'xp40_badge_newbie' })).status).toBe(200);
+    // A later authenticated request (another app session/device) reads D1 state.
+    const again = await call(env, 'alice', 'getXpCosmetics');
+    expect(again.body.equipped.badge).toBe('xp40_badge_newbie');
+    expect(again.body.items.find((item: any) => item.id === 'xp40_badge_newbie').state).toBe('equipped');
+    // Type matching remains server enforced.
+    expect((await call(env, 'alice', 'equipCosmetic', { slot: 'frame', itemId: 'xp40_badge_newbie' })).status).toBe(403);
+  });
+
+  it('keeps all four equipped slots independent and exposes them on the public profile', async () => {
+    const env = env0();
+    await seedUser(env, 'alice');
+    await call(env, 'alice', 'getXpCosmetics');
+    for (const [slot, itemId] of [
+      ['frame', 'xp40_frame_default'],
+      ['theme', 'xp40_theme_default'],
+      ['badge', 'xp40_badge_newbie'],
+      ['title', 'xp40_title_new_member'],
+    ]) expect((await call(env, 'alice', 'equipCosmetic', { slot, itemId })).status).toBe(200);
+    const pub = await read(env, '/users/alice');
+    expect(pub.body.cosmetics).toMatchObject({
+      frame: { id: 'xp40_frame_default' },
+      theme: { id: 'xp40_theme_default' },
+      badge: { id: 'xp40_badge_newbie' },
+      title: { id: 'xp40_title_new_member', text: 'New Member' },
+    });
+  });
+});
+
+// ===========================================================================
 describe('quests', () => {
   it('weeks start on Monday and months follow the calendar, on the reward-day boundary', () => {
     const mon = Date.UTC(2026, 9, 26, 12); // Monday 26 Oct 2026
@@ -759,6 +871,8 @@ describe('visual layer contract', () => {
     expect(bad.status).toBe(400);
     const ok = await admin(env, 'PUT', '/gamification/catalog/frame_x', { type: 'frame', name: 'X', rarity: 'rare', asset: { key: 'frame.gold' } });
     expect(ok.status).toBe(200);
+    const xp40 = await admin(env, 'PUT', '/gamification/catalog/xp40_frame_x', { type: 'frame', name: 'XP X', rarity: 'common', asset: { key: 'xp40.frame_green_leaf', tier: 'xp' } });
+    expect(xp40.status).toBe(200);
   });
 
   it('public profiles expose levelInfo and resolved cosmetics but no XP history', async () => {

@@ -243,6 +243,7 @@ export function ItemPreview({ r, height = 144 }: { r: any; height?: number }) {
 
 function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () => void; onToggle: () => void; toggling: boolean }) {
   const l = r.listing;
+  const freeXp = r.asset?.collection === "xp40";
   const st = listingStatus(r);
   const rarity = RARITY_COLOR[r.rarity] ?? RARITY_COLOR.common;
   const window =
@@ -258,14 +259,14 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
           <TierTag asset={r.asset} />
         </span>
         <span className="absolute top-2 right-2">
-          {st === "on_sale" ? <Badge variant="active">on sale</Badge> : st === "hidden" ? <Badge variant="warning">hidden</Badge> : <Badge>not listed</Badge>}
+          {freeXp ? <Badge variant="info">free XP</Badge> : st === "on_sale" ? <Badge variant="active">on sale</Badge> : st === "hidden" ? <Badge variant="warning">hidden</Badge> : <Badge>not listed</Badge>}
         </span>
       </div>
       <div className="p-4 flex-1 flex flex-col gap-3">
         <div>
           <div className="flex items-baseline justify-between gap-2">
             <p className="font-bold text-base">{r.name}</p>
-            <p className="font-bold text-base whitespace-nowrap">{l ? `${fmtNumber(l.priceCoins)} DP coin` : "—"}</p>
+            <p className="font-bold text-base whitespace-nowrap">{freeXp ? `Level ${Number(r.asset?.level) || 0}` : l ? `${fmtNumber(l.priceCoins)} DP coin` : "—"}</p>
           </div>
           <p className="text-xs text-muted-foreground">{TYPE_LABEL[r.type] ?? r.type} · <span className="font-mono">{r.itemId}</span></p>
           {r.description ? <p className="text-sm text-muted-foreground mt-1">{r.description}</p> : null}
@@ -280,24 +281,28 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
           <Detail k="Ownership" v={l ? "Permanent" : "–"} />
           <Detail k="Sale window" v={l ? window : "–"} wide />
           <Detail k="Artwork" v={r.asset?.key ? <span className="font-mono text-xs">{String(r.asset.key)}</span> : "Built-in (by rarity)"} wide />
-          <Detail k="Family" v={tierOf(r.asset) === "premium" ? "Premium · animated" : "XP reward · static"} />
+          <Detail k="Family" v={freeXp ? "Free XP · lightweight motion" : "Premium · animated"} />
           {l ? <Detail k="Sort" v={String(l.sort)} /> : null}
           {l?.updatedAt ? <Detail k="Last changed" v={fmtDateTime(l.updatedAt)} wide /> : null}
         </dl>
-        <div className="flex gap-2 mt-auto pt-1">
-          <Button onClick={onEdit}>{l ? "Edit listing" : "List for sale"}</Button>
-          {l && (
-            <Button variant="secondary" onClick={onToggle} disabled={toggling}>
-              {l.active ? "Hide" : "Put on sale"}
-            </Button>
-          )}
-        </div>
+        {freeXp ? (
+          <Notice>Earned permanently from the server-authoritative XP level. This item cannot be listed for DP coin.</Notice>
+        ) : (
+          <div className="flex gap-2 mt-auto pt-1">
+            <Button onClick={onEdit}>{l ? "Edit listing" : "List for sale"}</Button>
+            {l && (
+              <Button variant="secondary" onClick={onToggle} disabled={toggling}>
+                {l.active ? "Hide" : "Put on sale"}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/** XP (earned, static artwork) or Premium (bought, animated artwork). */
+/** XP (earned with light motion) or Premium (bought with richer effects). */
 function TierTag({ asset }: { asset: any }) {
   const tier = tierOf(asset);
   const level = Number(asset?.level);

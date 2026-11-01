@@ -26,7 +26,7 @@ import type { Env } from "../types";
 import { createNotification } from "./notify";
 import { experienceOn, getProgression, levelInfo, milestonesUpTo, type LevelInfo, type Progression } from "./progression";
 import { rewardDayNumber } from "./gamification";
-import { grantItemStatements, loadAchievementDefs, type AchievementDef } from "./cosmetics";
+import { grantItemStatements, loadAchievementDefs, loadCatalog, type AchievementDef } from "./cosmetics";
 import { xpAwardStatements } from "./xpService";
 
 /** Metrics an achievement can be defined on. All computed on the server. */
@@ -235,6 +235,32 @@ async function grantMilestoneItems(env: Env, p: Progression, uid: string, level:
   return missing.filter((_, i) => Number(res[i]?.meta?.changes || 0) > 0);
 }
 
+/**
+ * Exact XP40 collection items earned at or below `level`.
+ *
+ * Unlock authority is the normalized xp_cosmetic_unlocks table, never the
+ * client and never mutable asset JSON. INSERT OR IGNORE on (uid,item_id) makes
+ * first sync, multi-level jumps, multiple devices and concurrent syncs safe.
+ * Level 0 means "starter" for display; all accounts compute to at least level 1.
+ */
+async function grantXpCosmeticItems(env: Env, uid: string, level: number, ts: number): Promise<string[]> {
+  const rules = await env.DB.prepare(
+    `SELECT item_id, unlock_level FROM xp_cosmetic_unlocks
+      WHERE collection = 'xp40' AND unlock_level <= ?
+      ORDER BY unlock_level, category, item_order`,
+  ).bind(level).all<{ item_id: string; unlock_level: number }>();
+  if (!rules.results?.length) return [];
+  const held = await env.DB.prepare(`SELECT item_id FROM user_inventory WHERE uid = ?`).bind(uid).all<{ item_id: string }>();
+  const heldSet = new Set((held.results ?? []).map((r) => r.item_id));
+  const missing = rules.results.filter((r) => !heldSet.has(r.item_id));
+  if (!missing.length) return [];
+  const statements = missing.flatMap((r) =>
+    grantItemStatements(env, uid, [r.item_id], "xp_level", `level:${r.unlock_level}`, ts),
+  );
+  const results = await env.DB.batch(statements);
+  return missing.filter((_, i) => Number(results[i]?.meta?.changes || 0) > 0).map((r) => r.item_id);
+}
+
 /** Coin rewards for milestones crossed in (from, to]: claimable grants, paid later through the reward budget. */
 function milestoneGrantStatements(env: Env, p: Progression, uid: string, from: number, to: number, ts: number): D1PreparedStatement[] {
   return p.cfg.milestones
@@ -288,7 +314,11 @@ export async function syncProgression(env: Env, uid: string, opts: { p?: Progres
 
   if (first) {
     await env.DB.prepare(`UPDATE users SET level_seen = ? WHERE uid = ? AND level_seen IS NULL`).bind(info.level, uid).run();
-    newItems = await grantMilestoneItems(env, p, uid, info.level, ts);
+    const [legacy, xp40] = await Promise.all([
+      grantMilestoneItems(env, p, uid, info.level, ts),
+      grantXpCosmeticItems(env, uid, info.level, ts),
+    ]);
+    newItems = [...legacy, ...xp40];
   } else if (info.level > Number(user.level_seen)) {
     const from = Number(user.level_seen);
     // The compare-and-set and the milestone Diamond grants are ONE batch: if
@@ -298,10 +328,17 @@ export async function syncProgression(env: Env, uid: string, opts: { p?: Progres
     const grantStmts = on ? milestoneGrantStatements(env, p, uid, from, info.level, ts) : [];
     const batch = await env.DB.batch([casStmt, ...grantStmts]);
     if (Number(batch[0]?.meta?.changes || 0) > 0) {
-      newItems = await grantMilestoneItems(env, p, uid, info.level, ts);
+      const [legacy, xp40] = await Promise.all([
+        grantMilestoneItems(env, p, uid, info.level, ts),
+        grantXpCosmeticItems(env, uid, info.level, ts),
+      ]);
+      newItems = [...legacy, ...xp40];
       if (on) {
         leveledUp = { from, to: info.level };
-        const unlockedNames = p.cfg.milestones.filter((ms) => ms.level > from && ms.level <= info.level).map((ms) => ms.title);
+        const milestoneNames = p.cfg.milestones.filter((ms) => ms.level > from && ms.level <= info.level).map((ms) => ms.title);
+        const catalog = new Map((await loadCatalog(env)).map((item) => [item.id, item.name]));
+        const cosmeticNames = newItems.map((id) => catalog.get(id)).filter((name): name is string => !!name);
+        const unlockedNames = [...new Set([...cosmeticNames, ...milestoneNames])];
         await createNotification(env, uid, {
           title: `Level up! You're now level ${info.level} 🎉`,
           body: unlockedNames.length
@@ -314,8 +351,13 @@ export async function syncProgression(env: Env, uid: string, opts: { p?: Progres
       }
     }
   } else if (opts.full) {
-    // Catch up items added to milestones the user already passed.
-    newItems = await grantMilestoneItems(env, p, uid, info.level, ts);
+    // Catch up legacy milestone items and XP40 items introduced after the user
+    // passed their level. Both grants are idempotent under concurrent reads.
+    const [legacy, xp40] = await Promise.all([
+      grantMilestoneItems(env, p, uid, info.level, ts),
+      grantXpCosmeticItems(env, uid, info.level, ts),
+    ]);
+    newItems = [...legacy, ...xp40];
   }
 
   if (on && !silent) {

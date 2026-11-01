@@ -7,7 +7,7 @@
  * handler it was given (which calls the Worker).
  */
 import React from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { Ionicons } from '@/src/lib/icons';
@@ -25,6 +25,7 @@ import { GamificationIcon } from './GamificationIcon';
 import { RarityPill } from './RarityPill';
 import { EmptyInventory, FrameRing } from './vectors';
 import { CosmeticFx } from './CosmeticFx';
+import { CosmeticArtGraphic } from './CosmeticGraphic';
 import { FRAME_AVATAR_RATIO, cosmeticArt } from '@/src/lib/cosmeticArt';
 
 const BRAND = '#FF4D67';
@@ -87,26 +88,34 @@ export function CosmeticPreview({
   name?: string | null;
 }) {
   const locked = item.owned === false;
-  // Bundled artwork: XP items (assets/xp, static) and Premium (assets/shop/digital, animated).
+  // Bundled artwork: XP40 items use optimized art + lightweight effects;
+  // Premium uses richer layered effects. Both stop under reduced motion/off-screen.
   const art = cosmeticArt(item);
   const tier = !art && item.type === 'frame' ? frameTier(item) : null;
   return (
     <View style={{ width: size, height: size, opacity: locked ? 0.55 : 1 }} accessible accessibilityLabel={`${item.name}${locked ? ', locked' : ''}`}>
-      {art && art.kind === 'frame' ? (
+      {art?.kind === 'frame' ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-          <Avatar uri={avatarUri ?? undefined} name={name || 'You'} size={size * FRAME_AVATAR_RATIO} />
+          <Avatar uri={avatarUri ?? undefined} name={name || 'You'} size={size * (art.avatarRatio ?? FRAME_AVATAR_RATIO)} />
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            <Image source={art.source} style={{ width: size, height: size }} resizeMode="contain" />
+            <CosmeticArtGraphic art={art} width={size} height={size} />
             {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} /> : null}
           </View>
         </View>
-      ) : art && art.kind === 'theme' ? (
+      ) : art?.kind === 'theme' ? (
         <View style={{ width: size, height: size, borderRadius: size * 0.22, overflow: 'hidden' }}>
-          <Image source={art.source} style={{ width: size, height: size }} resizeMode="cover" />
+          <CosmeticArtGraphic art={art.preview ? { source: art.preview } : art} width={size} height={size} fit="cover" />
+          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} fit="cover" /> : null}
+        </View>
+      ) : art?.layout === 'nameplate' ? (
+        <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+          <CosmeticArtGraphic art={art} width={size} height={size * 0.3} fit="stretch" />
+          <Text style={[styles.titleChipText, { position: 'absolute', color: '#FFFFFF', fontSize: Math.max(7, size * 0.14), maxWidth: size * 0.58 }]} numberOfLines={1}>{String(item.asset?.text ?? item.name)}</Text>
+          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size * 0.3} /> : null}
         </View>
       ) : art ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-          <Image source={art.source} style={{ width: size * 0.8, height: size * 0.8 }} resizeMode="contain" />
+          <CosmeticArtGraphic art={art} width={size * 0.8} height={size * 0.8} />
           {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size * 0.8} height={size * 0.8} /> : null}
         </View>
       ) : tier ? (

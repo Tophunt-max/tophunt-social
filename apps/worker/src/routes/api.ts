@@ -3986,6 +3986,7 @@ apiRoute.post("/", async (c) => {
     case "getProgression":
     case "getAchievements":
     case "getInventory":
+    case "getXpCosmetics":
     case "equipCosmetic":
     case "pinAchievements":
     case "getQuests":

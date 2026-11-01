@@ -1,18 +1,20 @@
 /**
- * The animated overlay of a premium cosmetic (sparkles, glow, flames, aurora)
- * and the shimmer on premium title chips. Driven by the shared clock in
- * src/lib/fxClock.ts, so any number on screen cost one animation.
+ * Animated overlay for cosmetics: lightweight glow/particles on FREE XP items,
+ * richer sparkles/flames/aurora on Premium items, and title-chip shimmer.
+ * Driven by the shared clock in src/lib/fxClock.ts, so any number on screen
+ * costs one looping animation.
  *
  * Off (drawn static) under reduced motion, while the screen is not focused,
  * while the app is backgrounded, or with `motion="none"`.
  */
 import React from 'react';
-import { Image, StyleSheet, View, type ImageSourcePropType, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useScreenActive } from '@/src/hooks/useScreenActive';
 import { fxClock, useFxClock } from '@/src/lib/fxClock';
 import type { FxMotion } from '@/src/lib/cosmeticArt';
+import { CosmeticGraphic, type CosmeticGraphicSource, type GraphicFit } from './CosmeticGraphic';
 
 export type MotionLevel = 'full' | 'none';
 
@@ -26,7 +28,11 @@ function useMotionOn(motion: MotionLevel) {
 
 const TAU = Math.PI * 2;
 
-/** `Fx` drawn over its base at `width` × `height`, moving with `fx`. */
+/**
+ * `Fx` drawn over its base at `width` × `height`, moving with `fx`. `Fx` is
+ * either a WebP overlay (Premium) or an SVG component (XP40 effects); both get
+ * the same motion.
+ */
 export function CosmeticFx({
   Fx,
   fx,
@@ -34,15 +40,15 @@ export function CosmeticFx({
   height,
   motion = 'full',
   style,
-  preserveAspectRatio,
+  fit,
 }: {
-  Fx: ImageSourcePropType;
+  Fx: CosmeticGraphicSource;
   fx?: FxMotion;
   width: number | string;
   height: number | string;
   motion?: MotionLevel;
   style?: StyleProp<ViewStyle>;
-  preserveAspectRatio?: string;
+  fit?: GraphicFit;
 }) {
   const on = useMotionOn(motion);
   const kind = fx ?? 'pulse';
@@ -73,7 +79,7 @@ export function CosmeticFx({
   });
   return (
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.center, style, anim]}>
-      <Image source={Fx} style={{ width: width as any, height: height as any }} resizeMode="contain" />
+      <CosmeticGraphic graphic={Fx} width={width} height={height} fit={fit} />
     </Animated.View>
   );
 }

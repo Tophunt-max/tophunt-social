@@ -121,7 +121,7 @@ export function ProfileFrame({
               box slightly; the parent does not clip. Drawn ABOVE the photo so
               ornaments that dip into the ring (the crown, the XP seal) stay
               visible. The premium fx layer animates inside FrameArt. */}
-          <FrameArt frame={frame} box={size / FRAME_AVATAR_RATIO} motion={paused ? 'none' : 'full'} />
+          <FrameArt frame={frame} box={size / (art.avatarRatio ?? FRAME_AVATAR_RATIO)} motion={paused ? 'none' : 'full'} />
         </Animated.View>
       ) : null}
     </View>

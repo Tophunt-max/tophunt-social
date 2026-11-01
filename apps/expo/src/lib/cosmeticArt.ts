@@ -1,45 +1,83 @@
 /**
- * One place that turns a cosmetic's `asset` into its bundled artwork and tells
- * apart the two families:
+ * One place that turns a cosmetic's `asset.key` into bundled artwork and keeps
+ * FREE XP (`xp.*`, `xp40.*`) separate from Premium Shop (`shop.*`).
  *
- *   - `xp`      earned with XP (level milestones, achievements):
- *               apps/expo/assets/xp, "Earned" style, never animated;
- *   - `premium` bought with DP coin in the Shop:
- *               apps/expo/assets/shop/digital, layered and animated.
- *
- * The tier is read from `asset.tier` (set by migrations 0076/0077) and falls
- * back to the key prefix. Anything else in the catalog is earned, so `xp` is
- * the default.
+ * XP40 uses SVG artwork (WebP backgrounds for themes) with lightweight shared
+ * SVG effects; legacy XP is static WebP; Premium is WebP with a WebP effect
+ * overlay. Unknown catalog art degrades to existing vector/color fallbacks in
+ * the renderer rather than crashing.
  */
+import type { FC } from 'react';
 import type { ImageSourcePropType } from 'react-native';
-import { SHOP_DIGITAL_ART } from '@/assets/shop/digital';
-import { XP_ART } from '@/assets/xp';
+import type { SvgProps } from 'react-native-svg';
+import { SHOP_DIGITAL_ART, type FxMotion } from '@/assets/shop/digital';
+import { XP_ART, type LegacyXpArtEntry, type Xp40Entry, type XpAnimationConfig } from '@/assets/xp';
 
 export type CosmeticTier = 'xp' | 'premium';
 export type ArtKind = 'frame' | 'theme' | 'badge' | 'title' | 'sticker' | 'collectible' | 'effect';
-/** Retained for the shared legacy animation component; WebP cosmetics are static. */
-export type FxMotion = 'spin' | 'pulse' | 'twinkle' | 'flicker' | 'drift';
+export type { FxMotion };
 
-export interface CosmeticArt {
+interface CosmeticArtBase {
   kind: ArtKind;
   tier: CosmeticTier;
-  source: ImageSourcePropType;
-  /** Animated WebP overlay, used by premium frames only. */
-  Fx?: ImageSourcePropType;
+  /** Optimized raster (XP40 themes; full-size badge export where needed). */
+  image?: ImageSourcePropType;
+  preview?: ImageSourcePropType;
+  /**
+   * Animated overlay: a WebP image for Premium items, an SVG component for
+   * XP40's lightweight effects. CosmeticFx draws and animates either.
+   */
+  Fx?: ImageSourcePropType | FC<SvgProps>;
   fx?: FxMotion;
+  animation?: XpAnimationConfig;
+  layout?: 'nameplate';
+  /** Avatar diameter / artwork box; XP40 frames have a wider decorative band. */
+  avatarRatio?: number;
 }
 
+/**
+ * Base artwork is an SVG component (`Art`, XP40) or a bundled image (`source`,
+ * legacy XP and Premium WebP). At least one is always present; renderers draw
+ * `Art` when it exists, else `source` (see CosmeticArtGraphic).
+ */
+export type CosmeticArt = CosmeticArtBase &
+  ({ Art: FC<SvgProps>; source?: ImageSourcePropType } | { Art?: undefined; source: ImageSourcePropType });
+
 type WithAsset = { asset?: Record<string, any> | null } | null | undefined;
+
+const xpMotion = (name?: string): FxMotion => {
+  if (name === 'frame-rotating-ornaments') return 'spin';
+  if (name === 'frame-particles' || name === 'unlock-confetti') return 'drift';
+  if (name === 'badge-shine' || name === 'unlock-burst') return 'twinkle';
+  return 'pulse';
+};
+
+/** XP40 frame artwork is 512 units wide with a 332-unit avatar opening. */
+const XP40_FRAME_AVATAR_RATIO = 332 / 512;
+
+function xpArt(key: string, entry: LegacyXpArtEntry | Xp40Entry): CosmeticArt {
+  if (!('collection' in entry)) return { kind: entry.kind, tier: 'xp', source: entry.source };
+  const base: CosmeticArtBase = {
+    kind: entry.kind,
+    tier: 'xp',
+    image: entry.image,
+    preview: entry.preview,
+    Fx: entry.animation.overlay,
+    fx: xpMotion(entry.animation.name),
+    animation: entry.animation,
+    layout: entry.type === 'theme' ? undefined : entry.layout,
+    avatarRatio: key.startsWith('xp40.frame_') ? XP40_FRAME_AVATAR_RATIO : undefined,
+  };
+  // Themes are raster-only; frames, badges and titles draw their SVG.
+  return entry.type === 'theme' ? { ...base, source: entry.image } : { ...base, Art: entry.Art };
+}
 
 export function cosmeticArt(item: WithAsset, kind?: ArtKind): CosmeticArt | null {
   const key = item?.asset?.key;
   if (typeof key !== 'string') return null;
-  const shop = SHOP_DIGITAL_ART[key];
-  const hit: CosmeticArt | null = shop
-    ? { ...shop, tier: 'premium' }
-    : XP_ART[key]
-      ? { ...XP_ART[key], tier: 'xp' }
-      : null;
+  const premium = SHOP_DIGITAL_ART[key];
+  const xp = XP_ART[key];
+  const hit: CosmeticArt | null = premium ? { ...premium, tier: 'premium' } : xp ? xpArt(key, xp) : null;
   if (!hit || (kind && hit.kind !== kind)) return null;
   return hit;
 }
@@ -51,20 +89,16 @@ export function cosmeticTier(item: WithAsset): CosmeticTier {
   return typeof key === 'string' && key.startsWith('shop.') ? 'premium' : 'xp';
 }
 
-/** Level an XP item unlocks at, when the catalog says so (asset.level). */
+/** Level an XP item unlocks at, including the level-0 starter set. */
 export function cosmeticLevel(item: WithAsset): number | null {
   const n = Number(item?.asset?.level);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
-/**
- * Avatar diameter inside a frame artwork of outer size `box`: every frame's
- * avatar circle is r=50 in a 120-unit box.
- */
+/** Legacy and Premium frames use a 120 canvas with a 100px avatar opening. */
 export const FRAME_AVATAR_RATIO = 100 / 120;
 
-/** Hallmark colours, shared by every label that says XP or Premium. */
 export const TIER_STYLE: Record<CosmeticTier, { label: string; fg: string; bg: string; border: string }> = {
-  xp: { label: 'XP', fg: '#475569', bg: '#E2E8F0', border: '#94A3B8' },
+  xp: { label: 'Free XP', fg: '#DDFBFF', bg: '#075985', border: '#38BDF8' },
   premium: { label: 'Premium', fg: '#FFFFFF', bg: '#C026D3', border: '#F0ABFC' },
 };

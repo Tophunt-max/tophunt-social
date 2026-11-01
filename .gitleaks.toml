@@ -1,10 +1,10 @@
 # gitleaks configuration.
 #
-# The default ruleset is kept in full — this only carves out two specific
-# false positives that the broad `generic-api-key` heuristic flags because the
-# identifier contains "KEY". Both are allow-listed by an EXACT regex rather than
-# by path or by rule, so a genuine credential added to the same file still fails
-# the scan.
+# The default ruleset is kept in full. This file only carves out known
+# non-credential constants that the broad `generic-api-key` heuristic flags
+# because they appear beside a JSON field named "key". The patterns match exact
+# public asset/config namespaces, never a file or rule, so a genuine credential
+# added beside them still fails the scan.
 #
 # A permanently-red secret scan is worse than no secret scan, because everyone
 # learns to ignore it. That is why these are pinned narrowly instead of disabling
@@ -30,4 +30,9 @@ regexes = [
   # (`'$.key', 'xp.sticker_streak_30'`): the file name of a bundled sticker in
   # apps/expo/assets/xp/stickers, not key material.
   '''xp\.sticker_streak_30''',
+
+  # Exact public namespace for the 40 FREE XP artwork keys, e.g.
+  # `xp40.frame_green_leaf`. It contains no credentials; the real art is bundled
+  # under apps/expo/assets/xp and the migration only stores these identifiers.
+  '''xp40\.(?:frame|theme|badge|title)_[a-z_]+''',
 ]
