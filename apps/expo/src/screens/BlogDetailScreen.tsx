@@ -16,6 +16,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { blogService, BlogPost } from '@/src/services/blog/blogService';
 import RenderHtml from '@/src/components/blog/RenderHtml';
 import BlogComments from '@/src/components/blog/BlogComments';
+import { AdSlot } from '@/src/ads/AdSlot';
 import { Header } from '@/src/components/home/Header';
 import { useWebSeo } from '@/src/lib/webSeo';
 import { shareOrigin } from '@/src/lib/share';
@@ -276,6 +277,9 @@ export default function BlogDetailScreen({ permalink = false }: Props) {
                   ))}
                 </View>
               )}
+
+              {/* After the article, before comments (Monetization → Ad platform → Blog article). */}
+              <AdSlot slot="blog_article" isDark={isDark} />
 
               {/* Reader comments. Keyed on the post ROW id, not the slug — and
                   mounted only once a post is resolved, so it never fetches a

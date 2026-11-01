@@ -391,7 +391,7 @@ export function DailyLoginCard({ rewards }: { rewards: any }) {
 
 // ─── Daily tasks (gamification.dailyTasks) ──────────────────────────────────
 
-type TaskType = "vote" | "share" | "contest" | "ad";
+type TaskType = "vote" | "share" | "contest" | "like" | "comment" | "follow" | "ads" | "ad";
 interface Task {
   id: string;
   title: string;
@@ -408,12 +408,21 @@ const TASK_TYPES: { v: TaskType; l: string }[] = [
   { v: "vote", l: "Vote karo" },
   { v: "share", l: "Battle share karo" },
   { v: "contest", l: "Contest join karo" },
-  { v: "ad", l: "Ad dekho" },
+  { v: "like", l: "Battles like karo" },
+  { v: "comment", l: "Battles par comment karo" },
+  { v: "follow", l: "Creators follow karo" },
+  { v: "ads", l: "N ads dekho (bonus)" },
+  { v: "ad", l: "Ad dekho (purana, claim nahi hota)" },
 ];
 const DEFAULT_TASKS: Task[] = [
   { id: "vote5", title: "Vote in 5 battles", reward: 15, target: 5, type: "vote", enabled: true, startsAt: null, endsAt: null },
   { id: "share", title: "Share a battle", reward: 10, target: 1, type: "share", enabled: true, startsAt: null, endsAt: null },
+  { id: "like5", title: "Like 5 battles", reward: 5, target: 5, type: "like", enabled: true, startsAt: null, endsAt: null },
+  { id: "comment3", title: "Comment on 3 battles", reward: 10, target: 3, type: "comment", enabled: true, startsAt: null, endsAt: null },
+  { id: "follow3", title: "Follow 3 creators", reward: 5, target: 3, type: "follow", enabled: true, startsAt: null, endsAt: null },
+  { id: "join1", title: "Join a contest", reward: 10, target: 1, type: "contest", enabled: true, startsAt: null, endsAt: null },
   { id: "watch_ad", title: "Watch a video ad", reward: 5, target: 1, type: "ad", enabled: true, startsAt: null, endsAt: null },
+  { id: "ads3", title: "Watch 3 video ads", reward: 10, target: 3, type: "ads", enabled: true, startsAt: null, endsAt: null },
 ];
 /** epoch ms <-> <input type="datetime-local"> (local time). */
 const toLocalInput = (ms: number | null) => {
@@ -529,7 +538,8 @@ export function DailyTasksCard({ rewards }: { rewards: any }) {
       </button>
       <p className={hint}>
         Chalu task poore karne par ek user ko roz {total.toLocaleString()} Diamond. Progress server ginta hai: vote = aaj ke vote, share = aaj share ki gayi
-        alag-alag battles (ek battle do baar nahi ginti), contest = aaj ke contest entry. "Ad" task watch-ad se claim hota hai.
+        alag-alag battles (ek battle do baar nahi ginti), contest = aaj ke contest entry, like / comment = aaj alag-alag battles par like / comment,
+        follow = aaj follow kiye log, "N ads" = aaj ke verified rewarded ads (har ad ka apna reward alag milta hai, ye uske upar bonus hai). Purana "Ad" task watch-ad se claim hota hai.
       </p>
     </Card>
   );

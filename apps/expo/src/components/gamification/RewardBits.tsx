@@ -10,7 +10,6 @@ import React from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/src/components/ui/Avatar';
-import { AppImage } from '@/src/components/ui/AppImage';
 import { Ionicons } from '@/src/lib/icons';
 import {
   achievementAsset,
@@ -25,8 +24,9 @@ import type { ExplorePalette } from '@/src/components/explore/theme';
 import { GamificationIcon } from './GamificationIcon';
 import { RarityPill } from './RarityPill';
 import { EmptyInventory, FrameRing } from './vectors';
-import { FRAME_AVATAR_RATIO, cosmeticArt } from '@/src/lib/cosmeticArt';
 import { CosmeticFx } from './CosmeticFx';
+import { CosmeticArtGraphic } from './CosmeticGraphic';
+import { FRAME_AVATAR_RATIO, cosmeticArt } from '@/src/lib/cosmeticArt';
 
 const BRAND = '#FF4D67';
 
@@ -94,33 +94,28 @@ export function CosmeticPreview({
   const tier = !art && item.type === 'frame' ? frameTier(item) : null;
   return (
     <View style={{ width: size, height: size, opacity: locked ? 0.55 : 1 }} accessible accessibilityLabel={`${item.name}${locked ? ', locked' : ''}`}>
-      {art?.kind === 'frame' && art.Art ? (
+      {art?.kind === 'frame' ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
           <Avatar uri={avatarUri ?? undefined} name={name || 'You'} size={size * (art.avatarRatio ?? FRAME_AVATAR_RATIO)} />
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            <art.Art width={size} height={size} />
+            <CosmeticArtGraphic art={art} width={size} height={size} />
             {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} /> : null}
           </View>
         </View>
-      ) : art?.kind === 'theme' && art.image ? (
+      ) : art?.kind === 'theme' ? (
         <View style={{ width: size, height: size, borderRadius: size * 0.22, overflow: 'hidden' }}>
-          <AppImage source={(art.preview ?? art.image) as any} style={StyleSheet.absoluteFill} contentFit="cover" />
-          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} preserveAspectRatio="xMidYMid slice" /> : null}
+          <CosmeticArtGraphic art={art.preview ? { source: art.preview } : art} width={size} height={size} fit="cover" />
+          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} fit="cover" /> : null}
         </View>
-      ) : art?.kind === 'theme' && art.Art ? (
-        <View style={{ width: size, height: size, borderRadius: size * 0.22, overflow: 'hidden' }}>
-          <art.Art width={size} height={size} preserveAspectRatio="xMidYMid slice" />
-          {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} preserveAspectRatio="xMidYMid slice" /> : null}
-        </View>
-      ) : art?.layout === 'nameplate' && art.Art ? (
+      ) : art?.layout === 'nameplate' ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-          <art.Art width={size} height={size * 0.3} preserveAspectRatio="none" />
+          <CosmeticArtGraphic art={art} width={size} height={size * 0.3} fit="stretch" />
           <Text style={[styles.titleChipText, { position: 'absolute', color: '#FFFFFF', fontSize: Math.max(7, size * 0.14), maxWidth: size * 0.58 }]} numberOfLines={1}>{String(item.asset?.text ?? item.name)}</Text>
           {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size * 0.3} /> : null}
         </View>
-      ) : art?.Art ? (
+      ) : art ? (
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-          <art.Art width={size * 0.8} height={size * 0.8} />
+          <CosmeticArtGraphic art={art} width={size * 0.8} height={size * 0.8} />
           {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size * 0.8} height={size * 0.8} /> : null}
         </View>
       ) : tier ? (

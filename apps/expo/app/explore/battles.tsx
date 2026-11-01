@@ -14,6 +14,9 @@ import { OpenBattleCard } from '@/src/components/explore/OpenBattleCard';
 import { SectionEmpty, SectionError } from '@/src/components/explore/ExploreBits';
 import { BattleTileSkeleton } from '@/src/components/explore/ExploreSkeletons';
 import { BRAND, PAD, useExplorePalette } from '@/src/components/explore/theme';
+import { AdSlot } from '@/src/ads/AdSlot';
+import { useAdPlacement } from '@/src/ads/placements';
+import { interleaveAdRows, isAdSlotRow } from '@/src/lib/adSlots';
 
 const KINDS: BattleKind[] = ['trending', 'ending', 'open', 'fresh'];
 
@@ -39,7 +42,9 @@ export default function ExploreBattlesScreen() {
       }
     return kind === 'open' ? joinableOpenBattles(out, user?.uid) : out;
   }, [q.data, kind, user?.uid]);
-  const rows = useMemo(() => chunk(items, 2), [items]);
+  // Ad platform: a full-width ad row between tile rows (Monetization → Ad platform).
+  const gridAd = useAdPlacement('explore_grid');
+  const rows = useMemo(() => interleaveAdRows(chunk(items, 2), 'explore_grid', gridAd?.rules ?? null), [items, gridAd]);
 
   const join = (item: any) => {
     if (!requireAuth('join')) return;
@@ -57,9 +62,13 @@ export default function ExploreBattlesScreen() {
       </View>
       <FlatList
         data={rows}
-        keyExtractor={(_, i) => `r${i}`}
+        keyExtractor={(row, i) => (isAdSlotRow(row) ? row.id : `r${i}`)}
         contentContainerStyle={{ paddingTop: 8, paddingBottom: 40 }}
-        renderItem={({ item: row }) => (
+        renderItem={({ item: row }) => isAdSlotRow(row) ? (
+          <View style={{ paddingHorizontal: PAD }}>
+            <AdSlot slot="explore_grid" index={row.index} isDark={p.isDark} />
+          </View>
+        ) : (
           <View style={styles.row}>
             {row.map((m) =>
               kind === 'open' ? (

@@ -24,7 +24,7 @@ Full theme images use WebP quality 82. Thumbnails use quality 80–84 with alpha
 - Frames, badges, and titles expose an SVG `Art` component and a static `preview` image.
 - Badges also expose the full `512 × 512` static `image`.
 - Themes expose the optimized full-size `image` and card `preview`; their editable `source.svg` remains beside those files but is not bundled as the main runtime background.
-- `XP40_ART` contains exactly 40 XP40 entries. `XP_ART` combines those entries with the 18 legacy keys used by migration 0077.
+- `XP40_ART` contains exactly 40 XP40 entries. `XP_ART` combines those entries with the 18 legacy keys used by migration 0077 (`LEGACY_XP_ART`, static WebP images).
 - `XP40_FRAMES`, `XP40_THEMES`, `XP40_BADGES`, `XP40_TITLES`, and `XP40_BY_TYPE` provide category access without computed asset paths.
 
 Every XP40 entry includes `id`, `kind`, `type`, `name`, `description`, `unlockLevel`, `source`, `collection`, `rarity`, a static artwork reference, `preview`, and `animation`.

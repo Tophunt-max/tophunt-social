@@ -131,3 +131,34 @@ export function canShowInterstitial(
 export function recordInterstitial(state: FrequencyState, now: number): FrequencyState {
   return { shown: [...state.shown, now], sessionAds: state.sessionAds + 1 };
 }
+
+// ------------------------------------------------------------- ad platform rows
+
+/** A list row that renders an ad platform slot (src/ads/AdSlot.tsx). */
+export interface AdSlotRow {
+  kind: 'adslot';
+  /** Stable per position, never an item id. */
+  id: string;
+  /** 0-based count of ad rows above this one (rotates house ads, keys the slot). */
+  index: number;
+}
+
+export const isAdSlotRow = (x: unknown): x is AdSlotRow => !!x && typeof x === 'object' && (x as any).kind === 'adslot';
+
+/**
+ * Insert ad rows into a list by the slot's rules (first position, interval,
+ * max per session). `null` rule = no ad rows.
+ */
+export function interleaveAdRows<T>(items: readonly T[], slot: string, rule: SlotRule | null): (T | AdSlotRow)[] {
+  if (!rule) return items.slice();
+  const positions = new Set(adPositions(items.length, rule));
+  if (!positions.size) return items.slice();
+  const out: (T | AdSlotRow)[] = [];
+  let organic = 0;
+  let n = 0;
+  for (let row = 0; organic < items.length; row++) {
+    if (positions.has(row)) out.push({ kind: 'adslot', id: `ad:${slot}:${n}`, index: n++ });
+    else out.push(items[organic++]);
+  }
+  return out;
+}

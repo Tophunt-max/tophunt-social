@@ -48,7 +48,9 @@ import { emitToast } from '@/src/lib/toastBridge';
 import { useAppActive, useReduceMotion } from '@/src/hooks/usePlaybackEnvironment';
 import { useIsFocused } from '@react-navigation/native';
 import { SponsoredCard } from '@/src/components/home/SponsoredCard';
-import { interleaveSponsored, isSponsoredRow } from '@/src/lib/adSlots';
+import { interleaveAdRows, interleaveSponsored, isAdSlotRow, isSponsoredRow } from '@/src/lib/adSlots';
+import { AdSlot } from '@/src/ads/AdSlot';
+import { useAdPlacement } from '@/src/ads/placements';
 import { useMonetizationConfig, useSponsoredCampaigns } from '@/src/services/monetization';
 
 type FeedTab = 'foryou' | 'following';
@@ -110,9 +112,17 @@ export default function HomeScreen() {
   const monetization = useMonetizationConfig();
   const sponsoredOn = monetization.sponsored.enabled && feedTab === 'foryou';
   const { data: sponsoredCampaigns } = useSponsoredCampaigns(sponsoredOn);
+  // Ad platform rows (admin: Monetization → Ad platform → Home feed), added on
+  // top of the direct sponsored rows. Display only, like them.
+  const feedAd = useAdPlacement('home_feed');
   const displayItems = useMemo(
-    () => interleaveSponsored(matches, sponsoredCampaigns ?? [], sponsoredOn ? monetization.sponsored : null),
-    [matches, sponsoredCampaigns, sponsoredOn, monetization.sponsored],
+    () =>
+      interleaveAdRows(
+        interleaveSponsored(matches, sponsoredCampaigns ?? [], sponsoredOn ? monetization.sponsored : null),
+        'home_feed',
+        feedAd && feedTab === 'foryou' ? feedAd.rules : null,
+      ),
+    [matches, sponsoredCampaigns, sponsoredOn, monetization.sponsored, feedAd, feedTab],
   );
   const displayRef = useRef<any[]>([]);
   displayRef.current = displayItems;
@@ -157,8 +167,8 @@ export default function HomeScreen() {
     setVisibleIds((prev) => (sameIds(prev, visible) ? prev : visible));
     let fresh = 0;
     for (const id of visible) {
-      // Sponsored rows count their own impressions (SponsoredCard); not battles.
-      if (id.startsWith('sp:')) continue;
+      // Sponsored and ad rows count their own impressions; they are not battles.
+      if (id.startsWith('sp:') || id.startsWith('ad:')) continue;
       if (!impressedRef.current.has(id)) {
         impressedRef.current.add(id);
         fresh++;
@@ -472,7 +482,11 @@ export default function HomeScreen() {
   const screenFocused = useIsFocused();
   const appActive = useAppActive();
   const reduceMotion = useReduceMotion();
-  const renderItem = useCallback(({ item }: { item: any }) => isSponsoredRow(item) ? (
+  const renderItem = useCallback(({ item }: { item: any }) => isAdSlotRow(item) ? (
+    <View style={{ paddingHorizontal: 16 }}>
+      <AdSlot slot="home_feed" index={item.index} isDark={isDark} />
+    </View>
+  ) : isSponsoredRow(item) ? (
     <SponsoredCard row={item} isDark={isDark} visible={visibleIds.has(item.id) && screenFocused} countable={!isGuest} />
   ) : (
     <PostCard
@@ -609,7 +623,7 @@ export default function HomeScreen() {
         // PostCard seeds votes / counts / isLiked from `item` into useState once, so
         // reusing a card across the swap would keep the snapshot's stale numbers.
         // One remount per revalidation; network-sourced cards keep the plain id.
-        keyExtractor={(item: any, index) => (isLoading ? index.toString() : isSponsoredRow(item) ? item.id : source === 'cache' ? `cached:${item.id}` : item.id)}
+        keyExtractor={(item: any, index) => (isLoading ? index.toString() : isSponsoredRow(item) || isAdSlotRow(item) ? item.id : source === 'cache' ? `cached:${item.id}` : item.id)}
         refreshControl={
             <RefreshControl
               refreshing={isRefreshing}

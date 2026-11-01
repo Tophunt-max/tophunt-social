@@ -14,6 +14,8 @@
  * API for admin user operations (lib/firebaseAdmin.ts).
  */
 import { sweepSignupBonuses } from "./lib/verificationReward";
+import { adOptimizerJob } from "./lib/adOptimizer";
+import { adRevenueImportJob } from "./lib/adRevenueImport";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
@@ -604,6 +606,8 @@ export default {
             // to open the Money Health page (lib/moneyHealth.ts).
             await runCronJob(env, "moneyHealthCheck", () => moneyHealthAlert(env));
             await runCronJob(env, "coinAlerts", () => runCoinAlerts(env));
+            // Ad revenue from the AdMob / AdSense APIs + reconciliation (lib/adRevenueImport.ts).
+            await runCronJob(env, "adRevenueImport", () => adRevenueImportJob(env));
           })(),
         );
         break;
@@ -637,6 +641,8 @@ export default {
             await runCronJob(env, "gamificationHourly", () => gamificationHourly(env));
             // Signup bonuses that were waiting for the account to age (lib/verificationReward.ts).
             await runCronJob(env, "signupBonusSweep", () => sweepSignupBonuses(env));
+            // Ad waterfall order, network health, adaptive timeouts, alerts (lib/adOptimizer.ts).
+            await runCronJob(env, "adOptimizer", () => adOptimizerJob(env));
           })(),
         );
         break;

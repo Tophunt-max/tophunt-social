@@ -3,32 +3,13 @@
  *
  * XP40 is the colorful FREE/NORMAL collection with lightweight shared motion.
  * Premium Shop artwork lives in assets/shop/digital and is intentionally not
- * referenced here. Metro needs
- * literal imports/requires, so do not replace these references with paths built
- * at runtime. Legacy migration-0077 keys remain registered below XP40.
+ * referenced here. Metro needs literal imports/requires, so do not replace
+ * these references with paths built at runtime. Legacy migration-0077 keys
+ * (`xp.*`) remain registered below XP40 as static WebP images.
  */
 import type { FC } from 'react';
 import type { ImageSourcePropType } from 'react-native';
 import type { SvgProps } from 'react-native-svg';
-
-import FrameBronze from './frames/bronze.svg';
-import FrameSilver from './frames/silver.svg';
-import FrameGoldPulse from './frames/gold_pulse.svg';
-import FrameChampion from './frames/champion.svg';
-import FrameDiamondAura from './frames/diamond_aura.svg';
-import FrameLegendary from './frames/legendary.svg';
-import ThemeMidnight from './themes/midnight.svg';
-import ThemeRoyal from './themes/royal.svg';
-import BadgeRareCreator from './badges/rare_creator.svg';
-import TitleCreator from './titles/creator.svg';
-import TitleChampion from './titles/champion.svg';
-import TitleLegend from './titles/legend.svg';
-import StickerFirstWin from './stickers/first_win.svg';
-import StickerStreak30 from './stickers/streak_30.svg';
-import CollectibleSeasonStar from './collectibles/season_star.svg';
-import CollectibleEliteSet from './collectibles/elite_set.svg';
-import CollectibleSeasonTop from './collectibles/season_top.svg';
-import EffectLegendBurst from './effects/legend_burst.svg';
 
 import FrameDefaultArt from './frames/default/source.svg';
 import FrameGreenLeafArt from './frames/green-leaf/source.svg';
@@ -118,7 +99,7 @@ export interface Xp40ThemeEntry extends Xp40BaseEntry {
 }
 
 export type Xp40Entry = Xp40SvgEntry | Xp40ThemeEntry;
-export interface LegacyXpArtEntry { kind: XpArtKind; Art: FC<SvgProps> }
+export interface LegacyXpArtEntry { kind: XpArtKind; source: ImageSourcePropType }
 
 const FRAME_ANIMATIONS = {
   glow: { name: 'frame-gentle-glow', overlay: FrameGentleGlow, durationMs: 3200, loop: true },
@@ -478,25 +459,32 @@ export const XP40_BY_TYPE = {
   title: XP40_TITLES,
 } as const;
 
+/** Static WebP cosmetics earned through XP milestones and achievements (migration 0077 keys). */
 export const LEGACY_XP_ART: Record<string, LegacyXpArtEntry> = {
-  'xp.frame_bronze': { kind: 'frame', Art: FrameBronze },
-  'xp.frame_silver': { kind: 'frame', Art: FrameSilver },
-  'xp.frame_gold_pulse': { kind: 'frame', Art: FrameGoldPulse },
-  'xp.frame_champion': { kind: 'frame', Art: FrameChampion },
-  'xp.frame_diamond_aura': { kind: 'frame', Art: FrameDiamondAura },
-  'xp.frame_legendary': { kind: 'frame', Art: FrameLegendary },
-  'xp.theme_midnight': { kind: 'theme', Art: ThemeMidnight },
-  'xp.theme_royal': { kind: 'theme', Art: ThemeRoyal },
-  'xp.badge_rare_creator': { kind: 'badge', Art: BadgeRareCreator },
-  'xp.title_creator': { kind: 'title', Art: TitleCreator },
-  'xp.title_champion': { kind: 'title', Art: TitleChampion },
-  'xp.title_legend': { kind: 'title', Art: TitleLegend },
-  'xp.sticker_first_win': { kind: 'sticker', Art: StickerFirstWin },
-  'xp.sticker_streak_30': { kind: 'sticker', Art: StickerStreak30 },
-  'xp.collectible_season_star': { kind: 'collectible', Art: CollectibleSeasonStar },
-  'xp.collectible_elite_set': { kind: 'collectible', Art: CollectibleEliteSet },
-  'xp.collectible_season_top': { kind: 'collectible', Art: CollectibleSeasonTop },
-  'xp.effect_legend_burst': { kind: 'effect', Art: EffectLegendBurst },
+  'xp.frame_bronze': { kind: 'frame', source: require('./frames/bronze.webp') },
+  'xp.frame_silver': { kind: 'frame', source: require('./frames/silver.webp') },
+  'xp.frame_gold_pulse': { kind: 'frame', source: require('./frames/gold_pulse.webp') },
+  'xp.frame_champion': { kind: 'frame', source: require('./frames/champion.webp') },
+  'xp.frame_diamond_aura': { kind: 'frame', source: require('./frames/diamond_aura.webp') },
+  'xp.frame_legendary': { kind: 'frame', source: require('./frames/legendary.webp') },
+
+  'xp.theme_midnight': { kind: 'theme', source: require('./themes/midnight.webp') },
+  'xp.theme_royal': { kind: 'theme', source: require('./themes/royal.webp') },
+
+  'xp.badge_rare_creator': { kind: 'badge', source: require('./badges/rare_creator.webp') },
+
+  'xp.title_creator': { kind: 'title', source: require('./titles/creator.webp') },
+  'xp.title_champion': { kind: 'title', source: require('./titles/champion.webp') },
+  'xp.title_legend': { kind: 'title', source: require('./titles/legend.webp') },
+
+  'xp.sticker_first_win': { kind: 'sticker', source: require('./stickers/first_win.webp') },
+  'xp.sticker_streak_30': { kind: 'sticker', source: require('./stickers/streak_30.webp') },
+
+  'xp.collectible_season_star': { kind: 'collectible', source: require('./collectibles/season_star.webp') },
+  'xp.collectible_elite_set': { kind: 'collectible', source: require('./collectibles/elite_set.webp') },
+  'xp.collectible_season_top': { kind: 'collectible', source: require('./collectibles/season_top.webp') },
+
+  'xp.effect_legend_burst': { kind: 'effect', source: require('./effects/legend_burst.webp') },
 };
 
 /** All XP artwork, including migration-0077 legacy keys and the XP40 collection. */

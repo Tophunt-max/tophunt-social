@@ -16,13 +16,13 @@ import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-na
 import Animated, { FadeInRight, ZoomIn, useReducedMotion } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '@/src/components/ui/Avatar';
-import { AppImage } from '@/src/components/ui/AppImage';
 import { Ionicons } from '@/src/lib/icons';
 import { frameTier } from '@/src/lib/gamificationAssets';
 import { assetColors, rarityColor } from '@/src/lib/progression';
 import { FRAME_AVATAR_RATIO, TIER_STYLE, cosmeticArt, cosmeticLevel, cosmeticTier } from '@/src/lib/cosmeticArt';
 import type { CardCosmetics, PublicCosmetics } from '@/src/services/gamification';
 import { CosmeticFx, PremiumGem, ShimmerSweep, type MotionLevel } from './CosmeticFx';
+import { CosmeticArtGraphic } from './CosmeticGraphic';
 import { FrameRing } from './vectors';
 
 type FrameItem = PublicCosmetics['frame'];
@@ -42,11 +42,10 @@ export function cosmeticsOf(row: unknown): CardCosmetics | null {
  */
 export function FrameArt({ frame, box, motion = 'full' }: { frame: { asset?: Record<string, any> | null } | null | undefined; box: number; motion?: MotionLevel }) {
   const art = cosmeticArt(frame, 'frame');
-  if (!art?.Art) return null;
-  const Art = art.Art;
+  if (!art) return null;
   return (
     <View pointerEvents="none" style={[{ width: box, height: box }, styles.center]}>
-      <Art width={box} height={box} />
+      <CosmeticArtGraphic art={art} width={box} height={box} />
       {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={box} height={box} motion={motion} /> : null}
     </View>
   );
@@ -109,11 +108,10 @@ export function CosmeticBadge({ badge, size = 16, motion = 'full' }: { badge?: B
   const reduceMotion = useReducedMotion();
   if (!badge) return null;
   const art = cosmeticArt(badge, 'badge');
-  if (art?.Art) {
-    const Art = art.Art;
+  if (art) {
     return (
       <Animated.View entering={reduceMotion ? undefined : ZoomIn.springify().damping(18)} accessible accessibilityLabel={`${badge.name}, ${TIER_STYLE[art.tier].label}`} style={{ marginLeft: 3, width: size, height: size }}>
-        <Art width={size} height={size} />
+        <CosmeticArtGraphic art={art} width={size} height={size} />
         {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={size} height={size} motion={motion} /> : null}
       </Animated.View>
     );
@@ -143,9 +141,15 @@ export function CosmeticTitleChip({ title, compact = false, motion = 'full' }: {
   const tier = cosmeticTier(title);
   const [c0, c1] = assetColors(title.asset, [rarityColor(title.rarity), rarityColor(title.rarity)]);
   const h = compact ? 18 : 24;
-  const Art = art?.Art;
-  const nameplate = art?.layout === 'nameplate' && !!Art;
-  const icon = Art && !nameplate ? <Art width={h * 0.72} height={h * 0.72} /> : !nameplate ? <Ionicons name="ribbon" size={h * 0.6} color={tier === 'premium' ? '#FFF' : c1} /> : null;
+  // XP40 nameplates draw the art as the chip background (and animate the whole
+  // chip below); every other artwork is a small icon, with its Premium FX.
+  const nameplate = art?.layout === 'nameplate' && !!art.Art;
+  const icon = nameplate ? null : art ? (
+    <View style={{ width: h * 0.72, height: h * 0.72 }}>
+      <CosmeticArtGraphic art={art} width={h * 0.72} height={h * 0.72} />
+      {art.Fx && art.tier === 'premium' ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={h * 0.72} height={h * 0.72} motion={motion} /> : null}
+    </View>
+  ) : <Ionicons name="ribbon" size={h * 0.6} color={tier === 'premium' ? '#FFF' : c1} />;
   if (tier === 'premium') {
     return (
       <Animated.View
@@ -185,12 +189,12 @@ export function CosmeticTitleChip({ title, compact = false, motion = 'full' }: {
         },
       ]}
     >
-      {nameplate && Art ? <View pointerEvents="none" style={StyleSheet.absoluteFill}><Art width="100%" height="100%" preserveAspectRatio="none" /></View> : null}
+      {nameplate && art ? <View pointerEvents="none" style={StyleSheet.absoluteFill}><CosmeticArtGraphic art={art} width="100%" height="100%" fit="stretch" /></View> : null}
       {icon}
       <Text style={[styles.titleText, { color: nameplate ? '#FFFFFF' : c1, fontSize: compact ? 10.5 : 12.5, textShadowColor: nameplate ? 'rgba(0,0,0,0.55)' : 'transparent', textShadowRadius: nameplate ? 2 : 0 }]} numberOfLines={1}>
         {title.text}
       </Text>
-      {art?.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width="100%" height="100%" motion={motion} /> : null}
+      {art?.Fx && art.tier === 'xp' ? <CosmeticFx Fx={art.Fx} fx={art.fx} width="100%" height="100%" motion={motion} /> : null}
     </Animated.View>
   );
 }
@@ -227,20 +231,11 @@ export function NameCosmetics({
 export function ThemeBackdrop({ theme, style, motion = 'full' }: { theme?: ThemeItem | null; style?: StyleProp<ViewStyle>; motion?: MotionLevel }) {
   if (!theme) return null;
   const art = cosmeticArt(theme, 'theme');
-  if (art?.image) {
+  if (art) {
     return (
       <View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }, style]}>
-        <AppImage source={art.image as any} style={StyleSheet.absoluteFill} contentFit="cover" />
-        {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width="100%" height="100%" preserveAspectRatio="xMidYMid slice" motion={motion} /> : null}
-      </View>
-    );
-  }
-  if (art?.Art) {
-    const Art = art.Art;
-    return (
-      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow: 'hidden' }, style]}>
-        <Art width="100%" height="100%" preserveAspectRatio="xMidYMid slice" />
-        {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width="100%" height="100%" preserveAspectRatio="xMidYMid slice" motion={motion} /> : null}
+        <CosmeticArtGraphic art={art} width="100%" height="100%" fit="cover" />
+        {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width="100%" height="100%" fit="cover" motion={motion} /> : null}
       </View>
     );
   }

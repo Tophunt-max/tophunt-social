@@ -78,6 +78,7 @@ import { useAuthGate } from '@/src/hooks/useAuthGate';
 import { contestService } from '@/src/services/contests/contestService';
 import { battleCaption, battleUrl, prepareShareFile, shareBattleLink, shareImageFile, shareOrigin } from '@/src/lib/share';
 import { storyCaption } from '@/src/lib/shareCaptions';
+import { useStoryAds } from '@/src/ads/StoryAd';
 import { createShareCounter, resolveBattleShareAsset, shareOutcomeMessage } from '@/src/lib/vsShareAsset';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
@@ -120,6 +121,9 @@ export default function StoryView() {
   const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
   const [progress] = useState(new Animated.Value(0));
   const [isPaused, setIsPaused] = useState(false);
+  // Ads between people's stories (src/ads/StoryAd.tsx, Ad platform → Stories).
+  const storyAds = useStoryAds();
+  const beforeNextPerson = storyAds.beforeNextPerson;
   const [isLoading, setIsLoading] = useState(true);
   /**
    * The player reported it cannot play this source.
@@ -155,7 +159,7 @@ export default function StoryView() {
   // this one. Neither used to pause the bar or the music.
   const appActive = useAppActive();
   const screenFocused = useIsFocused();
-  const uiHeld = isPaused || showHighlightModal || isKeyboardVisible || showViewers;
+  const uiHeld = isPaused || showHighlightModal || isKeyboardVisible || showViewers || storyAds.showingAd;
   const environmentHeld = !appActive || !screenFocused;
   const anyHeld = uiHeld || environmentHeld;
   const anyHeldRef = useRef(anyHeld);
@@ -559,12 +563,14 @@ export default function StoryView() {
       setCurrentStoryIndex(prev => prev + 1);
     } else if (currentUserIndex < users.length - 1) {
       const nextUser = users[currentUserIndex + 1];
-      router.setParams({ userId: nextUser.userId });
-      setCurrentStoryIndex(0);
+      beforeNextPerson(() => {
+        router.setParams({ userId: nextUser.userId });
+        setCurrentStoryIndex(0);
+      });
     } else {
       router.back();
     }
-  }, [currentStoryIndex, currentUserStories, currentUserIndex, users, router]);
+  }, [currentStoryIndex, currentUserStories, currentUserIndex, users, router, beforeNextPerson]);
 
   const prevStory = useCallback(() => {
     if (!currentUserStories) return;
@@ -1326,6 +1332,7 @@ export default function StoryView() {
             )} ListEmptyComponent={<Text style={styles.emptyText}>No views yet</Text>} contentContainerStyle={{ paddingBottom: 50 }} />
         </Animated.View>
         </View>
+      {storyAds.overlay}
     </KeyboardAvoidingView>
   );
 }

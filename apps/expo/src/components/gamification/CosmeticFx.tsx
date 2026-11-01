@@ -10,12 +10,11 @@
 import React from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion } from 'react-native-reanimated';
-import type { FC } from 'react';
-import type { SvgProps } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useScreenActive } from '@/src/hooks/useScreenActive';
 import { fxClock, useFxClock } from '@/src/lib/fxClock';
 import type { FxMotion } from '@/src/lib/cosmeticArt';
+import { CosmeticGraphic, type CosmeticGraphicSource, type GraphicFit } from './CosmeticGraphic';
 
 export type MotionLevel = 'full' | 'none';
 
@@ -29,7 +28,11 @@ function useMotionOn(motion: MotionLevel) {
 
 const TAU = Math.PI * 2;
 
-/** `Fx` drawn over its base at `width` × `height`, moving with `fx`. */
+/**
+ * `Fx` drawn over its base at `width` × `height`, moving with `fx`. `Fx` is
+ * either a WebP overlay (Premium) or an SVG component (XP40 effects); both get
+ * the same motion.
+ */
 export function CosmeticFx({
   Fx,
   fx,
@@ -37,15 +40,15 @@ export function CosmeticFx({
   height,
   motion = 'full',
   style,
-  preserveAspectRatio,
+  fit,
 }: {
-  Fx: FC<SvgProps>;
+  Fx: CosmeticGraphicSource;
   fx?: FxMotion;
   width: number | string;
   height: number | string;
   motion?: MotionLevel;
   style?: StyleProp<ViewStyle>;
-  preserveAspectRatio?: string;
+  fit?: GraphicFit;
 }) {
   const on = useMotionOn(motion);
   const kind = fx ?? 'pulse';
@@ -76,7 +79,7 @@ export function CosmeticFx({
   });
   return (
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.center, style, anim]}>
-      <Fx width={width as any} height={height as any} {...(preserveAspectRatio ? { preserveAspectRatio } : {})} />
+      <CosmeticGraphic graphic={Fx} width={width} height={height} fit={fit} />
     </Animated.View>
   );
 }

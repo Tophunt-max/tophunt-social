@@ -2,35 +2,46 @@
  * One place that turns a cosmetic's `asset.key` into bundled artwork and keeps
  * FREE XP (`xp.*`, `xp40.*`) separate from Premium Shop (`shop.*`).
  *
- * XP40 can use optimized WebP backgrounds and lightweight shared SVG effects;
- * Premium uses layered SVG artwork. Unknown catalog art degrades to existing
- * vector/color fallbacks in the renderer rather than crashing.
+ * XP40 uses SVG artwork (WebP backgrounds for themes) with lightweight shared
+ * SVG effects; legacy XP is static WebP; Premium is WebP with a WebP effect
+ * overlay. Unknown catalog art degrades to existing vector/color fallbacks in
+ * the renderer rather than crashing.
  */
 import type { FC } from 'react';
 import type { ImageSourcePropType } from 'react-native';
 import type { SvgProps } from 'react-native-svg';
 import { SHOP_DIGITAL_ART, type FxMotion } from '@/assets/shop/digital';
-import { XP_ART, type XpAnimationConfig } from '@/assets/xp';
+import { XP_ART, type LegacyXpArtEntry, type Xp40Entry, type XpAnimationConfig } from '@/assets/xp';
 
 export type CosmeticTier = 'xp' | 'premium';
 export type ArtKind = 'frame' | 'theme' | 'badge' | 'title' | 'sticker' | 'collectible' | 'effect';
 export type { FxMotion };
 
-export interface CosmeticArt {
+interface CosmeticArtBase {
   kind: ArtKind;
   tier: CosmeticTier;
-  Art?: FC<SvgProps>;
   /** Optimized raster (XP40 themes; full-size badge export where needed). */
   image?: ImageSourcePropType;
   preview?: ImageSourcePropType;
-  /** Animated overlay, either Premium FX or a lightweight XP40 effect. */
-  Fx?: FC<SvgProps>;
+  /**
+   * Animated overlay: a WebP image for Premium items, an SVG component for
+   * XP40's lightweight effects. CosmeticFx draws and animates either.
+   */
+  Fx?: ImageSourcePropType | FC<SvgProps>;
   fx?: FxMotion;
   animation?: XpAnimationConfig;
   layout?: 'nameplate';
   /** Avatar diameter / artwork box; XP40 frames have a wider decorative band. */
   avatarRatio?: number;
 }
+
+/**
+ * Base artwork is an SVG component (`Art`, XP40) or a bundled image (`source`,
+ * legacy XP and Premium WebP). At least one is always present; renderers draw
+ * `Art` when it exists, else `source` (see CosmeticArtGraphic).
+ */
+export type CosmeticArt = CosmeticArtBase &
+  ({ Art: FC<SvgProps>; source?: ImageSourcePropType } | { Art?: undefined; source: ImageSourcePropType });
 
 type WithAsset = { asset?: Record<string, any> | null } | null | undefined;
 
@@ -41,22 +52,32 @@ const xpMotion = (name?: string): FxMotion => {
   return 'pulse';
 };
 
+/** XP40 frame artwork is 512 units wide with a 332-unit avatar opening. */
+const XP40_FRAME_AVATAR_RATIO = 332 / 512;
+
+function xpArt(key: string, entry: LegacyXpArtEntry | Xp40Entry): CosmeticArt {
+  if (!('collection' in entry)) return { kind: entry.kind, tier: 'xp', source: entry.source };
+  const base: CosmeticArtBase = {
+    kind: entry.kind,
+    tier: 'xp',
+    image: entry.image,
+    preview: entry.preview,
+    Fx: entry.animation.overlay,
+    fx: xpMotion(entry.animation.name),
+    animation: entry.animation,
+    layout: entry.type === 'theme' ? undefined : entry.layout,
+    avatarRatio: key.startsWith('xp40.frame_') ? XP40_FRAME_AVATAR_RATIO : undefined,
+  };
+  // Themes are raster-only; frames, badges and titles draw their SVG.
+  return entry.type === 'theme' ? { ...base, source: entry.image } : { ...base, Art: entry.Art };
+}
+
 export function cosmeticArt(item: WithAsset, kind?: ArtKind): CosmeticArt | null {
   const key = item?.asset?.key;
   if (typeof key !== 'string') return null;
   const premium = SHOP_DIGITAL_ART[key];
-  const xp = XP_ART[key] as any;
-  const hit: CosmeticArt | null = premium
-    ? { ...premium, tier: 'premium' }
-    : xp
-      ? {
-          ...xp,
-          tier: 'xp',
-          Fx: xp.animation?.overlay,
-          fx: xpMotion(xp.animation?.name),
-          avatarRatio: key.startsWith('xp40.frame_') ? 332 / 512 : undefined,
-        }
-      : null;
+  const xp = XP_ART[key];
+  const hit: CosmeticArt | null = premium ? { ...premium, tier: 'premium' } : xp ? xpArt(key, xp) : null;
   if (!hit || (kind && hit.kind !== kind)) return null;
   return hit;
 }

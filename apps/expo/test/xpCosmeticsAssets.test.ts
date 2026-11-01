@@ -60,7 +60,7 @@ describe('XP40 free artwork contract', () => {
     for (const type of ['frame', 'theme', 'badge', 'title']) expect(keys.filter((x) => x.type === type), type).toHaveLength(10);
     expect(new Set(keys.map((x) => x.key)).size).toBe(40);
     expect(source).not.toMatch(/require\([^'"].*\)/); // no computed require paths
-    const migration = fs.readFileSync(path.join(ROOT, '..', 'worker', 'migrations', '0078_free_xp_cosmetics.sql'), 'utf8');
+    const migration = fs.readFileSync(path.join(ROOT, '..', 'worker', 'migrations', '0079_free_xp_cosmetics.sql'), 'utf8');
     const migrationKeys = [...migration.matchAll(/"key":"(xp40\.(?:frame|theme|badge|title)_[a-z_]+)"/g)].map((m) => `'${m[1]}':`).sort();
     expect(migrationKeys).toEqual(keys.map((x) => x.key).sort());
   });
@@ -107,7 +107,7 @@ describe('XP40 free artwork contract', () => {
 
   it('keeps free assets out of the Premium registry and DP coin store migration', () => {
     const premium = fs.readFileSync(path.join(ROOT, 'assets', 'shop', 'digital', 'index.ts'), 'utf8');
-    const migration = fs.readFileSync(path.join(ROOT, '..', 'worker', 'migrations', '0078_free_xp_cosmetics.sql'), 'utf8');
+    const migration = fs.readFileSync(path.join(ROOT, '..', 'worker', 'migrations', '0079_free_xp_cosmetics.sql'), 'utf8');
     expect(premium).not.toContain('xp40.');
     expect(migration).not.toMatch(/INSERT[^;]+INTO store_listings/is);
   });

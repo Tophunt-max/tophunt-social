@@ -269,6 +269,65 @@ describe('daily tasks', () => {
     expect((await call(env, 'u1', 'getDailyTasks')).body.tasks[0]).toMatchObject({ progress: 1, claimable: true });
     expect((await call(env, 'u1', 'claimDailyTask', { taskId: 'join1' })).body).toMatchObject({ success: true, reward: 8 });
   });
+
+  it('like / comment tasks count DIFFERENT battles, follow counts people', async () => {
+    const { env } = env0();
+    await seedGamification(env, {
+      dailyTasks: [
+        { id: 'like2', title: 'Like 2', reward: 3, target: 2, type: 'like' },
+        { id: 'com2', title: 'Comment 2', reward: 4, target: 2, type: 'comment' },
+        { id: 'fol2', title: 'Follow 2', reward: 5, target: 2, type: 'follow' },
+      ],
+    });
+    await seedUser(env, 'u1');
+    const ts = Date.now();
+    const run = (sql: string, ...args: any[]) => env.DB.prepare(sql).bind(...args).run();
+    await run(`INSERT INTO match_likes (match_id, user_id, created_at) VALUES ('m1', 'u1', ?)`, ts);
+    // Three comments on ONE battle still count once.
+    for (const id of ['c1', 'c2', 'c3']) await run(`INSERT INTO match_comments (id, match_id, user_id, text, created_at) VALUES (?, 'm1', 'u1', 'hi', ?)`, id, ts);
+    await run(`INSERT INTO follows (follower_id, following_id, created_at) VALUES ('u1', 'x1', ?)`, ts);
+    // Yesterday's activity does not count today.
+    await run(`INSERT INTO follows (follower_id, following_id, created_at) VALUES ('u1', 'x0', ?)`, ts - 2 * DAY);
+
+    let byId = Object.fromEntries((await call(env, 'u1', 'getDailyTasks')).body.tasks.map((t: any) => [t.id, t]));
+    expect(byId.like2).toMatchObject({ progress: 1, claimable: false });
+    expect(byId.com2).toMatchObject({ progress: 1, claimable: false });
+    expect(byId.fol2).toMatchObject({ progress: 1, claimable: false });
+    expect((await call(env, 'u1', 'claimDailyTask', { taskId: 'com2' })).status).toBeGreaterThanOrEqual(400);
+
+    await run(`INSERT INTO match_likes (match_id, user_id, created_at) VALUES ('m2', 'u1', ?)`, ts);
+    await run(`INSERT INTO match_comments (id, match_id, user_id, text, created_at) VALUES ('c4', 'm2', 'u1', 'hi', ?)`, ts);
+    await run(`INSERT INTO follows (follower_id, following_id, created_at) VALUES ('u1', 'x2', ?)`, ts);
+    byId = Object.fromEntries((await call(env, 'u1', 'getDailyTasks')).body.tasks.map((t: any) => [t.id, t]));
+    expect([byId.like2.claimable, byId.com2.claimable, byId.fol2.claimable]).toEqual([true, true, true]);
+    for (const id of ['like2', 'com2', 'fol2']) expect((await call(env, 'u1', 'claimDailyTask', { taskId: id })).status).toBe(200);
+    expect(await coins(env, 'u1')).toBe(12);
+  });
+
+  it('an "ads" task counts verified ad views and reports the ad counter', async () => {
+    const { env } = env0();
+    await seedGamification(env, { dailyTasks: [{ id: 'ads2', title: 'Watch 2 ads', reward: 7, target: 2, type: 'ads' }] });
+    await seedUser(env, 'u1');
+    const ts = Date.now();
+    const day = rewardDayNumber(ts, 0);
+    const res0 = await call(env, 'u1', 'getDailyTasks');
+    expect(res0.body.ads).toMatchObject({ enabled: false, watchedToday: 0 });
+    expect(res0.body.tasks[0]).toMatchObject({ progress: 0, claimable: false });
+    for (const id of ['admob:t1', 'admob:t2']) {
+      await env.DB.prepare(`INSERT INTO ad_reward_claims (id, uid, day, provider, reward, created_at) VALUES (?, 'u1', ?, 'admob', 5, ?)`).bind(id, day, ts).run();
+    }
+    const res = await call(env, 'u1', 'getDailyTasks');
+    expect(res.body.ads.watchedToday).toBe(2);
+    expect(res.body.tasks[0]).toMatchObject({ progress: 2, claimable: true });
+    expect((await call(env, 'u1', 'claimDailyTask', { taskId: 'ads2' })).body).toMatchObject({ success: true, reward: 7 });
+  });
+
+  it('accepts the new task types and still rejects unknown ones', () => {
+    for (const type of ['like', 'comment', 'follow', 'ads']) {
+      expect(() => validateGamificationCoinLists({ dailyTasks: [{ id: 'aa', title: 'x', reward: 1, target: 1, type }] }), type).not.toThrow();
+    }
+    expect(() => validateGamificationCoinLists({ dailyTasks: [{ id: 'aa', title: 'x', reward: 1, target: 1, type: 'dance' }] })).toThrow();
+  });
 });
 
 // ===========================================================================

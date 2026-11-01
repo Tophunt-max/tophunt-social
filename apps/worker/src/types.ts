@@ -133,6 +133,20 @@ export interface Env {
    * Leave unset in production until an ad-network SSV callback exists.
    */
   ALLOW_UNVERIFIED_AD_REWARDS?: string;
+  /**
+   * Deploy-level opt-in (exactly "true") for rewarded ads on the WEB build
+   * (Google Ad Manager / GPT), which has no server-side verification. Required
+   * IN ADDITION to the panel's `monetization.ads.web.enabled` (lib/webAdReward.ts).
+   */
+  ALLOW_WEB_AD_REWARDS?: string;
+  /** Revenue import from the AdMob / AdSense APIs (lib/adRevenueImport.ts). Secrets. */
+  GOOGLE_ADS_CLIENT_ID?: string;
+  GOOGLE_ADS_CLIENT_SECRET?: string;
+  GOOGLE_ADS_REFRESH_TOKEN?: string;
+  ADMOB_PUBLISHER_ID?: string;
+  ADSENSE_ACCOUNT_ID?: string;
+  /** Optional dedicated HMAC key for web ad watch tokens (else derived from ADMIN_PROXY_SECRET). */
+  WEB_AD_TOKEN_SECRET?: string;
 
   // Capacity monitoring (admin dashboard "Database Capacity" widget). All
   // OPTIONAL and fail-open: without them the widget still shows table growth +

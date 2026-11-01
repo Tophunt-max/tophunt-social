@@ -1,0 +1,90 @@
+name: App OTA update
+
+# Publishes a JavaScript-only update (EAS Update) from GitHub to the apps that
+# are already installed. Run it from the Actions tab. See APP_RELEASE.md.
+#
+# An OTA reaches builds with the SAME app version (runtimeVersion policy
+# "appVersion"). Native changes (a new SDK, a permission, the AdMob app id)
+# need a new build through "App release" instead.
+#
+# Needs: secret EXPO_TOKEN, variable EAS_PROJECT_ID.
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Channel (matches the eas.json build profile)
+        type: choice
+        options: [production, preview]
+        default: production
+      message:
+        description: What changed (shown in expo.dev)
+        type: string
+        required: true
+
+concurrency:
+  group: app-ota-${{ inputs.channel }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/expo
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EAS_PROJECT_ID: ${{ vars.EAS_PROJECT_ID }}
+      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
+      ADMOB_ANDROID_APP_ID: ${{ vars.ADMOB_ANDROID_APP_ID }}
+      ADMOB_IOS_APP_ID: ${{ vars.ADMOB_IOS_APP_ID }}
+    steps:
+      - name: Check setup
+        working-directory: .
+        run: |
+          if [ -z "$EXPO_TOKEN" ] || [ -z "$EAS_PROJECT_ID" ]; then
+            echo "::error::Needs secret EXPO_TOKEN and variable EAS_PROJECT_ID. See APP_RELEASE.md."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/expo/package-lock.json
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+      - name: Icons
+        run: npm run check:icons
+      - name: Tests
+        run: npm test
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # The JS bundle is built HERE, so it needs the same EXPO_PUBLIC_* values
+      # as the builds on this channel. They are read from eas.json.
+      - name: Use the channel's app settings
+        run: |
+          jq -r --arg p "${{ inputs.channel }}" '.build[$p].env | to_entries[] | select(.key | startswith("EXPO_PUBLIC_")) | "\(.key)=\(.value)"' eas.json >> "$GITHUB_ENV"
+          jq -r --arg p "${{ inputs.channel }}" '.build[$p].env | keys[] | select(startswith("EXPO_PUBLIC_"))' eas.json
+
+      - name: Publish update
+        env:
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          eas update --channel "${{ inputs.channel }}" --message "$MESSAGE" --non-interactive --json > update.json
+          cat update.json
+          echo "### OTA published to ${{ inputs.channel }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"

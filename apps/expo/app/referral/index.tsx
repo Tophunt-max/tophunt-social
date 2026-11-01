@@ -19,6 +19,7 @@ import { BackButton } from '@/src/components/ui/BackButton';
 import { Ionicons } from '@/src/lib/icons';
 import { Colors } from '@/constants/theme';
 import { emitToast } from '@/src/lib/toastBridge';
+import { AdSlot } from '@/src/ads/AdSlot';
 import { appShareOrigin, isCompletedShare, shareBattleLink, whatsappShareUrl, openShareUrl } from '@/src/lib/share';
 import { referralCaption } from '@/src/lib/shareCaptions';
 import {
@@ -354,6 +355,8 @@ export default function ReferralScreen() {
               </View>
             ))
           )}
+          {/* Small banner at the bottom (Ad platform → Invite friends page). */}
+          <AdSlot slot="referral_share" isDark={isDark} />
         </ScrollView>
       )}
     </SafeAreaView>
