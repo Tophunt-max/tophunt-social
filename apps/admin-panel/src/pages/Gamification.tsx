@@ -173,6 +173,7 @@ function Rules() {
           maxLevel: Number(rest.maxLevel),
           pinnedLimit: Number(rest.pinnedLimit),
           velocityFlagEvents: Number(rest.velocityFlagEvents),
+          holdRewardsWhenFlagged: rest.holdRewardsWhenFlagged !== false,
           rewardBudgetId: rest.rewardBudgetId || null,
           betaUids: betaUids.split(/[\s,]+/).filter(Boolean),
           // The Worker wants ranks by increasing level; milestones read best that way too.
@@ -248,6 +249,13 @@ function Rules() {
           <label className="text-sm">Velocity flag (events/day/action)<input type="number" className={field} value={draft.velocityFlagEvents} onChange={(e) => setDraft({ ...draft, velocityFlagEvents: e.target.value })} /></label>
           <label className="text-sm">Reward budget id (free_rewards)<input className={field} value={draft.rewardBudgetId ?? ""} onChange={(e) => setDraft({ ...draft, rewardBudgetId: e.target.value })} /></label>
         </div>
+        <label className="flex items-start gap-2 text-sm mt-4">
+          <input type="checkbox" className="mt-1" checked={draft.holdRewardsWhenFlagged !== false} onChange={(e) => setDraft({ ...draft, holdRewardsWhenFlagged: e.target.checked })} />
+          <span>
+            Bonus-chasing guard: hold level rewards while an account has an open abuse flag
+            <span className="block text-xs text-muted-foreground">Velocity, same-device battle and ledger-mismatch flags hold that account's level items and milestone Diamond (XP and level still count). Closing the flag in Flags pays out what its real XP earns. Reverse farmed XP before closing the flag.</span>
+          </span>
+        </label>
       </div>
 
       <div className={card}>
@@ -541,6 +549,15 @@ function UserInspector() {
     onSuccess: () => { toast.success("Restored"); refresh(); },
     onError: (e) => toast.error(describeError(e)),
   });
+  const settle = useMutation({
+    mutationFn: () => { const r = window.prompt("Reason for settling level rewards (audit-logged)?") || ""; return api.gamification.settleRewards(uid!, r); },
+    onSuccess: (r) => {
+      const s = r.settled;
+      toast.success(`Settled at level ${s.level}: ${s.itemsRevoked.length} taken back, ${s.itemsGranted.length + s.itemsRestored} given, ${s.grantsReleased} Diamond released${s.held ? " (still on hold)" : ""}`);
+      refresh();
+    },
+    onError: (e) => toast.error(describeError(e)),
+  });
   const grantAch = useMutation({
     mutationFn: () => { const id = window.prompt("Achievement id to grant (e.g. community_contributor)") || ""; const r = window.prompt("Reason?") || ""; return api.gamification.grantAchievement(uid!, id, r); },
     onSuccess: (r) => { toast.success(r.granted ? "Granted" : "Already unlocked"); refresh(); },
@@ -556,6 +573,11 @@ function UserInspector() {
       {u.isError && <p className="text-sm text-red-600">{describeError(u.error)}</p>}
       {d && (
         <>
+          {d.rewardsHeld && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-sm p-3">
+              Level rewards are ON HOLD: this account has an open abuse flag. Review it under Flags; closing it pays out what the account's real XP earns.
+            </div>
+          )}
           <div className="grid md:grid-cols-3 gap-4">
             <div className={card}>
               <p className="text-sm text-muted-foreground">@{d.username}</p>
@@ -573,6 +595,7 @@ function UserInspector() {
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} /> Notify user</label>
                 <button className={btn} onClick={() => adjust.mutate()} disabled={!amount || reason.trim().length < 3 || adjust.isPending}>Apply</button>
                 <button className={btn2} onClick={() => grantAch.mutate()}>Grant achievement…</button>
+                <button className={btn2} onClick={() => settle.mutate()} disabled={settle.isPending}>Settle level rewards</button>
               </div>
               <p className="text-xs text-muted-foreground mt-2">A correction is a new ledger event; history is never edited. XP never goes below zero.</p>
             </div>
@@ -676,12 +699,16 @@ function Flags() {
   const q = useQuery({ queryKey: ["gam", "flags", status], queryFn: () => api.gamification.flags(status) });
   const review = useMutation({
     mutationFn: ({ id, s }: { id: string; s: string }) => api.gamification.reviewFlag(id, s, window.prompt("Note (optional)") || undefined),
-    onSuccess: () => { toast.success("Updated"); qc.invalidateQueries({ queryKey: ["gam", "flags"] }); },
+    onSuccess: (r) => {
+      const s = r?.settled;
+      toast.success(s ? `Updated. Rewards settled at level ${s.level}${s.held ? " (another flag is still open: still on hold)" : `: ${s.itemsGranted.length + s.itemsRestored} items, ${s.grantsReleased} Diamond released`}` : "Updated");
+      qc.invalidateQueries({ queryKey: ["gam", "flags"] });
+    },
     onError: (e) => toast.error(describeError(e)),
   });
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Signals for a human to look at. Nothing here penalises anyone automatically — a shared family phone looks like two accounts on one device.</p>
+      <p className="text-sm text-muted-foreground">Signals for a human to look at. While a flag is open, that account's level rewards are held (the bonus-chasing guard; XP and level still count). If the XP was farmed, reverse it in Users first, then mark the flag Actioned; otherwise Dismiss. Either way the account is then paid what its real XP earns. A shared family phone looks like two accounts on one device.</p>
       <select className={`${field} w-40`} value={status} onChange={(e) => setStatus(e.target.value)}>
         {["open", "dismissed", "actioned"].map((s) => <option key={s} value={s}>{s}</option>)}
       </select>

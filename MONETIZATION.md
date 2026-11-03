@@ -235,6 +235,29 @@ and re-checks price and availability inside the transaction.
   equip). `/rewards/inventory`, `/rewards/xp-cosmetics` and `/rewards/store` were removed; buying is in the
   Shop's Digital tab. My Collection stays reachable when the Shopping kill switch is off.
 
+### Level reward integrity: bonus-chasing guard and clawback (`lib/rewardIntegrity.ts`)
+
+- **Hold (bonus-chasing guard).** While an account has an OPEN `velocity`, `same_device_match` or
+  `ledger_mismatch` flag, it levels up as usual but its level rewards wait: level items are not granted and
+  milestone Diamond is created as `held` (not claimable). The app shows "Level rewards review me hain".
+  Switch: `progression.holdRewardsWhenFlagged` (default on; Gamification → Rules → Limits).
+- **Review.** Closing a flag (`PATCH /admin/gamification/flags/:id`, now full admin + recent sign-in) calls
+  `settleLevelRewards`: the account is paid what its real XP earns. Reverse farmed XP first, then mark Actioned.
+- **Clawback.** When XP drops (admin negative adjustment, event reversal, or any sync that sees
+  level < level_seen): level items (`source` `xp_level`/`level`, `source_ref` `level:N`, N above the new
+  level) are revoked with reason `level_clawback` and unequipped; unclaimed level Diamond becomes
+  `clawed_back`; `level_seen` is lowered. Regaining the level restores exactly those rows. Claimed Diamond is
+  not debited (reported as `claimedAboveLevel`). Shop, achievement, season and admin grants are untouched.
+- **Admin.** `POST /admin/gamification/users/:id/settle-rewards` (reason, audited); the Users inspector shows
+  "ON HOLD" and a "Settle level rewards" button. Every settle is audited as `gamification.rewards.settle`.
+- **Restore guards.** Restoring an item revoked by a store refund (coins already returned) or by level
+  clawback is refused; the previous revoke reason is kept in the audit row.
+- **Caches.** Revoke, restore, refund, XP adjust/reverse and flag review purge the user's profile cache.
+- **Display safety net.** The 03:00 UTC hourly run unequips any equipped cosmetic with no live inventory row
+  (`stripUnownedEquipped`).
+- **Other.** `equipBadge` uses the progression curve and is rate-limited; `getInventory` and
+  `getAchievements` are rate-limited (240/h).
+
 ### Compare-at price / real discounts (migration 0081)
 
 - `store_listings.compare_at_coins` (nullable): the "original" price an admin sets in Monetization → Store →

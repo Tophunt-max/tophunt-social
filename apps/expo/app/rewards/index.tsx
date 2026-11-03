@@ -80,6 +80,7 @@ export default function RewardsScreen() {
               gain={<XpGainFloat item={feed.current} onDone={feed.done} />}
             />
           </View>
+          <HeldNotice data={data} p={p} />
           {data.enabled ? <Grants data={data} p={p} /> : null}
           <Links data={data} p={p} onOpen={(r) => router.push(r as any)} />
           {data.enabled && data.season ? <SeasonCard season={data.season} p={p} onOpen={() => router.push('/rewards/leaderboard?period=season' as any)} /> : null}
@@ -95,6 +96,19 @@ export default function RewardsScreen() {
       )}
       {data ? <AchievementUnlockToast uid={user?.uid} unlocked={data.newlyUnlocked} /> : null}
     </SafeAreaView>
+  );
+}
+
+/** Level rewards wait for an admin review of recent activity (worker rewardIntegrity.ts). */
+function HeldNotice({ data, p }: { data: ProgressionView; p: ExplorePalette }) {
+  if (!data.rewards.held) return null;
+  return (
+    <View style={[styles.card, { backgroundColor: p.card, borderColor: '#F59E0B', gap: 4 }]}>
+      <Text style={[styles.cardTitle, { color: p.text }]}>Level rewards review me hain</Text>
+      <Text style={[styles.muted, { color: p.sub }]}>
+        Aapki haal ki activity ki jaanch ho rahi hai. XP aur level count ho rahe hain; level items aur Diamond jaanch poori hote hi mil jaayenge.
+      </Text>
+    </View>
   );
 }
 

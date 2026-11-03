@@ -76,7 +76,8 @@ export interface ProgressionView {
   pinnedLimit: number;
   showcaseUnlocksAt: number;
   season: { id: string; name: string; endsAt: number; xp: number; rank: number | null } | null;
-  rewards: { claimable: RewardGrant[]; budgetAvailable: boolean };
+  /** `held`: level rewards wait for an admin review of recent activity (worker rewardIntegrity.ts). */
+  rewards: { claimable: RewardGrant[]; budgetAvailable: boolean; held?: boolean };
 }
 
 export interface AchievementView {

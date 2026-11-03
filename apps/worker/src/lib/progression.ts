@@ -118,6 +118,12 @@ export interface ProgressionConfig {
   rewardBudgetId: string | null;
   /** XP events per day per action that raise a review flag (never a block). */
   velocityFlagEvents: number;
+  /**
+   * Bonus-chasing guard (lib/rewardIntegrity.ts): while an account has an open
+   * abuse flag, its level rewards (items and milestone Diamond) are held until
+   * an admin reviews the flag. On by default.
+   */
+  holdRewardsWhenFlagged: boolean;
   /** Bumped by the admin save; stored on every XP event. */
   version: number;
 }
@@ -210,6 +216,7 @@ export const DEFAULT_PROGRESSION: ProgressionConfig = {
   pinnedLimit: 3,
   rewardBudgetId: null,
   velocityFlagEvents: 200,
+  holdRewardsWhenFlagged: true,
   version: 1,
 };
 
@@ -332,6 +339,7 @@ export function sanitizeProgression(raw: unknown): ProgressionConfig {
     pinnedLimit: isInt(p.pinnedLimit, 0, 12) ? p.pinnedLimit : DEFAULT_PROGRESSION.pinnedLimit,
     rewardBudgetId: typeof p.rewardBudgetId === "string" && p.rewardBudgetId ? p.rewardBudgetId : null,
     velocityFlagEvents: isInt(p.velocityFlagEvents, 1, 1_000_000) ? p.velocityFlagEvents : DEFAULT_PROGRESSION.velocityFlagEvents,
+    holdRewardsWhenFlagged: p.holdRewardsWhenFlagged !== false,
     version: isInt(p.version, 1, 1_000_000_000) ? p.version : 1,
   };
 }
@@ -421,6 +429,7 @@ export function validateProgression(p: any, curve: Pick<LevelCurve, "xpThreshold
     throw new Error("rewardBudgetId must be empty or a budget id.");
   }
   if (p.velocityFlagEvents !== undefined && !isInt(p.velocityFlagEvents, 1, 1_000_000)) throw new Error("velocityFlagEvents must be 1-1,000,000.");
+  if (p.holdRewardsWhenFlagged !== undefined && typeof p.holdRewardsWhenFlagged !== "boolean") throw new Error("holdRewardsWhenFlagged must be true or false.");
 }
 
 export interface Progression {

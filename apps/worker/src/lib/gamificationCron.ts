@@ -8,17 +8,21 @@
  *   3. Ledger reconciliation for the same accounts: users.xp must equal the
  *      sum of their XP events. A mismatch raises a review flag; nothing is
  *      corrected automatically.
+ *   4. Once a day (03:00 UTC run): unequip any equipped cosmetic the account no
+ *      longer owns (lib/rewardIntegrity.ts stripUnownedEquipped), a safety net
+ *      for the display path, which renders users.cosmetics as stored.
  */
 import type { Env } from "../types";
 import { syncProgressionSafe } from "./achievements";
 import { experienceOn, getProgression } from "./progression";
 import { seasonTick } from "./seasons";
 import { reconcileXp } from "./xpService";
+import { stripUnownedEquipped } from "./rewardIntegrity";
 
 const WINDOW_MS = 75 * 60 * 1000;
 const MAX_USERS = 200;
 
-export async function gamificationHourly(env: Env): Promise<{ seasons: unknown; synced: number; mismatches: number }> {
+export async function gamificationHourly(env: Env): Promise<{ seasons: unknown; synced: number; mismatches: number; unequipped: number }> {
   const seasons = await seasonTick(env);
   const p = await getProgression(env);
   const since = Date.now() - WINDOW_MS;
@@ -43,5 +47,13 @@ export async function gamificationHourly(env: Env): Promise<{ seasons: unknown; 
     );
     console.error("[gamification] XP ledger mismatches", mismatches.length);
   }
-  return { seasons, synced, mismatches: mismatches.length };
+  let unequipped = 0;
+  if (new Date().getUTCHours() === 3) {
+    unequipped = await stripUnownedEquipped(env).catch((e) => {
+      console.error("[gamification] unowned-equipped sweep failed", e);
+      return 0;
+    });
+    if (unequipped) console.warn("[gamification] unequipped unowned cosmetics", unequipped);
+  }
+  return { seasons, synced, mismatches: mismatches.length, unequipped };
 }

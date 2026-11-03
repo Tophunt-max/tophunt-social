@@ -10,6 +10,9 @@
  * Every write is audit-logged with before/after values. XP corrections are new
  * ledger events (lib/xpService.ts), never edits to a balance.
  */
+import { CLAWBACK_REASON, rewardsHeld, settleLevelRewards } from "../lib/rewardIntegrity";
+import { STORE_REFUND_REASON_PREFIX } from "../lib/store";
+import { userCacheKey } from "../lib/cache";
 import type { Hono } from "hono";
 import type { Env, Variables } from "../types";
 import { getDb, schema } from "../db";
@@ -475,6 +478,7 @@ export function registerGamificationRoutes(
       achievements: ach.results ?? [],
       inventory: await loadInventory(c.env, uid),
       flags: flags.results ?? [],
+      rewardsHeld: await rewardsHeld(c.env, p, uid),
       ...(grants ? { rewardGrants: grants } : {}),
     });
   });
@@ -523,8 +527,13 @@ export function registerGamificationRoutes(
           targetId: "rewards",
         }).catch(() => undefined);
       }
-      c.executionCtx.waitUntil(syncProgression(c.env, uid).catch(() => undefined));
-      return c.json({ success: true, applied: res.delta, before: user.xp ?? 0, after: after?.xp ?? 0, correlationId });
+      // Less XP can mean a lower level: take back the rewards above it now,
+      // in the request, so the admin sees the result (lib/rewardIntegrity.ts).
+      const settled = res.delta < 0 ? await settleLevelRewards(c.env, await getProgression(c.env), uid) : null;
+      if (settled) await logAudit(c, "gamification.rewards.settle", "user", uid, { cause: "xp.adjust", correlationId, ...settled });
+      else c.executionCtx.waitUntil(syncProgression(c.env, uid).catch(() => undefined));
+      c.executionCtx.waitUntil(purgeShared(c, userCacheKey(uid)).catch(() => undefined));
+      return c.json({ success: true, applied: res.delta, before: user.xp ?? 0, after: after?.xp ?? 0, correlationId, settled });
     } catch (e) {
       await idem?.finish(false);
       throw e;
@@ -544,7 +553,10 @@ export function registerGamificationRoutes(
     const delta = await reverseXp(c.env, { originalId: eventId, reason, actor: actorOf(c), ts: now() });
     if (delta === null) throw httpsError("already-exists", "This event was already reversed.");
     await logAudit(c, "gamification.xp.reverse", "xp_event", eventId, { uid: ev.uid, delta, before: before?.xp ?? 0, reason });
-    return c.json({ success: true, delta });
+    const settled = await settleLevelRewards(c.env, await getProgression(c.env), ev.uid);
+    if (settled) await logAudit(c, "gamification.rewards.settle", "user", ev.uid, { cause: "xp.reverse", eventId, ...settled });
+    c.executionCtx.waitUntil(purgeShared(c, userCacheKey(ev.uid)).catch(() => undefined));
+    return c.json({ success: true, delta, settled });
   });
 
   adminRoute.post("/gamification/users/:id/achievements/:achievementId", async (c) => {
@@ -578,6 +590,7 @@ export function registerGamificationRoutes(
     ]);
     if (Number(res[0]?.meta?.changes || 0) === 0) throw httpsError("not-found", "The user does not hold this item.");
     await logAudit(c, "gamification.item.revoke", "user", uid, { itemId, reason });
+    c.executionCtx.waitUntil(purgeShared(c, userCacheKey(uid)).catch(() => undefined));
     return c.json({ success: true });
   });
 
@@ -586,11 +599,36 @@ export function registerGamificationRoutes(
     const uid = c.req.param("id");
     const itemId = c.req.param("itemId");
     const reason = reasonOf(await c.req.json<any>().catch(() => ({})));
+    const row = await c.env.DB.prepare(`SELECT revoked_at, revoke_reason FROM user_inventory WHERE uid = ? AND item_id = ?`)
+      .bind(uid, itemId).first<{ revoked_at: number | null; revoke_reason: string | null }>();
+    if (!row || row.revoked_at == null) throw httpsError("not-found", "Nothing to restore.");
+    // A refunded purchase already gave the coins back: restoring the item too
+    // would hand out both. The user buys it again instead.
+    if ((row.revoke_reason ?? "").startsWith(STORE_REFUND_REASON_PREFIX)) {
+      throw httpsError("failed-precondition", "This item was refunded; its coins were returned. The user can buy it again.");
+    }
+    // Level clawback follows the account's real XP; it comes back by itself when the level is reached.
+    if (row.revoke_reason === CLAWBACK_REASON) {
+      throw httpsError("failed-precondition", "This level reward was taken back because the account's XP dropped below its level. It returns automatically when the level is reached again.");
+    }
     const res = await c.env.DB.prepare(`UPDATE user_inventory SET revoked_at = NULL, revoke_reason = NULL WHERE uid = ? AND item_id = ? AND revoked_at IS NOT NULL`)
       .bind(uid, itemId).run();
     if (Number(res.meta?.changes || 0) === 0) throw httpsError("not-found", "Nothing to restore.");
-    await logAudit(c, "gamification.item.restore", "user", uid, { itemId, reason });
+    await logAudit(c, "gamification.item.restore", "user", uid, { itemId, reason, previousRevokeReason: row.revoke_reason, revokedAt: row.revoked_at });
+    c.executionCtx.waitUntil(purgeShared(c, userCacheKey(uid)).catch(() => undefined));
     return c.json({ success: true });
+  });
+
+  /** Recompute an account's level rewards against its real XP (hold, clawback, release). */
+  adminRoute.post("/gamification/users/:id/settle-rewards", async (c) => {
+    requireFullAdmin(c);
+    const uid = c.req.param("id");
+    const reason = reasonOf(await c.req.json<any>().catch(() => ({})));
+    const settled = await settleLevelRewards(c.env, await getProgression(c.env), uid);
+    if (!settled) throw httpsError("not-found", "User not found.");
+    await logAudit(c, "gamification.rewards.settle", "user", uid, { cause: "manual", reason, ...settled });
+    c.executionCtx.waitUntil(purgeShared(c, userCacheKey(uid)).catch(() => undefined));
+    return c.json({ success: true, settled });
   });
 
   // ------------------------------------------------------------------- flags
@@ -607,11 +645,23 @@ export function registerGamificationRoutes(
     const b = await c.req.json<any>().catch(() => ({}));
     if (!["dismissed", "actioned", "open"].includes(b.status)) throw httpsError("invalid-argument", "status must be open, dismissed or actioned.");
     const note = typeof b.note === "string" ? b.note.slice(0, 300) : null;
+    const flag = await c.env.DB.prepare(`SELECT uid FROM xp_flags WHERE id = ?`).bind(id).first<{ uid: string }>();
+    if (!flag) throw httpsError("not-found", "Flag not found.");
+    // Closing a flag ends the reward hold for this account (unless another
+    // flag is still open), so it changes what the account is paid: full admin.
+    if (b.status !== "open") requireFullAdmin(c);
     const r = await c.env.DB.prepare(`UPDATE xp_flags SET status = ?, reviewed_by = ?, reviewed_at = ?, review_note = ? WHERE id = ?`)
       .bind(b.status, actorOf(c), now(), note, id).run();
     if (Number(r.meta?.changes || 0) === 0) throw httpsError("not-found", "Flag not found.");
-    await logAudit(c, "gamification.flag.review", "xp_flag", id, { status: b.status, note });
-    return c.json({ success: true });
+    await logAudit(c, "gamification.flag.review", "xp_flag", id, { status: b.status, note, uid: flag.uid });
+    // Pay out (or keep holding) what the account's real XP earns. Reverse any
+    // farmed XP BEFORE dismissing/actioning, and the clawback is applied here.
+    const settled = b.status === "open" ? null : await settleLevelRewards(c.env, await getProgression(c.env), flag.uid);
+    if (settled) {
+      await logAudit(c, "gamification.rewards.settle", "user", flag.uid, { cause: "flag.review", flagId: id, ...settled });
+      c.executionCtx.waitUntil(purgeShared(c, userCacheKey(flag.uid)).catch(() => undefined));
+    }
+    return c.json({ success: true, settled });
   });
 
   // -------------------------------------------------------------- analytics

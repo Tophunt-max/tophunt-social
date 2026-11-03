@@ -190,11 +190,14 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
         rewards: {
           claimable: grants,
           budgetAvailable: grants.length ? !!(await rewardBudgetFor(env, p)) : true,
+          // Bonus-chasing guard: level rewards wait for an admin review.
+          held: sync.rewardsHeld,
         },
       };
     }
 
     case "getAchievements": {
+      await rateLimit(env, `ach:${uid}`, 240, 3600);
       const defs = await loadAchievementDefs(env);
       const mine = await env.DB.prepare(`SELECT achievement_id, tier, unlocked_at, xp_awarded FROM user_achievements WHERE uid = ?`).bind(uid).all<any>();
       const byId = new Map<string, { tier: number; unlockedAt: number; xp: number }>();
@@ -317,6 +320,7 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
     }
 
     case "getInventory": {
+      await rateLimit(env, `inv:${uid}`, 240, 3600);
       const u = await own(env, uid);
       const inv = await loadInventory(env, uid);
       const held = new Map(inv.map((i) => [i.itemId, i]));

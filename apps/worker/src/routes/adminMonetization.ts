@@ -9,6 +9,7 @@
  * they live in `appConfig.monetization` and are saved through
  * `POST /admin/app-settings`, which validates, versions, pushes and audits them.
  */
+import { userCacheKey } from "../lib/cache";
 import type { Hono } from "hono";
 import type { Env, Variables } from "../types";
 import { httpsError } from "../lib/http";
@@ -363,8 +364,11 @@ export function registerMonetizationRoutes(
   adminRoute.post("/monetization/store/purchases/:id/refund", async (c) => {
     const id = c.req.param("id");
     const reason = reasonOf(await c.req.json<any>().catch(() => ({})));
+    const buyer = await c.env.DB.prepare(`SELECT uid FROM store_purchases WHERE id = ?`).bind(id).first<{ uid: string }>();
     const out = await refundStorePurchase(c.env, id, actorOf(c), reason);
-    await logAudit(c, "store.purchase.refund", "store_purchase", id, { reason, coins: out.coins });
+    await logAudit(c, "store.purchase.refund", "store_purchase", id, { reason, coins: out.coins, uid: buyer?.uid ?? null });
+    // The refunded item was unequipped: drop the cached public profile now.
+    if (buyer?.uid) c.executionCtx.waitUntil(purgeShared(c, userCacheKey(buyer.uid)).catch(() => undefined));
     return c.json(out);
   });
 
