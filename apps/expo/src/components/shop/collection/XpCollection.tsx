@@ -11,11 +11,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInUp, useReducedMotion } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { BackButton } from '@/src/components/ui/BackButton';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { Ionicons } from '@/src/lib/icons';
@@ -38,7 +37,7 @@ import {
   type XpCosmeticView,
 } from '@/src/services/gamification';
 
-const BG = '#07111F';
+export const BG = '#07111F';
 const CARD = '#0D1B2E';
 const CARD_2 = '#10243C';
 const BORDER = '#1E3A5F';
@@ -50,7 +49,9 @@ const PINK = '#FF4D86';
 const AMBER = '#FBBF24';
 const PAD = 16;
 
-const TABS: { type: XpCosmeticType; label: string; icon: string; color: string }[] = [
+type KindTab = XpCosmeticType | 'all';
+const TABS: { type: KindTab; label: string; icon: string; color: string }[] = [
+  { type: 'all', label: 'All levels', icon: 'trophy', color: GREEN },
   { type: 'frame', label: 'Frames', icon: 'person-circle', color: CYAN },
   { type: 'theme', label: 'Themes', icon: 'color-palette', color: '#A78BFA' },
   { type: 'badge', label: 'Badges', icon: 'medal', color: AMBER },
@@ -58,23 +59,24 @@ const TABS: { type: XpCosmeticType; label: string; icon: string; color: string }
 ];
 
 /**
- * Dedicated FREE XP collection. It never calls the Store or any coin action:
- * ownership comes from getXpCosmetics (server XP/level), and the only write is
- * equipCosmetic, whose Worker UPDATE checks permanent D1 ownership and type.
+ * Shop → My Collection → XP Collection: the free level rewards, one item per
+ * level 1-100 (worker migration 0084). It never calls the Store or any coin
+ * action: ownership comes from getXpCosmetics (server XP/level), and the only
+ * write is equipCosmetic, whose Worker UPDATE checks D1 ownership and type.
  */
-export default function XpCosmeticsScreen() {
+export function XpCollection() {
   const { user } = useAuth();
   const q = useXpCosmetics(user?.uid, !!user);
   const equip = useEquipCosmetic();
   const { width } = useDesignWindow();
   const reduceMotion = useReducedMotion();
-  const [type, setType] = useState<XpCosmeticType>('frame');
+  const [type, setType] = useState<KindTab>('all');
   const [selected, setSelected] = useState<XpCosmeticView | null>(null);
   const columns = width >= 900 ? 5 : width >= 600 ? 4 : 2;
   const contentWidth = Math.min(width, 1100);
   const cardWidth = (contentWidth - PAD * 2 - 12 * (columns - 1)) / columns;
   const data = q.data;
-  const items = useMemo(() => (data?.items ?? []).filter((item) => item.type === type), [data?.items, type]);
+  const items = useMemo(() => (data?.items ?? []).filter((item) => type === 'all' || item.type === type), [data?.items, type]);
   const avatar = { uri: user?.photoURL ?? null, name: user?.displayName || 'You' };
 
   const onEquip = (item: XpCosmeticView) => {
@@ -93,15 +95,7 @@ export default function XpCosmeticsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <View style={styles.header}>
-        <BackButton size={24} color={TEXT} style={{ marginRight: 10 }} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle} accessibilityRole="header">XP Rewards</Text>
-          <Text style={styles.headerSub}>Normal / Free cosmetics</Text>
-        </View>
-        <View style={styles.freePill}><Ionicons name="star" size={12} color="#052E16" /><Text style={styles.freePillText}>FREE</Text></View>
-      </View>
+    <View style={styles.screen}>
 
       {q.isLoading && !data ? (
         <View style={styles.center}><ActivityIndicator color={CYAN} size="large" /><Text style={styles.loading}>Loading your rewards…</Text></View>
@@ -127,13 +121,14 @@ export default function XpCosmeticsScreen() {
                 </View>
               ) : null}
               <View style={styles.sectionIntro}>
-                <Text style={styles.sectionTitle}>Your free collection</Text>
-                <Text style={styles.sectionSub}>Earn XP by posting, voting, commenting and daily check-ins. No DP coin or Diamond needed.</Text>
+                <Text style={styles.sectionTitle}>Level rewards · 1 to {data.total}</Text>
+                <Text style={styles.sectionSub}>Har level par ek free item. XP posting, voting, comments, daily tasks aur check-in se milta hai. DP coin ya Diamond nahi lagta.</Text>
               </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
                 {TABS.map((tab) => {
                   const active = tab.type === type;
-                  const count = data.items.filter((item) => item.type === tab.type && item.owned).length;
+                  const inTab = data.items.filter((item) => tab.type === 'all' || item.type === tab.type);
+                  const count = inTab.filter((item) => item.owned).length;
                   return (
                     <TouchableOpacity
                       key={tab.type}
@@ -144,7 +139,7 @@ export default function XpCosmeticsScreen() {
                     >
                       <Ionicons name={tab.icon} size={17} color={active ? tab.color : MUTED} />
                       <Text style={[styles.tabText, active && { color: TEXT }]}>{tab.label}</Text>
-                      <Text style={[styles.tabCount, active && { color: tab.color }]}>{count}/10</Text>
+                      <Text style={[styles.tabCount, active && { color: tab.color }]}>{count}/{inTab.length}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -171,7 +166,7 @@ export default function XpCosmeticsScreen() {
         onClose={() => setSelected(null)}
         onEquip={onEquip}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -187,7 +182,7 @@ function ProgressHero({ data }: { data: NonNullable<ReturnType<typeof useXpCosme
         <View style={{ flex: 1 }}>
           <Text style={styles.heroKicker}>YOUR XP JOURNEY</Text>
           <Text style={styles.heroXp}>{formatXp(info.xp)} <Text style={styles.heroXpUnit}>XP</Text></Text>
-          <Text style={styles.heroRank}>{info.rank.name} · {data.counts.unlocked}/40 cosmetics unlocked</Text>
+          <Text style={styles.heroRank}>{info.rank.name} · {data.counts.unlocked}/{data.total} level rewards unlocked</Text>
         </View>
       </View>
       <View style={styles.progressTrack}>
@@ -207,7 +202,7 @@ function ProgressHero({ data }: { data: NonNullable<ReturnType<typeof useXpCosme
           <Text style={styles.nextXp}>{formatXp(data.nextUnlock.xpRemaining)} XP</Text>
         </View>
       ) : (
-        <View style={styles.nextUnlock}><Ionicons name="checkmark-circle" size={19} color={GREEN} /><Text style={styles.nextName}>All 40 free cosmetics unlocked</Text></View>
+        <View style={styles.nextUnlock}><Ionicons name="checkmark-circle" size={19} color={GREEN} /><Text style={styles.nextName}>All {data.total} level rewards unlocked</Text></View>
       )}
     </LinearGradient>
   );
@@ -227,7 +222,7 @@ function XpItemCard({ item, width, avatar, busy, offline, onPreview, onEquip }: 
         <Text style={[styles.itemName, locked && { color: '#CBD5E1' }]} numberOfLines={1}>{item.name}</Text>
         <View style={styles.itemMeta}><TierPill item={item} compact /><Text style={styles.requiredXp}>{formatXp(item.requiredXp)} XP</Text></View>
         <Text style={[styles.state, { color: equipped ? GREEN : locked ? MUTED : CYAN }]}>
-          {equipped ? 'Currently equipped' : locked ? `${formatXp(item.xpRemaining)} XP remaining` : 'Unlocked permanently'}
+          {equipped ? 'Currently equipped' : locked ? `${formatXp(item.xpRemaining)} XP aur chahiye` : 'Unlocked permanently'}
         </Text>
         <View style={styles.actions}>
           <TouchableOpacity style={styles.previewBtn} onPress={onPreview} accessibilityRole="button"><Text style={styles.previewBtnText}>Preview</Text></TouchableOpacity>
@@ -237,7 +232,7 @@ function XpItemCard({ item, width, avatar, busy, offline, onPreview, onEquip }: 
             onPress={onEquip}
             accessibilityRole="button"
           >
-            <Text style={[styles.equipBtnText, equipped && { color: TEXT }]}>{locked ? 'Locked' : equipped ? 'Remove' : 'Equip'}</Text>
+            <Text style={[styles.equipBtnText, equipped && { color: TEXT }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{locked ? `Level ${item.unlocksAtLevel} par unlock` : equipped ? 'Remove' : 'Equip'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -262,9 +257,9 @@ function PreviewModal({ item, avatar, busy, offline, onClose, onEquip }: { item:
           <View style={styles.modalBody}>
             <View style={styles.modalPills}><TierPill item={item} /><View style={styles.unlockPill}><Ionicons name="lock-open" size={12} color={CYAN} /><Text style={styles.unlockPillText}>Level {item.unlocksAtLevel} · {formatXp(item.requiredXp)} XP</Text></View></View>
             <Text style={styles.modalDescription}>{item.description}</Text>
-            <Text style={[styles.modalState, { color: item.equipped ? GREEN : locked ? AMBER : CYAN }]}>{item.equipped ? 'Equipped now' : locked ? `Locked · ${formatXp(item.xpRemaining)} XP remaining` : 'Unlocked permanently on your account'}</Text>
+            <Text style={[styles.modalState, { color: item.equipped ? GREEN : locked ? AMBER : CYAN }]}>{item.equipped ? 'Equipped now' : locked ? `Level ${item.unlocksAtLevel} par unlock · ${formatXp(item.xpRemaining)} XP aur chahiye` : 'Unlocked permanently on your account'}</Text>
             <TouchableOpacity style={[styles.modalAction, (locked || offline) && styles.disabledBtn, item.equipped && styles.removeBtn]} disabled={locked || offline || busy} onPress={() => onEquip(item)} accessibilityRole="button">
-              {busy ? <ActivityIndicator color="#052E16" /> : <Text style={[styles.modalActionText, item.equipped && { color: TEXT }]}>{locked ? `Reach Level ${item.unlocksAtLevel}` : offline ? 'Reconnect to equip' : item.equipped ? 'Remove item' : 'Equip free item'}</Text>}
+              {busy ? <ActivityIndicator color="#052E16" /> : <Text style={[styles.modalActionText, item.equipped && { color: TEXT }]}>{locked ? `Level ${item.unlocksAtLevel} par unlock` : offline ? 'Reconnect to equip' : item.equipped ? 'Remove item' : 'Equip free item'}</Text>}
             </TouchableOpacity>
           </View>
         </Animated.View>
@@ -288,11 +283,6 @@ function LivePreview({ item, avatar }: { item: XpCosmeticView; avatar: { uri: st
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: BG },
-  header: { height: 62, paddingHorizontal: PAD, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: BORDER },
-  headerTitle: { color: TEXT, fontFamily: 'Urbanist-Bold', fontSize: 20 },
-  headerSub: { color: CYAN, fontFamily: 'Urbanist-SemiBold', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.8 },
-  freePill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: GREEN, borderRadius: 12, paddingHorizontal: 9, paddingVertical: 5 },
-  freePillText: { color: '#052E16', fontFamily: 'Urbanist-Bold', fontSize: 10, letterSpacing: 0.6 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loading: { color: MUTED, fontFamily: 'Urbanist-Medium' },
   hero: { margin: PAD, borderRadius: 24, borderWidth: 1, borderColor: '#245A7A', padding: 18, overflow: 'hidden' },

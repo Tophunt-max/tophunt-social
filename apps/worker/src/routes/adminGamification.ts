@@ -52,6 +52,9 @@ import { purgeShared } from "../lib/edgeCache";
 type Audit = (c: any, action: string, targetType: string, targetId: string | null, detail?: Record<string, unknown>) => Promise<void>;
 
 const ID_RE = /^[a-z0-9_-]{2,40}$/;
+/** Free XP level rewards: one item per level 1..XP_REWARD_MAX_LEVEL (migration 0084). */
+const XP_REWARD_MAX_LEVEL = 100;
+const XP_REWARD_KINDS = ["frame", "theme", "badge", "title"] as const;
 const DAY_MS = 86_400_000;
 
 function reasonOf(body: any, min = 3): string {
@@ -236,6 +239,109 @@ export function registerGamificationRoutes(
       before, after: v, ownersAffected: await itemOwnerCount(c.env, id),
     });
     return c.json({ success: true });
+  });
+
+  // ------------------------------------------------------- XP level rewards
+  /**
+   * Free XP level rewards: one frame / theme / badge / title per level 1-100
+   * (xp_cosmetic_unlocks, migration 0084). Users get them by reaching the
+   * level (achievements.ts grantXpCosmeticItems); they are never sold.
+   */
+  adminRoute.get("/gamification/xp-rewards", async (c) => {
+    const rows = await c.env.DB.prepare(
+      `SELECT x.item_id, x.unlock_level, r.type, r.name, r.description, r.rarity, r.asset, r.active, r.sort,
+              (SELECT COUNT(*) FROM user_inventory i WHERE i.item_id = x.item_id AND i.revoked_at IS NULL) AS owners
+         FROM xp_cosmetic_unlocks x JOIN reward_catalog r ON r.id = x.item_id
+        WHERE x.collection = 'xp40'
+        ORDER BY x.unlock_level, x.item_id`,
+    ).all<any>();
+    const parse = (v: unknown) => {
+      try {
+        const o = JSON.parse(String(v ?? "{}"));
+        return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+      } catch {
+        return {};
+      }
+    };
+    return c.json({
+      maxLevel: XP_REWARD_MAX_LEVEL,
+      kinds: XP_REWARD_KINDS,
+      items: (rows.results ?? []).map((r) => ({
+        itemId: r.item_id, level: Number(r.unlock_level), type: r.type, name: r.name, description: r.description ?? "",
+        rarity: r.rarity, asset: parse(r.asset), active: !!r.active, sort: Number(r.sort ?? 0), owners: Number(r.owners),
+      })),
+    });
+  });
+
+  /**
+   * Create or edit a level reward. Body: { create?, level, item: {type, name,
+   * description, rarity, asset, active}, swap? }. One item per level: a taken
+   * level is refused unless `swap: true`, which moves the other item to this
+   * item's current level in the same batch. Raising an item's level never
+   * takes it back from people who already have it.
+   */
+  adminRoute.put("/gamification/xp-rewards/:id", async (c) => {
+    requireFullAdmin(c);
+    const id = c.req.param("id");
+    if (!ID_RE.test(id)) throw httpsError("invalid-argument", "id must be 2-40 lowercase letters, digits, _ or -.");
+    const b = await c.req.json<any>().catch(() => ({}));
+    const level = Number(b?.level);
+    if (!Number.isInteger(level) || level < 1 || level > XP_REWARD_MAX_LEVEL) {
+      throw httpsError("invalid-argument", `level must be a whole number from 1 to ${XP_REWARD_MAX_LEVEL}.`);
+    }
+    const raw = b?.item ?? {};
+    if (!(XP_REWARD_KINDS as readonly string[]).includes(raw.type)) {
+      throw httpsError("invalid-argument", `An XP level reward is a ${XP_REWARD_KINDS.join(", ")}.`);
+    }
+    const asset = raw.asset && typeof raw.asset === "object" && !Array.isArray(raw.asset) ? raw.asset : {};
+    const v = validateCatalogItemInput(c.env, { ...raw, asset: { ...asset, tier: "xp", collection: "xp40", level } });
+
+    const before = await c.env.DB.prepare(
+      `SELECT r.id, r.type, r.name, r.rarity, r.asset, r.active, x.unlock_level,
+              EXISTS (SELECT 1 FROM store_listings l WHERE l.item_id = r.id) AS listed
+         FROM reward_catalog r LEFT JOIN xp_cosmetic_unlocks x ON x.item_id = r.id
+        WHERE r.id = ?`,
+    ).bind(id).first<any>();
+    if (before && b?.create === true) throw httpsError("already-exists", `An item with id "${id}" already exists. Pick another id.`);
+    if (before && (before.unlock_level == null || before.listed)) {
+      throw httpsError("failed-precondition", "This id belongs to a Shop item. XP level rewards are separate items; use a new id.");
+    }
+    await assertTypeChangeAllowed(c.env, id, before?.type, v.type);
+
+    const occupant = await c.env.DB.prepare(
+      `SELECT x.item_id, r.name FROM xp_cosmetic_unlocks x JOIN reward_catalog r ON r.id = x.item_id
+        WHERE x.unlock_level = ? AND x.item_id <> ? LIMIT 1`,
+    ).bind(level, id).first<{ item_id: string; name: string }>();
+    const oldLevel = before?.unlock_level == null ? null : Number(before.unlock_level);
+    if (occupant && !(b?.swap === true && oldLevel !== null)) {
+      throw httpsError("already-exists", `Level ${level} already has "${occupant.name}". Pick a free level${oldLevel !== null ? ", or swap them" : ""}.`);
+    }
+
+    const ts = now();
+    const stmts = [
+      catalogUpsertStatement(c.env, id, v, ts),
+      c.env.DB.prepare(
+        `INSERT INTO xp_cosmetic_unlocks (item_id, collection, category, unlock_level, item_order, created_at)
+         VALUES (?, 'xp40', ?, ?, ?, ?)
+         ON CONFLICT (item_id) DO UPDATE SET category = excluded.category, unlock_level = excluded.unlock_level, item_order = excluded.item_order`,
+      ).bind(id, v.type, level, level, ts),
+    ];
+    if (occupant && oldLevel !== null) {
+      stmts.push(
+        c.env.DB.prepare(`UPDATE xp_cosmetic_unlocks SET unlock_level = ?, item_order = ? WHERE item_id = ?`).bind(oldLevel, oldLevel, occupant.item_id),
+        c.env.DB.prepare(`UPDATE reward_catalog SET asset = json_set(asset, '$.level', ?), updated_at = ? WHERE id = ?`).bind(oldLevel, ts, occupant.item_id),
+      );
+    }
+    await c.env.DB.batch(stmts);
+    invalidateGamificationCatalog();
+    await purgeShared(c, CATALOG_CACHE_KEY).catch(() => {});
+    await logAudit(c, before ? "gamification.xp_reward.update" : "gamification.xp_reward.create", "reward_item", id, {
+      before: before ? { ...before, listed: undefined } : null,
+      after: { ...v, level },
+      swappedWith: occupant && oldLevel !== null ? { itemId: occupant.item_id, level: oldLevel } : null,
+      ownersAffected: await itemOwnerCount(c.env, id),
+    });
+    return c.json({ success: true, itemId: id, level });
   });
 
   // ----------------------------------------------------------------- seasons

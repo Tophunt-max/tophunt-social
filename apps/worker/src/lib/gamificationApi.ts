@@ -239,7 +239,7 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
         `SELECT item_id, category, unlock_level, item_order
            FROM xp_cosmetic_unlocks
           WHERE collection = 'xp40'
-          ORDER BY CASE category WHEN 'frame' THEN 0 WHEN 'theme' THEN 1 WHEN 'badge' THEN 2 ELSE 3 END, item_order`,
+          ORDER BY unlock_level, item_id`,
       ).all<{ item_id: string; category: string; unlock_level: number; item_order: number }>();
       const level = sync.levelInfo.level;
       const items = (rules.results ?? []).flatMap((rule) => {
@@ -263,7 +263,7 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
           unlocksAtLevel: Number(rule.unlock_level),
           requiredXp,
           xpRemaining: Math.max(0, requiredXp - sync.levelInfo.xp),
-          order: Number(rule.item_order),
+          order: Number(rule.unlock_level),
           owned,
           equipped: isEquipped,
           state: isEquipped ? "equipped" as const : owned ? "unlocked" as const : "locked" as const,

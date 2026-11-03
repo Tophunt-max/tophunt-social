@@ -127,7 +127,8 @@ describe('features', () => {
     expect(featureForRoute(['contest', 'photo'])).toBe('contests');
     expect(featureForRoute(['earn'])).toBe('earning');
     expect(featureForRoute(['shop', 'cart'])).toBe('shopping');
-    expect(featureForRoute(['rewards', 'store'])).toBe('shopping');
+    expect(featureForRoute(['shop', 'collection'])).toBeNull();
+    expect(featureForRoute(['rewards', 'store'])).toBeNull();
     expect(featureForRoute(['wallet', 'gifts'])).toBeNull();
     expect(featureForRoute(['wallet'])).toBeNull();
     expect(featureForRoute(['home'])).toBeNull();

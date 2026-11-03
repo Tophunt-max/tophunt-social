@@ -85,6 +85,7 @@ import m_0080_store_wishlist_sql from "../../migrations/0080_store_wishlist.sql"
 import m_0081_store_compare_price_sql from "../../migrations/0081_store_compare_price.sql";
 import m_0082_shop_product_compare_price_sql from "../../migrations/0082_shop_product_compare_price.sql";
 import m_0083_comment_stickers_sql from "../../migrations/0083_comment_stickers.sql";
+import m_0084_xp_level_rewards_100_sql from "../../migrations/0084_xp_level_rewards_100.sql";
 
 export interface Migration {
   name: string;
@@ -176,4 +177,5 @@ export const MIGRATIONS: Migration[] = [
   { name: "0081_store_compare_price.sql", sql: m_0081_store_compare_price_sql },
   { name: "0082_shop_product_compare_price.sql", sql: m_0082_shop_product_compare_price_sql },
   { name: "0083_comment_stickers.sql", sql: m_0083_comment_stickers_sql },
+  { name: "0084_xp_level_rewards_100.sql", sql: m_0084_xp_level_rewards_100_sql },
 ];

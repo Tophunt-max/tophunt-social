@@ -139,7 +139,7 @@ const PageGlow = React.memo(function PageGlow({ width, height, heroBottom }: { w
  * the 748 px desktop mock, u = contentW / 748 (MOCK, ShopHomeSections.tsx).
  * See premium/mock.ts), Digital
  * (full catalogue with filters), Physical (products), and My Collection (a
- * link to /rewards/inventory). `/shop?tab=digital` and `/shop?tab=physical`
+ * link to /shop/collection). `/shop?tab=digital` and `/shop?tab=physical`
  * open on that tab.
  *
  * Every block and tag here comes from real server data (src/lib/shopModel.ts):
@@ -281,7 +281,7 @@ export default function ShopScreen() {
   }, [setTab]);
   const openItem = useCallback((id: string) => router.push(`/shop/item/${encodeURIComponent(id)}` as any), [router]);
   const openProduct = useCallback((id: string) => router.push(`/shop/${encodeURIComponent(id)}` as any), [router]);
-  const openCollection = useCallback(() => router.push('/rewards/inventory' as any), [router]);
+  const openCollection = useCallback(() => router.push('/shop/collection' as any), [router]);
   /** Admin slide / deal card target → Digital tab filter, Physical tab or an in-app route. */
   const followNav = useCallback((nav: ShopNav) => {
     if (nav.kind === 'digital') openDigital(nav.filter);

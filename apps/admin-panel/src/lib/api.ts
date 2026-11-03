@@ -917,6 +917,10 @@ export const api = {
     saveAchievement: (id: string, payload: any) => put(`/admin/gamification/achievements/${encodeURIComponent(id)}`, payload),
     catalog: () => get<any[]>("/admin/gamification/catalog"),
     saveItem: (id: string, payload: any) => put(`/admin/gamification/catalog/${encodeURIComponent(id)}`, payload),
+    /** Free XP level rewards, one per level 1-100 (worker adminGamification.ts). */
+    xpRewards: () => get<{ maxLevel: number; kinds: string[]; items: any[] }>("/admin/gamification/xp-rewards"),
+    saveXpReward: (id: string, payload: { create?: boolean; level: number; swap?: boolean; item: any }) =>
+      put<{ success: boolean; itemId: string; level: number }>(`/admin/gamification/xp-rewards/${encodeURIComponent(id)}`, payload),
     seasons: () => get<any[]>("/admin/gamification/seasons"),
     createSeason: (payload: any) => post<{ id: string }>("/admin/gamification/seasons", payload),
     updateSeason: (id: string, payload: any) => patch(`/admin/gamification/seasons/${encodeURIComponent(id)}`, payload),

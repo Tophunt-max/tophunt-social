@@ -82,7 +82,7 @@ describe('XP40 free artwork contract', () => {
   it('uses one foreground-aware clock and virtualized cards for animation performance', () => {
     const clock = fs.readFileSync(path.join(ROOT, 'src/lib/fxClock.ts'), 'utf8');
     const fx = fs.readFileSync(path.join(ROOT, 'src/components/gamification/CosmeticFx.tsx'), 'utf8');
-    const screen = fs.readFileSync(path.join(ROOT, 'app/rewards/xp-cosmetics.tsx'), 'utf8');
+    const screen = fs.readFileSync(path.join(ROOT, 'src/components/shop/collection/XpCollection.tsx'), 'utf8');
     expect(clock.match(/makeMutable\(/g)).toHaveLength(1);
     expect(clock).toContain("AppState.addEventListener('change'");
     expect(clock).toContain('subscribers === 0');

@@ -301,12 +301,12 @@ export function registerMonetizationRoutes(
     if (!ITEM_ID_RE.test(itemId)) throw httpsError("invalid-argument", "Item id: 2-40 lowercase letters, digits, _ or -.");
     const body = await c.req.json<any>().catch(() => ({}));
     const item = validateCatalogItemInput(c.env, body?.item ?? {});
-    if ((item.asset as any).collection === "xp40") throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification.");
+    if ((item.asset as any).collection === "xp40") throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification → XP Level Rewards.");
     const before = await c.env.DB.prepare(
       `SELECT r.*, EXISTS (SELECT 1 FROM xp_cosmetic_unlocks x WHERE x.item_id = r.id AND x.collection = 'xp40') AS xp40
          FROM reward_catalog r WHERE r.id = ?`,
     ).bind(itemId).first<any>();
-    if (before?.xp40) throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification.");
+    if (before?.xp40) throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification → XP Level Rewards.");
     if (body?.create === true && before) throw httpsError("already-exists", `An item with id "${itemId}" already exists. Pick another id.`);
     await assertTypeChangeAllowed(c.env, itemId, before?.type, item.type);
 

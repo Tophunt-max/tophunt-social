@@ -55,7 +55,7 @@ export default function RewardsScreen() {
           previousLevel={data.leveledUp?.from ?? null}
           xpGained={data.recentXp[0] ? { amount: data.recentXp[0].delta, label: data.recentXp[0].label } : null}
           unlocks={data.leveledUp ? (data.newCosmetics?.length ? data.newCosmetics.map((item) => item.name) : data.roadmap.filter((m) => m.level > data.leveledUp!.from && m.level <= data.leveledUp!.to).map((m) => m.title)) : undefined}
-          onView={() => router.push('/rewards/xp-cosmetics' as any)}
+          onView={() => router.push('/shop/collection?tab=xp' as any)}
         />
       ) : null}
       {q.isLoading ? (
@@ -136,8 +136,8 @@ function Grants({ data, p }: { data: ProgressionView; p: ExplorePalette }) {
 function Links({ data, p, onOpen }: { data: ProgressionView; p: ExplorePalette; onOpen: (route: string) => void }) {
   const items: { asset: AssetKey; label: string; sub: string; route: string }[] = [
     { asset: 'activity.achievement', label: 'Achievements', sub: `${data.achievements.unlocked}/${data.achievements.total}`, route: '/rewards/achievements' },
-    { asset: 'activity.inventory', label: 'Free XP Cosmetics', sub: '40 level rewards', route: '/rewards/xp-cosmetics' },
-    { asset: 'activity.inventory', label: 'My Items', sub: 'Free & Premium', route: '/rewards/inventory' },
+    { asset: 'activity.inventory', label: 'XP Collection', sub: '100 level rewards', route: '/shop/collection?tab=xp' },
+    { asset: 'activity.inventory', label: 'My Premium Collection', sub: 'DP coin items', route: '/shop/collection' },
     { asset: 'activity.leaderboard', label: 'Leaderboards', sub: 'Week · Month · All', route: '/rewards/leaderboard' },
     { asset: 'reward.hall_of_fame', label: 'Hall of Fame', sub: 'Champions', route: '/rewards/hall-of-fame' },
     { asset: 'activity.insights', label: 'Insights', sub: 'Your stats', route: '/rewards/insights' },
