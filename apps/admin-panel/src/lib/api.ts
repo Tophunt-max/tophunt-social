@@ -380,6 +380,10 @@ const uploadOnboardingImage = (file: File, onProgress?: UploadProgressHandler) =
 const uploadExploreBanner = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/explore-banner", file, onProgress, "Banner upload failed. Check your connection and try again.");
 
+/** Shop home hero slide / deal card artwork (Worker POST /admin/media/shop-banner). */
+const uploadShopBanner = (file: File, onProgress?: UploadProgressHandler) =>
+  uploadBinary("/admin/media/shop-banner", file, onProgress, "Shop image upload failed. Check your connection and try again.");
+
 const uploadProductImage = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/product-image", file, onProgress, "Product image upload failed. Check your connection and try again.");
 
@@ -986,6 +990,7 @@ export const api = {
   saveAuthMethods: (authMethods: any) => post("/admin/app-settings", { authMethods }),
   uploadOnboardingImage,
   uploadExploreBanner,
+  uploadShopBanner,
   onboardingStats: (days = 30) => get<OnboardingStats>(`/admin/onboarding/stats?days=${days}`),
   verificationReward: () => get<any>("/admin/verification-reward"),
   signupBonusReviews: (status: "pending" | "approved" | "rejected" = "pending") =>

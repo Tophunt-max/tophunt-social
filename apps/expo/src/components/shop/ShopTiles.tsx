@@ -13,6 +13,7 @@ import { Ionicons } from '@/src/lib/icons';
 import { ScaleTouchable } from '@/src/components/explore/ScaleTouchable';
 import { BRAND_GRAD, GOLD, type ExplorePalette } from '@/src/components/explore/theme';
 import { VOTE_GRAD } from './DigitalItemCard';
+import { DiscountTag } from './premium/DiscountTag';
 
 export interface ShopProduct {
   id: string;
@@ -104,6 +105,7 @@ export const ProductTile = React.memo(function ProductTile({
         </View>
         <View style={styles.tileFoot}>
           <Price coins={item.priceCoins} p={p} />
+          <DiscountTag item={item} size={10} color={p.sub} />
           <View style={{ flex: 1 }} />
           {inStock ? <RoundAction p={p} icon="bag-handle" locked={!canAfford} label={canAfford ? 'Open product' : 'Not enough DP coin'} /> : null}
         </View>
@@ -135,6 +137,7 @@ export function DealCard({ item, width, p, canAfford, onPress }: { item: ShopPro
           <View style={styles.price}>
             <CoinIcon size={15} color={GOLD} />
             <Text style={[styles.priceText, { color: GOLD, fontSize: 17 }]}>{item.priceCoins.toLocaleString()}</Text>
+            <DiscountTag item={item} size={12} color="#E5E7EB" />
           </View>
         </View>
         <RoundAction p={{ ...p, chip: 'rgba(255,255,255,0.2)', sub: '#FFF' }} icon="bag-handle" size={42} locked={!canAfford} label={canAfford ? 'Open product' : 'Not enough DP coin'} />

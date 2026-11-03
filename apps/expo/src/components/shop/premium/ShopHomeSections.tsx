@@ -5,18 +5,19 @@
  * and the quick-actions bar. All static (no per-tile animation; the glow is a
  * shadow), and every card is memoized.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { Ionicons } from '@/src/lib/icons';
-import type { CardTag, CategoryTile, CollectionTile } from '@/src/lib/shopModel';
+import { discountOf, type CardTag, type CategoryTile, type CollectionTile, type DealCardView, type ShopNav } from '@/src/lib/shopModel';
 import { TH, glowShadow } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
 import type { ShopProduct } from '@/src/services/shop';
 import { FONT_FLOOR, MOCK, cellWidth, font, px, rowWidths } from './mock';
+import { DealPager, DealTimerPill } from './DealPager';
 import { DiscountTag } from './DiscountTag';
 import { ProductPreview } from './ProductPreview';
 import { BoltIcon, BoxIcon, ChestArt, CoinArt, CubeLine, TileArt } from './ShopArt';
@@ -234,7 +235,8 @@ export const PhysicalCard = React.memo(function PhysicalCard({ product, u, width
       <Text style={[styles.cardName, { fontSize: fs, marginTop: px(4, u), paddingHorizontal: px(5, u), textAlign: 'left' }]} numberOfLines={1}>{product.title}</Text>
       <View style={[styles.price, { gap: px(3, u), paddingHorizontal: px(5, u), marginTop: px(2, u) }]}>
         <CoinArt size={Math.max(fs, px(12, u))} />
-        <Text style={[styles.priceText, { fontSize: fs }]} numberOfLines={1}>{priceText(product.priceCoins, width)}</Text>
+        <Text style={[styles.priceText, { fontSize: fs }]} numberOfLines={1}>{discountOf(product) ? product.priceCoins.toLocaleString() : priceText(product.priceCoins, width)}</Text>
+        <DiscountTag item={product} size={font(9, u, 7)} />
       </View>
     </TouchableOpacity>
   );
@@ -293,6 +295,7 @@ export function DealsCard({ product, u, onGrab, onContest }: { product: ShopProd
                 <View style={[styles.price, { gap: px(3, u), marginTop: px(3, u) }]}>
                   <CoinArt size={Math.max(font(11, u), px(13, u))} />
                   <Text style={[styles.priceText, { fontSize: font(12, u) }]}>{product.priceCoins.toLocaleString()} DP</Text>
+                  <DiscountTag item={product} size={font(10, u, 7.5)} />
                 </View>
                 {button('Grab Now', () => onGrab(product.id), `Grab now: ${product.title}`)}
               </>
@@ -305,6 +308,76 @@ export function DealsCard({ product, u, onGrab, onContest }: { product: ShopProd
             )}
           </View>
         </View>
+      </LinearGradient>
+    </View>
+  );
+}
+
+/**
+ * Admin deal cards in the Hot Deals slot (same 312×124 box): the section
+ * title and the current card's real timer in the header, one card per page
+ * (DealPager), the admin image in place of the chest art, and an
+ * "UP TO X% OFF" pill only when the computed percent is above 0.
+ */
+export function AdminDealsCard({
+  title, cards, u, onNav,
+}: { title: string; cards: DealCardView<StoreItemView, ShopProduct>[]; u: number; onNav: (nav: ShopNav) => void }) {
+  const w = px(MOCK.deals.w, u);
+  const h = px(MOCK.deals.h, u);
+  const r = px(MOCK.deals.radius, u);
+  const pad = px(10, u);
+  const pageW = w - pad * 2;
+  const [idx, setIdx] = useState(0);
+  const cur = cards[Math.min(idx, cards.length - 1)];
+  const btnH = Math.max(px(26, u), font(12, u) + 6);
+  const btnFs = font(12, u);
+  const art = { w: px(96, u), h: px(70, u) };
+  const page = (i: number) => {
+    const c = cards[i];
+    const p = c.product;
+    return (
+      <View style={[styles.dealsBody, { gap: px(8, u), marginTop: px(4, u), width: pageW }]}>
+        <View style={{ width: art.w, height: art.h, alignItems: 'center', justifyContent: 'center' }}>
+          {c.imageUrl ? (
+            <AppImage source={{ uri: c.imageUrl }} displayWidth={art.w} style={{ width: art.w, height: art.h, borderRadius: px(8, u), backgroundColor: '#1A0F3D' }} contentFit="cover" transition={150} accessibilityIgnoresInvertColors />
+          ) : (
+            <ChestArt width={art.w} height={art.h} />
+          )}
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {c.percent > 0 ? (
+            <View style={[styles.offPill, { borderRadius: px(8, u), paddingHorizontal: px(6, u), marginBottom: px(2, u) }]} accessible accessibilityLabel={`Up to ${c.percent}% off`}>
+              <Text style={[styles.offPillText, { fontSize: font(10, u, 7.5) }]} numberOfLines={1}>UP TO {c.percent}% OFF</Text>
+            </View>
+          ) : null}
+          <Text style={[styles.dealTitle, { fontSize: font(13, u) }]} numberOfLines={1}>{c.title}</Text>
+          {c.subtitle ? <Text style={[styles.dealSub, { fontSize: font(11, u), marginTop: px(2, u) }]} numberOfLines={p ? 1 : 2}>{c.subtitle}</Text> : null}
+          {p ? (
+            <View style={[styles.price, { gap: px(3, u), marginTop: px(3, u) }]}>
+              <CoinArt size={Math.max(font(11, u), px(13, u))} />
+              <Text style={[styles.priceText, { fontSize: font(12, u) }]}>{p.priceCoins.toLocaleString()} DP</Text>
+              <DiscountTag item={p} size={font(10, u, 7.5)} showPercent={false} />
+            </View>
+          ) : null}
+          <TouchableOpacity onPress={() => onNav(c.nav)} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel={`${c.ctaLabel}: ${c.title}`} style={{ alignSelf: 'flex-start', marginTop: px(6, u) }}>
+            <LinearGradient colors={['#FFE45C', '#FFC41A']} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={[styles.btn, { minWidth: px(120, u), height: btnH, borderRadius: btnH / 2, paddingHorizontal: px(8, u), gap: px(4, u) }]}>
+              <Text style={[styles.btnText, { fontSize: btnFs }]} numberOfLines={1}>{c.ctaLabel}</Text>
+              <ArrowIcon variant="arrow" direction="right" size={btnFs} color="#1A1033" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+  return (
+    <View style={[{ width: w, minHeight: h, borderRadius: r }, glow('#EC4899', u)]}>
+      <LinearGradient colors={['#3B0A55', '#1A0B3E']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.deals, { width: w, minHeight: h, borderRadius: r, padding: pad }]}>
+        <View style={[styles.head, { gap: px(5, u) }]}>
+          <BoltIcon size={px(16, u)} />
+          <Text style={[styles.headTitle, { fontSize: font(15, u, FONT_FLOOR.title), flex: 1 }]} accessibilityRole="header" numberOfLines={1}>{title}</Text>
+          {cur?.endsAt ? <DealTimerPill endsAt={cur.endsAt} u={u * 0.9} /> : null}
+        </View>
+        <DealPager count={cards.length} width={pageW} u={u} renderPage={page} onIndex={setIdx} labelOf={(i) => cards[i]?.title ?? ''} />
       </LinearGradient>
     </View>
   );
@@ -406,6 +479,8 @@ const styles = StyleSheet.create({
   dealSub: { color: '#E9D5FF', fontFamily: TH.fonts.medium },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   btnText: { color: '#1A1033', fontFamily: TH.fonts.bold },
+  offPill: { alignSelf: 'flex-start', backgroundColor: '#EF4444', paddingVertical: 1 },
+  offPillText: { color: '#FFF', fontFamily: TH.fonts.bold, letterSpacing: 0.3 },
   colLabel: { color: '#FFFFFF', fontFamily: TH.fonts.semibold, textAlign: 'center', paddingHorizontal: 2 },
   colCount: { color: '#C4B5FD', fontFamily: TH.fonts.semibold },
   qa: { flexDirection: 'row', backgroundColor: CARD_FILL, borderWidth: 1, borderColor: 'rgba(168,85,247,0.5)' },

@@ -322,7 +322,7 @@ describe('reference home: featured collection, trending, hero', () => {
     const f = featuredView({ title: 'Mythic Week', badge: 'Legendary Drop', itemIds: ['e1', 'm1'], heroItemId: 'm1', endsAt: NOW + DAY }, store, NOW);
     const h = heroSlides(store, f)!;
     expect(h.mode).toBe('drop');
-    expect(h.slides.map((s) => s.item.itemId)).toEqual(['m1', 'e1']);
+    expect(h.slides.map((s) => s.item?.itemId)).toEqual(['m1', 'e1']);
     expect(h.itemIds).toEqual(['e1', 'm1']);
     expect(h.endsAt).toBe(NOW + DAY);
     expect(h.slides[0]).toMatchObject({ badge: 'LEGENDARY DROP', title: 'MYTHIC', caps: 'WEEK', ctaLabel: 'Explore Now' });

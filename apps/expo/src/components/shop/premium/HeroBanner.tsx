@@ -5,15 +5,21 @@
  * Sliding: a Gesture.Pan (touch on native, mouse drag on web) moves one shared
  * position `pos` (in slides); each slide sits at slideOffset(i, pos, n), so
  * the loop has no seam. Release snaps one slide on a long drag or a flick
- * (snapTarget). A single 4 s interval autoplays; it stops while dragging,
- * while the screen is not focused and under reduced motion (swiping still
- * works). Dots jump to a slide; screen readers get an adjustable control
- * ("Agla slide" / "Pichla slide").
+ * (snapTarget). A single interval autoplays (hero.autoplayMs: the admin's
+ * autoplaySec, else 4 s); it stops while dragging, while the screen is not
+ * focused and under reduced motion (swiping still works). Dots jump to a
+ * slide; screen readers get an adjustable control ("Agla slide" / "Pichla slide").
  *
- * Honesty: the countdown (one 1 s clock) exists only for an admin drop with a
- * real future end. The fallback slides carry no "drop" / "limited" wording.
- * The mock's illustrated character is not an asset we have: the slide shows
- * the real item's artwork on the viewer's avatar instead.
+ * Admin slides (shopModel adminHeroSlides) may carry artwork: it is drawn as
+ * the full slide background (phones prefer mobileImageUrl) under a dark
+ * gradient on the text side, and the whole slide follows the slide's target.
+ * Without artwork a slide draws its first live item, as before.
+ *
+ * Honesty: the countdown (one 1 s clock) exists only for the CURRENT slide's
+ * real future end (a drop's end, or an admin slide with showCountdown). The
+ * fallback slides carry no "drop" / "limited" wording. The mock's
+ * illustrated character is not an asset we have: the slide shows the real
+ * item's artwork on the viewer's avatar instead.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, TouchableOpacity, View, type AccessibilityActionEvent } from 'react-native';
@@ -22,13 +28,14 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { cancelAnimation, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import Svg, { Circle, Defs, G, LinearGradient as SvgLinearGradient, Path, RadialGradient, Stop, Text as SvgText } from 'react-native-svg';
 import { useIsFocused } from '@react-navigation/native';
+import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { Ionicons } from '@/src/lib/icons';
-import { countdownParts, type HeroSlide, type HeroSlides } from '@/src/lib/shopModel';
+import { countdownParts, slideImage, type HeroSlide, type HeroSlides, type ShopNav } from '@/src/lib/shopModel';
 import { TH, glowShadow } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
-import { AUTOPLAY_MS, FONT_FLOOR, HERO, HERO_M, MOCK, MOCK_M, fitFont, font, loopDelta, mfont, px, slideOffset, snapTarget, wrapIndex } from './mock';
+import { FONT_FLOOR, HERO, HERO_M, MOCK, MOCK_M, fitFont, font, loopDelta, mfont, px, slideOffset, snapTarget, wrapIndex } from './mock';
 import { ProductPreview } from './ProductPreview';
 import { CrownLogo, Laurel } from './ShopArt';
 
@@ -48,12 +55,14 @@ function useSecondClock(on: boolean): number {
 const artCenter = (timed: boolean) => (timed ? 430 : 500);
 
 export function HeroBanner({
-  hero, viewer, u, onExplore, onOpenItem, variant = 'desktop',
+  hero, viewer, u, onNav, onOpenItem, variant = 'desktop',
 }: {
   hero: HeroSlides<StoreItemView>;
   viewer: Viewer;
   u: number;
-  onExplore: () => void;
+  /** CTA (every slide) and a tap on an admin slide: follow the slide's target. */
+  onNav: (nav: ShopNav) => void;
+  /** A tap on the item art of a drop / fallback slide. */
   onOpenItem: (id: string) => void;
   /** 'mobile' draws the 340 px phone mock (HERO_M, u = width / 340); 'desktop' the 748 mock (HERO). Same slider. */
   variant?: 'desktop' | 'mobile';
@@ -72,9 +81,11 @@ export function HeroBanner({
   const start = useSharedValue(0);
   const duration = reduce ? 0 : 380;
 
-  const timed = hero.mode === 'drop' && hero.endsAt !== null && hero.endsAt > Date.now();
+  const current = hero.slides[Math.min(index, n - 1)];
+  const curEnd = current?.endsAt ?? null;
+  const timed = curEnd !== null && curEnd > Date.now();
   const now = useSecondClock(timed && focused);
-  const cd = timed ? countdownParts(hero.endsAt, now) : null;
+  const cd = timed ? countdownParts(curEnd, now) : null;
 
   // The store refreshed with fewer slides.
   useEffect(() => {
@@ -98,10 +109,10 @@ export function HeroBanner({
 
   useEffect(() => {
     if (n < 2 || reduce || !focused || dragging) return;
-    const t = setInterval(() => go(1), AUTOPLAY_MS);
+    const t = setInterval(() => go(1), hero.autoplayMs);
     return () => clearInterval(t);
     // `index` restarts the period after a swipe or a dot tap.
-  }, [n, reduce, focused, dragging, go, index]);
+  }, [n, reduce, focused, dragging, go, index, hero.autoplayMs]);
 
   const onDragStart = useCallback(() => setDragging(true), []);
   const onDragEnd = useCallback((i: number) => {
@@ -159,38 +170,30 @@ export function HeroBanner({
         )}
         <GestureDetector gesture={pan}>
           <Animated.View style={[StyleSheet.absoluteFill, Platform.OS === 'web' ? ({ userSelect: 'none', cursor: n > 1 ? 'grab' : undefined } as any) : null]}>
-            {hero.slides.map((s, i) => mobile ? (
-              <MobileSlideView
-                key={s.item.itemId}
-                i={i}
-                n={n}
-                pos={pos}
-                slide={s}
-                viewer={viewer}
-                u={u}
-                W={W}
-                H={H}
-                visible={i === index}
-                onExplore={pressGuard(onExplore)}
-                onOpen={pressGuard(() => onOpenItem(s.item.itemId))}
-              />
-            ) : (
-              <SlideView
-                key={s.item.itemId}
-                i={i}
-                n={n}
-                pos={pos}
-                slide={s}
-                viewer={viewer}
-                u={u}
-                W={W}
-                H={H}
-                timed={timed}
-                visible={i === index}
-                onExplore={pressGuard(onExplore)}
-                onOpen={pressGuard(() => onOpenItem(s.item.itemId))}
-              />
-            ))}
+            {hero.slides.map((s, i) => {
+              const explore = pressGuard(() => onNav(s.nav));
+              // Admin slides lead to their target from anywhere; drop / fallback art opens the item.
+              const open = hero.mode === 'admin' || !s.item ? explore : pressGuard(() => onOpenItem(s.item!.itemId));
+              return mobile ? (
+                <MobileSlideView key={s.key} i={i} n={n} pos={pos} slide={s} viewer={viewer} u={u} W={W} H={H} visible={i === index} onExplore={explore} onOpen={open} />
+              ) : (
+                <SlideView
+                  key={s.key}
+                  i={i}
+                  n={n}
+                  pos={pos}
+                  slide={s}
+                  viewer={viewer}
+                  u={u}
+                  W={W}
+                  H={H}
+                  timed={s.endsAt !== null && s.endsAt > Date.now()}
+                  visible={i === index}
+                  onExplore={explore}
+                  onOpen={open}
+                />
+              );
+            })}
           </Animated.View>
         </GestureDetector>
 
@@ -250,7 +253,7 @@ export function HeroBanner({
             style={[styles.dots, { top: dotsTop, gap: px(mobile ? 4 : 5, u) }]}
             accessible
             accessibilityRole="adjustable"
-            accessibilityLabel={`Slide ${index + 1} / ${n}: ${hero.slides[index]?.item.name ?? ''}`}
+            accessibilityLabel={`Slide ${index + 1} / ${n}: ${slideName(hero.slides[index])}`}
             accessibilityActions={[{ name: 'increment', label: 'Agla slide' }, { name: 'decrement', label: 'Pichla slide' }]}
             onAccessibilityAction={onA11y}
           >
@@ -258,7 +261,7 @@ export function HeroBanner({
               const d = dotSize;
               return (
                 <TouchableOpacity
-                  key={s.item.itemId}
+                  key={s.key}
                   onPress={() => go(loopDelta(index, i, n))}
                   hitSlop={8}
                   accessible={false}
@@ -270,6 +273,29 @@ export function HeroBanner({
         ) : null}
       </View>
     </View>
+  );
+}
+
+/** What a slide is called for screen readers: the item, else the admin title. */
+const slideName = (s: HeroSlide<StoreItemView> | undefined) => (s ? s.item?.name ?? [s.title, s.caps].filter(Boolean).join(' ') : '');
+
+/**
+ * Admin artwork as the full slide background (cover), a dark gradient on the
+ * text side so the copy stays readable, and one button for the whole slide.
+ */
+function SlideArtwork({ uri, W, H, label, onOpen, textFrac }: { uri: string; W: number; H: number; label: string; onOpen: () => void; textFrac: number }) {
+  return (
+    <TouchableOpacity onPress={onOpen} activeOpacity={0.95} accessibilityRole="button" accessibilityLabel={label} style={StyleSheet.absoluteFill}>
+      <AppImage source={{ uri }} displayWidth={W} style={{ width: W, height: H }} contentFit="cover" transition={150} accessibilityIgnoresInvertColors />
+      <LinearGradient
+        colors={['rgba(10,4,24,0.88)', 'rgba(10,4,24,0.55)', 'rgba(10,4,24,0)']}
+        locations={[0, Math.min(0.9, textFrac * 0.75), Math.min(1, textFrac + 0.2)]}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+    </TouchableOpacity>
   );
 }
 
@@ -357,6 +383,7 @@ const SlideView = React.memo(function SlideView({
   onExplore: () => void; onOpen: () => void;
 }) {
   const moving = useAnimatedStyle(() => ({ transform: [{ translateX: slideOffset(i, pos.value, n) * W }] }));
+  const image = slideImage(slide, false);
   const textW = px(HERO.textW, u);
   const art = px(HERO.art, u);
   const artLeft = px(artCenter(timed), u) - art / 2;
@@ -380,30 +407,38 @@ const SlideView = React.memo(function SlideView({
       accessibilityElementsHidden={!visible}
       importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
     >
-      <TouchableOpacity
-        onPress={onOpen}
-        activeOpacity={0.92}
-        accessibilityRole="button"
-        accessibilityLabel={`${slide.item.name} details`}
-        style={[styles.abs, { left: artLeft, top: (H - art) / 2, width: art, height: art }]}
-      >
-        <ProductPreview item={slide.item} viewer={viewer} width={art} height={art} radius={px(18, u)} bare />
-      </TouchableOpacity>
+      {image ? (
+        <SlideArtwork uri={image} W={W} H={H} label={`${slideName(slide)}: ${slide.ctaLabel}`} onOpen={onOpen} textFrac={(HERO.textX + HERO.textW) / HERO.w} />
+      ) : slide.item ? (
+        <TouchableOpacity
+          onPress={onOpen}
+          activeOpacity={0.92}
+          accessibilityRole="button"
+          accessibilityLabel={`${slide.item.name} details`}
+          style={[styles.abs, { left: artLeft, top: (H - art) / 2, width: art, height: art }]}
+        >
+          <ProductPreview item={slide.item} viewer={viewer} width={art} height={art} radius={px(18, u)} bare />
+        </TouchableOpacity>
+      ) : null}
 
       {/* Text column: the mock positions, but flowed and centred so font floors never overlap on small screens. */}
       <View style={[styles.abs, styles.column, { left: px(HERO.textX, u), top: 0, width: textW, height: H - dotsRoom, gap }]} pointerEvents="box-none">
-        <View pointerEvents="none">
-          <LinearGradient colors={['#FFD24A', '#F5A524']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeBox, borderRadius: badgeBox / 2, paddingHorizontal: px(8, u), gap: px(4, u) }]}>
-            <CrownLogo width={badgeFs * 1.2} height={badgeFs} />
-            <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: Math.max(0.4, 1 * u) }]} numberOfLines={1}>{slide.badge}</Text>
-          </LinearGradient>
-        </View>
+        {slide.badge ? (
+          <View pointerEvents="none">
+            <LinearGradient colors={['#FFD24A', '#F5A524']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeBox, borderRadius: badgeBox / 2, paddingHorizontal: px(8, u), gap: px(4, u) }]}>
+              <CrownLogo width={badgeFs * 1.2} height={badgeFs} />
+              <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: Math.max(0.4, 1 * u) }]} numberOfLines={1}>{slide.badge}</Text>
+            </LinearGradient>
+          </View>
+        ) : null}
         <View pointerEvents="none">
           <GoldTitle text={slide.title} width={textW} max={titleMax} />
         </View>
-        <Text style={[styles.caps, { width: textW, fontSize: capsFs, lineHeight: capsFs * 1.15, letterSpacing: 2 * u }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-          {slide.caps}
-        </Text>
+        {slide.caps ? (
+          <Text style={[styles.caps, { width: textW, fontSize: capsFs, lineHeight: capsFs * 1.15, letterSpacing: 2 * u }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            {slide.caps}
+          </Text>
+        ) : null}
         {showSub ? (
           <Text style={[styles.sub, { width: textW, fontSize: subFs, lineHeight: subFs * 1.2 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
             {slide.subtitle}
@@ -464,6 +499,7 @@ const MobileSlideView = React.memo(function MobileSlideView({
   onExplore: () => void; onOpen: () => void;
 }) {
   const moving = useAnimatedStyle(() => ({ transform: [{ translateX: slideOffset(i, pos.value, n) * W }] }));
+  const image = slideImage(slide, true);
   const textW = px(HERO_M.textW, u);
   const art = px(HERO_M.art, u);
   const badgeFs = mfont(HERO_M.badge.text, u);
@@ -478,23 +514,29 @@ const MobileSlideView = React.memo(function MobileSlideView({
       accessibilityElementsHidden={!visible}
       importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
     >
-      <TouchableOpacity
-        onPress={onOpen}
-        activeOpacity={0.92}
-        accessibilityRole="button"
-        accessibilityLabel={`${slide.item.name} details`}
-        style={[styles.abs, { left: W - art + px(8, u), top: (H - art) / 2, width: art, height: art }]}
-      >
-        <ProductPreview item={slide.item} viewer={viewer} width={art} height={art} radius={px(14, u)} bare />
-      </TouchableOpacity>
+      {image ? (
+        <SlideArtwork uri={image} W={W} H={H} label={`${slideName(slide)}: ${slide.ctaLabel}`} onOpen={onOpen} textFrac={(HERO_M.textX + HERO_M.textW) / HERO_M.w} />
+      ) : slide.item ? (
+        <TouchableOpacity
+          onPress={onOpen}
+          activeOpacity={0.92}
+          accessibilityRole="button"
+          accessibilityLabel={`${slide.item.name} details`}
+          style={[styles.abs, { left: W - art + px(8, u), top: (H - art) / 2, width: art, height: art }]}
+        >
+          <ProductPreview item={slide.item} viewer={viewer} width={art} height={art} radius={px(14, u)} bare />
+        </TouchableOpacity>
+      ) : null}
 
       <View style={[styles.abs, styles.columnLeft, { left: px(HERO_M.textX, u), top: 0, width: textW, height: H - px(10, u), gap: px(2, u) }]} pointerEvents="box-none">
-        <View pointerEvents="none">
-          <LinearGradient colors={['#FFD24A', '#F5A524']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeH, borderRadius: badgeH / 2, paddingHorizontal: px(6, u), gap: px(3, u) }]}>
-            <CrownLogo width={badgeFs * 1.2} height={badgeFs} />
-            <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: 0.5 * u }]} numberOfLines={1}>{slide.badge}</Text>
-          </LinearGradient>
-        </View>
+        {slide.badge ? (
+          <View pointerEvents="none">
+            <LinearGradient colors={['#FFD24A', '#F5A524']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeH, borderRadius: badgeH / 2, paddingHorizontal: px(6, u), gap: px(3, u) }]}>
+              <CrownLogo width={badgeFs * 1.2} height={badgeFs} />
+              <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: 0.5 * u }]} numberOfLines={1}>{slide.badge}</Text>
+            </LinearGradient>
+          </View>
+        ) : null}
         <View accessible accessibilityRole="header" accessibilityLabel={`${slide.title} ${line2}`.trim()}>
           <GoldLine text={slide.title} width={textW} size={mfont(HERO_M.line1, u)} id="hero-m-gold-1" />
           {line2 ? <GoldLine text={line2} width={textW} size={mfont(HERO_M.line2, u)} id="hero-m-gold-2" /> : null}

@@ -13,6 +13,7 @@
  * Every default is the safe one: everything off, test mode, consent required.
  */
 import { httpsError } from "./http";
+import { DEALS_DEFAULTS, SLIDER_DEFAULTS, parseDeals, parseSlider, publicDeals, publicSlider, validateDealsPatch, validateSliderPatch, type ShopDealsConfig, type ShopSliderConfig } from "./shopHomeConfig";
 import { AD_PLATFORM_DEFAULTS, AD_SLOT_KEYS, parseAdPlatform, publicAdPlatform, validateAdPlatformPatch, webRewardedUnitFrom, type AdPlatformConfig } from "./adPlatform";
 
 export const AD_PROVIDERS = ["none", "admob"] as const;
@@ -57,7 +58,12 @@ export interface MonetizationConfig {
   adPlatform: AdPlatformConfig;
   sponsored: { enabled: boolean; firstPosition: number; interval: number; maxPerSession: number };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number; creatorShareBps: number };
-  store: { enabled: boolean; featured: StoreFeaturedConfig };
+  /**
+   * `slider` / `deals`: the admin-managed hero slider and deal cards of the
+   * Shop home (lib/shopHomeConfig.ts). When the slider has no live slide the
+   * app falls back to `featured`.
+   */
+  store: { enabled: boolean; featured: StoreFeaturedConfig; slider: ShopSliderConfig; deals: ShopDealsConfig };
   /** Physical shop (lib/shop.ts) and its fraud rules (lib/shopRisk.ts). */
   /**
    * `monthlyBudgetInr`: the platform's spend limit. Physical products are the
@@ -159,6 +165,8 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
   store: {
     enabled: false,
     featured: { enabled: false, badge: "Legendary Drop", title: "", subtitle: "", itemIds: [], heroItemId: null, endsAt: null, ctaLabel: "Explore Now" },
+    slider: SLIDER_DEFAULTS,
+    deals: DEALS_DEFAULTS,
   },
   shop: {
     enabled: false,
@@ -295,7 +303,12 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
       maxCoinsPerSend: int(m.gifts?.maxCoinsPerSend, d.gifts.maxCoinsPerSend, BOUNDS.maxCoinsPerSend),
       creatorShareBps: int(m.gifts?.creatorShareBps, d.gifts.creatorShareBps, BOUNDS.creatorShareBps),
     },
-    store: { enabled: bool(m.store?.enabled, false), featured: parseFeatured(m.store?.featured) },
+    store: {
+      enabled: bool(m.store?.enabled, false),
+      featured: parseFeatured(m.store?.featured),
+      slider: parseSlider(m.store?.slider),
+      deals: parseDeals(m.store?.deals),
+    },
     shop: {
       enabled: bool(m.shop?.enabled, false),
       monthlyBudgetInr: int(m.shop?.monthlyBudgetInr, 0, BOUNDS.monthlyBudgetInr),
@@ -396,6 +409,8 @@ export function webRewardedUnit(cfg: MonetizationConfig): string {
 export function publicMonetizationConfig(cfg: any, nowMs: number = Date.now()) {
   const m = parseMonetizationConfig(cfg);
   const featured = publicFeatured(m, nowMs);
+  const slider = publicSlider(m.store.enabled, m.store.slider, nowMs);
+  const deals = publicDeals({ store: m.store.enabled, shop: m.shop.enabled }, m.store.deals, nowMs);
   const ready = m.ads.enabled && providerReady(m);
   return {
     ads: {
@@ -424,8 +439,14 @@ export function publicMonetizationConfig(cfg: any, nowMs: number = Date.now()) {
     adPlatform: publicAdPlatform(m.adPlatform),
     sponsored: m.sponsored,
     gifts: { enabled: m.gifts.enabled, maxQuantity: m.gifts.maxQuantity, maxCoinsPerSend: m.gifts.maxCoinsPerSend },
-    // The featured block is sent only while it is live; the app shows nothing otherwise.
-    store: featured ? { enabled: m.store.enabled, featured } : { enabled: m.store.enabled },
+    // The featured block, the slider and the deals are sent only while live
+    // (lib/shopHomeConfig.ts); the app falls back to its automatic blocks otherwise.
+    store: {
+      enabled: m.store.enabled,
+      ...(featured ? { featured } : {}),
+      ...(slider ? { slider } : {}),
+      ...(deals ? { deals } : {}),
+    },
     // Fraud thresholds stay server-side; the app only needs to know the shop is open.
     shop: { enabled: m.shop.enabled, requireVerifiedPhone: m.shop.fraud.requireVerifiedPhone },
     earning: m.earning,
@@ -561,8 +582,10 @@ export function validateMonetizationPatch(patch: any, nowMs: number = Date.now()
 
   const st = patch.store;
   if (obj(st, "store")) {
-    only(st, ["enabled", "featured"], "store");
+    only(st, ["enabled", "featured", "slider", "deals"], "store");
     isBool(st.enabled, "store.enabled");
+    validateSliderPatch(st.slider);
+    validateDealsPatch(st.deals);
     const f = st.featured;
     if (obj(f, "store.featured")) {
       only(f, ["enabled", "badge", "title", "subtitle", "itemIds", "heroItemId", "endsAt", "ctaLabel"], "store.featured");

@@ -10,6 +10,8 @@ import { emitToast } from '@/src/lib/toastBridge';
 import { BRAND, BRAND_GRAD, GOLD, PAD, useExplorePalette } from '@/src/components/explore/theme';
 import { CoinMeter, DANGER, GhostButton, GradientButton, PricePill, ShopCard, ShopHeader, Stepper } from '@/src/components/shop/ShopBits';
 import { VOTE_GRAD } from '@/src/components/shop/DigitalItemCard';
+import { DiscountTag } from '@/src/components/shop/premium/DiscountTag';
+import { discountOf } from '@/src/lib/shopModel';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useProfile } from '@/src/hooks/useProfileData';
 import { balancesOf, hasLiveBalance } from '@/src/lib/balances';
@@ -110,6 +112,11 @@ export default function ProductScreen() {
             </View>
             <View style={styles.heroBottom} pointerEvents="none">
               <PricePill coins={product.priceCoins} size="lg" dark />
+              {discountOf(product) > 0 ? (
+                <View style={styles.wasRow}>
+                  <DiscountTag item={product} size={13} color="#F3F4F6" />
+                </View>
+              ) : null}
             </View>
             {soldOut ? (
               <View style={[StyleSheet.absoluteFill, styles.soldOut]} pointerEvents="none">
@@ -238,7 +245,8 @@ const styles = StyleSheet.create({
 
   hero: { width: '100%', aspectRatio: 1, borderRadius: 24, overflow: 'hidden', borderWidth: 1.5 },
   heroTop: { position: 'absolute', top: 12, left: 12, right: 12, flexDirection: 'row', justifyContent: 'space-between' },
-  heroBottom: { position: 'absolute', left: 12, bottom: 12 },
+  heroBottom: { position: 'absolute', left: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  wasRow: { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 100 },
   pillText: { color: '#FFF', fontSize: 10.5, fontFamily: 'Urbanist-Black', letterSpacing: 0.5 },
   soldOut: { backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },

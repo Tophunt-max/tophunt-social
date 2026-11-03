@@ -30,7 +30,7 @@ import {
   type CampaignStatus,
 } from "../lib/sponsored";
 import { purgeShared } from "../lib/edgeCache";
-import { ADMIN_TRANSITIONS, ORDER_STATUSES, loadOrder, monthStart, shopMonthSpendPaise, transitionOrder, unitCoins, validateProductInput, type OrderStatus } from "../lib/shop";
+import { ADMIN_TRANSITIONS, ORDER_STATUSES, compareAtCoinsOf, loadOrder, monthStart, shopMonthSpendPaise, transitionOrder, unitCoins, validateProductInput, type OrderStatus } from "../lib/shop";
 import { coinValuesFromConfig } from "../lib/coinPricing";
 import { RISK_FLAG_LABELS } from "../lib/shopRisk";
 import { createNotification } from "../lib/notify";
@@ -465,6 +465,8 @@ export function registerMonetizationRoutes(
         id: p.id, title: p.title, description: p.description, category: p.category, images: JSON.parse(p.images || "[]"),
         priceInr: Number(p.price_inr_paise) / 100, shippingInr: Number(p.shipping_inr_paise) / 100,
         priceCoins: unitCoins(Number(p.price_inr_paise), Number(p.shipping_inr_paise), dpCoinInr),
+        compareAtInr: p.compare_at_inr_paise == null ? null : Number(p.compare_at_inr_paise) / 100,
+        compareAtCoins: compareAtCoinsOf(p.compare_at_inr_paise, Number(p.price_inr_paise), Number(p.shipping_inr_paise), dpCoinInr),
         returnDays: Number(p.return_days), active: !!p.active, featured: !!p.featured, sort: Number(p.sort),
         unitsSold: soldBy.get(p.id) ?? 0,
         variants: (varsBy.get(p.id) ?? []).map((v) => ({ id: v.id, label: v.label, sku: v.sku, stock: Number(v.stock), active: !!v.active })),
@@ -482,12 +484,12 @@ export function registerMonetizationRoutes(
     const keep = new Set<string>();
     const stmts: D1PreparedStatement[] = [
       c.env.DB.prepare(
-        `INSERT INTO shop_products (id, title, description, category, images, price_inr_paise, shipping_inr_paise, return_days, active, featured, sort, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO shop_products (id, title, description, category, images, price_inr_paise, shipping_inr_paise, compare_at_inr_paise, return_days, active, featured, sort, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, description = excluded.description, category = excluded.category,
            images = excluded.images, price_inr_paise = excluded.price_inr_paise, shipping_inr_paise = excluded.shipping_inr_paise,
-           return_days = excluded.return_days, active = excluded.active, featured = excluded.featured, sort = excluded.sort, updated_at = excluded.updated_at`,
-      ).bind(id, v.title, v.description, v.category, v.images, v.pricePaise, v.shippingPaise, v.returnDays, v.active, v.featured, v.sort, ts, ts),
+           compare_at_inr_paise = excluded.compare_at_inr_paise, return_days = excluded.return_days, active = excluded.active, featured = excluded.featured, sort = excluded.sort, updated_at = excluded.updated_at`,
+      ).bind(id, v.title, v.description, v.category, v.images, v.pricePaise, v.shippingPaise, v.compareAtPaise, v.returnDays, v.active, v.featured, v.sort, ts, ts),
     ];
     v.variants.forEach((vr: any, i: number) => {
       const vid = vr.id && oldVariants.some((o) => o.id === vr.id) ? vr.id : `${id}-${crypto.randomUUID().slice(0, 8)}`;
@@ -503,8 +505,8 @@ export function registerMonetizationRoutes(
     for (const o of oldVariants) if (!keep.has(o.id)) stmts.push(c.env.DB.prepare(`UPDATE shop_variants SET active = 0, updated_at = ? WHERE id = ?`).bind(ts, o.id));
     await c.env.DB.batch(stmts);
     await logAudit(c, before ? "shop.product.update" : "shop.product.create", "shop_product", id, {
-      before: before ? { title: before.title, priceInrPaise: before.price_inr_paise, active: !!before.active } : null,
-      after: { title: v.title, priceInrPaise: v.pricePaise, shippingInrPaise: v.shippingPaise, active: !!v.active, variants: v.variants.map((x: any) => ({ label: x.label, stock: x.stock })) },
+      before: before ? { title: before.title, priceInrPaise: before.price_inr_paise, compareAtInrPaise: before.compare_at_inr_paise ?? null, active: !!before.active } : null,
+      after: { title: v.title, priceInrPaise: v.pricePaise, shippingInrPaise: v.shippingPaise, compareAtInrPaise: v.compareAtPaise, active: !!v.active, variants: v.variants.map((x: any) => ({ label: x.label, stock: x.stock })) },
     });
     return c.json({ success: true });
   });

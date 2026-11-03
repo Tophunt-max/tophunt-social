@@ -74,7 +74,7 @@ import {
   validateContestInput,
 } from "../lib/contestAdmin";
 import { normalizePrizeType, publicPrize, resolveMatchPrize } from "../lib/prizes";
-import { EXPLORE_BANNER_PREFIX, ONBOARDING_IMAGE_PREFIX, PRODUCT_IMAGE_PREFIX } from "../lib/mediaCategories";
+import { EXPLORE_BANNER_PREFIX, ONBOARDING_IMAGE_PREFIX, PRODUCT_IMAGE_PREFIX, SHOP_BANNER_PREFIX } from "../lib/mediaCategories";
 import { sanitizeOnboardingSlides } from "../lib/onboardingConfig";
 import { formatDeliveryAddress, summariseDeliveryAddress } from "../lib/deliveryAddress";
 import {
@@ -271,6 +271,8 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["PUT", /^\/gamification\/(achievements|catalog)\/[^/]+$/],
   // Monetization writes: prices, refunds, revenue imports, campaign approval.
   ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop)(\/.*)?$/],
+  // Shop home artwork goes straight onto the Shop's first screen.
+  ["POST", /^\/media\/shop-banner$/],
 ];
 export function isSensitiveAdminRoute(method: string, path: string): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
@@ -890,11 +892,23 @@ async function productImageKeyIsAttached(
   env: Env,
   key: string,
 ): Promise<boolean> {
-  const [contestRows, claimRows] = await Promise.all([
+  const [contestRows, claimRows, shopRows, orderRows] = await Promise.all([
     db.select({ url: schema.contests.prizeProductImageUrl }).from(schema.contests).all(),
     db.select({ url: schema.prizeClaims.productImageUrl }).from(schema.prizeClaims).all(),
+    // Physical shop products upload into the same prefix (Shopping → Products),
+    // and order lines keep a snapshot of the cover image.
+    env.DB.prepare(`SELECT images FROM shop_products`).all<{ images: string }>(),
+    env.DB.prepare(`SELECT DISTINCT image AS url FROM shop_order_items WHERE image IS NOT NULL`).all<{ url: string }>(),
   ]);
-  return [...contestRows, ...claimRows].some(
+  const shopUrls = (shopRows.results ?? []).flatMap((r) => {
+    try {
+      const list = JSON.parse(r.images || "[]");
+      return Array.isArray(list) ? list.map((url: unknown) => ({ url })) : [];
+    } catch {
+      return [];
+    }
+  });
+  return [...contestRows, ...claimRows, ...shopUrls, ...(orderRows.results ?? [])].some(
     (row) => typeof row.url === "string" && !!row.url && productImageKeyFromPublicUrl(env, row.url) === key,
   );
 }
@@ -1046,6 +1060,21 @@ adminRoute.post("/media/explore-banner", async (c) => {
   const body = await readAdminImageBody(c);
   const uploaded = await uploadToR2(c.env, fileType, EXPLORE_BANNER_PREFIX, body, [fileType]);
   await logAudit(c, "explore.banner.upload", "explore-banner", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
+  return c.json(uploaded);
+});
+
+/**
+ * Image for a Shop home hero slide or deal card (appConfig.monetization.store
+ * .slider / .deals, lib/shopHomeConfig.ts). Same intake as the Explore banner:
+ * declared type + length checked before the body is read, exact-type byte
+ * check in uploadToR2, 5 MB cap, JPEG / PNG / WebP, audited.
+ */
+adminRoute.post("/media/shop-banner", async (c) => {
+  requireFullAdmin(c);
+  const fileType = assertAdminImageUpload(c);
+  const body = await readAdminImageBody(c);
+  const uploaded = await uploadToR2(c.env, fileType, SHOP_BANNER_PREFIX, body, [fileType]);
+  await logAudit(c, "shop.banner.upload", "shop-banner", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
   return c.json(uploaded);
 });
 
