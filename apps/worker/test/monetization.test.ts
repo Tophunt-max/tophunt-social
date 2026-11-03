@@ -356,6 +356,41 @@ describe('digital store', () => {
     const other = (await call(env, 'alice', 'getStore')).body.items.find((i: any) => i.itemId !== item.id);
     if (other) expect(other.soldCount).toBeGreaterThanOrEqual(0);
   });
+
+  it('compare-at price: refused at or below the price, null clears it, out of range refused', async () => {
+    const { env, item } = await setup(100);
+    const put = (body: any) => admin(env, 'PUT', `/monetization/store/${item.id}`, { priceCoins: 30, active: true, ...body });
+    const eq = await put({ compareAtCoins: 30 });
+    expect(eq.status).toBe(400);
+    expect(JSON.stringify(eq.body)).toMatch(/more than the price/);
+    expect((await put({ compareAtCoins: 10 })).status).toBe(400);
+    expect((await put({ compareAtCoins: 40.5 })).status).toBe(400);
+    expect((await put({ compareAtCoins: 10_000_001 })).status).toBe(400);
+    expect((await put({ compareAtCoins: 'abc' })).status).toBe(400);
+    expect((await put({ compareAtCoins: 40 })).status).toBe(200);
+    const listing = (await admin(env, 'GET', '/monetization/store')).body.find((r: any) => r.itemId === item.id).listing;
+    expect(listing.compareAtCoins).toBe(40);
+    expect((await put({ compareAtCoins: null })).status).toBe(200);
+    expect((await call(env, 'alice', 'getStore')).body.items.find((i: any) => i.itemId === item.id).compareAtCoins).toBeNull();
+    expect((await put({ compareAtCoins: '' })).status).toBe(200);
+  });
+
+  it('getStore returns compareAtCoins; buying still charges price_coins', async () => {
+    const { env, item } = await setup(100);
+    expect((await admin(env, 'PUT', `/monetization/store/${item.id}`, { priceCoins: 30, compareAtCoins: 60, active: true })).status).toBe(200);
+    const row = (await call(env, 'alice', 'getStore')).body.items.find((i: any) => i.itemId === item.id);
+    expect(row).toMatchObject({ priceCoins: 30, compareAtCoins: 60 });
+    // The compare-at price is never an accepted expectedPrice.
+    expect((await buy(env, item.id, { expectedPrice: 60 })).body.error.reason).toBe('price_changed');
+    const res = await buy(env, item.id);
+    expect(res.status).toBe(200);
+    expect(res.body.purchase.priceCoins).toBe(30);
+    expect((await user(env, 'alice'))!.dpcoin).toBe(70);
+    await assertLedger(env, 'alice');
+    // A stale row with compare-at <= price (written outside the validator) is not shown as a discount.
+    await env.DB.prepare(`UPDATE store_listings SET compare_at_coins = 30 WHERE item_id = ?`).bind(item.id).run();
+    expect((await call(env, 'alice', 'getStore')).body.items.find((i: any) => i.itemId === item.id).compareAtCoins).toBeNull();
+  });
 });
 
 // ===========================================================================

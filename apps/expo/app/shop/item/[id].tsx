@@ -17,6 +17,7 @@ import { useCoinRate } from '@/src/hooks/useCoinRate';
 import { useCountdown } from '@/src/hooks/useCountdown';
 import { useDigitalPurchase } from '@/src/hooks/useDigitalPurchase';
 import { useProfile } from '@/src/hooks/useProfileData';
+import { DiscountTag } from '@/src/components/shop/premium/DiscountTag';
 import { balancesOf, hasLiveBalance } from '@/src/lib/balances';
 import { coinsInInr } from '@/src/lib/coinValue';
 import { EQUIP_WHERE, TYPE_SINGULAR, hasRealStock, isShort } from '@/src/lib/shopModel';
@@ -141,6 +142,7 @@ function ItemDetail({
               <CoinIcon size={22} />
               <Text style={[styles.price, { color: p.text }]}>{item.priceCoins.toLocaleString()}</Text>
               <Text style={[styles.unit, { color: p.sub }]}>DP coin</Text>
+              <DiscountTag item={item} size={13} color={p.sub} />
             </View>
           )}
           {!item.owned && inr ? <Text style={[styles.inr, { color: p.sub }]}>{inr}</Text> : null}

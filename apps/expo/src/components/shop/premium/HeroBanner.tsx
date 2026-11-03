@@ -28,7 +28,7 @@ import { countdownParts, type HeroSlide, type HeroSlides } from '@/src/lib/shopM
 import { TH, glowShadow } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
-import { AUTOPLAY_MS, FONT_FLOOR, HERO, MOCK, fitFont, font, loopDelta, px, slideOffset, snapTarget, wrapIndex } from './mock';
+import { AUTOPLAY_MS, FONT_FLOOR, HERO, HERO_M, MOCK, MOCK_M, fitFont, font, loopDelta, mfont, px, slideOffset, snapTarget, wrapIndex } from './mock';
 import { ProductPreview } from './ProductPreview';
 import { CrownLogo, Laurel } from './ShopArt';
 
@@ -48,13 +48,22 @@ function useSecondClock(on: boolean): number {
 const artCenter = (timed: boolean) => (timed ? 430 : 500);
 
 export function HeroBanner({
-  hero, viewer, u, onExplore, onOpenItem,
-}: { hero: HeroSlides<StoreItemView>; viewer: Viewer; u: number; onExplore: () => void; onOpenItem: (id: string) => void }) {
+  hero, viewer, u, onExplore, onOpenItem, variant = 'desktop',
+}: {
+  hero: HeroSlides<StoreItemView>;
+  viewer: Viewer;
+  u: number;
+  onExplore: () => void;
+  onOpenItem: (id: string) => void;
+  /** 'mobile' draws the 340 px phone mock (HERO_M, u = width / 340); 'desktop' the 748 mock (HERO). Same slider. */
+  variant?: 'desktop' | 'mobile';
+}) {
   const reduce = useReducedMotion();
   const focused = useIsFocused();
+  const mobile = variant === 'mobile';
   const n = hero.slides.length;
-  const W = px(HERO.w, u);
-  const H = px(HERO.h, u);
+  const W = px(mobile ? HERO_M.w : HERO.w, u);
+  const H = px(mobile ? HERO_M.h : HERO.h, u);
   const [index, setIndex] = useState(0);
   const [dragging, setDragging] = useState(false);
   /** Last time a drag ended: a press right after a drag is the drag's mouse-up, not a tap. */
@@ -134,16 +143,38 @@ export function HeroBanner({
     else if (e.nativeEvent.actionName === 'decrement') go(-1);
   };
 
-  const radius = px(MOCK.hero.radius, u);
+  const radius = px(mobile ? MOCK_M.hero.radius : MOCK.hero.radius, u);
   const t = HERO.timer;
+  const tm = HERO_M.timer;
+  const dotSize = px(mobile ? HERO_M.dots.size : HERO.dots.size, u);
+  const dotsTop = px(mobile ? HERO_M.dots.y : HERO.dots.y, u) - dotSize / 2;
   return (
     <View style={[{ width: W, height: H, borderRadius: radius }, glowShadow('#EC4899', true, 'md')]}>
       <View style={[styles.clip, { width: W, height: H, borderRadius: radius }]}>
         <LinearGradient colors={['#2A0A5E', '#4C0F86', '#7E1A9E']} start={{ x: 0, y: 0.1 }} end={{ x: 1, y: 0.9 }} style={StyleSheet.absoluteFill} />
-        <HeroBurst width={W} height={H} cx={artCenter(timed)} />
+        {mobile ? (
+          <HeroBurst width={W} height={H} vw={HERO_M.w} vh={HERO_M.h} cx={HERO_M.w - HERO_M.art / 2 + 4} cy={HERO_M.h / 2} k={0.42} />
+        ) : (
+          <HeroBurst width={W} height={H} cx={artCenter(timed)} />
+        )}
         <GestureDetector gesture={pan}>
           <Animated.View style={[StyleSheet.absoluteFill, Platform.OS === 'web' ? ({ userSelect: 'none', cursor: n > 1 ? 'grab' : undefined } as any) : null]}>
-            {hero.slides.map((s, i) => (
+            {hero.slides.map((s, i) => mobile ? (
+              <MobileSlideView
+                key={s.item.itemId}
+                i={i}
+                n={n}
+                pos={pos}
+                slide={s}
+                viewer={viewer}
+                u={u}
+                W={W}
+                H={H}
+                visible={i === index}
+                onExplore={pressGuard(onExplore)}
+                onOpen={pressGuard(() => onOpenItem(s.item.itemId))}
+              />
+            ) : (
               <SlideView
                 key={s.item.itemId}
                 i={i}
@@ -163,7 +194,31 @@ export function HeroBanner({
           </Animated.View>
         </GestureDetector>
 
-        {cd && !cd.ended ? (
+        {cd && !cd.ended && mobile ? (
+          <View
+            style={[styles.timer, { right: px(tm.right, u), top: px(tm.top, u), gap: px(3, u) }]}
+            pointerEvents="none"
+            accessible
+            accessibilityLabel={`Limited time. ${cd.d} din ${cd.h} ghante ${cd.m} minute baaki`}
+          >
+            <View style={[styles.limited, { alignSelf: 'center', width: px(tm.pillW, u), height: px(tm.pillH, u), borderRadius: px(tm.pillH / 2, u), gap: px(3, u), paddingHorizontal: px(4, u) }]}>
+              <Ionicons name="time" size={mfont(9, u)} color="#FFF" />
+              <Text style={[styles.limitedText, { fontSize: mfont(tm.label, u), letterSpacing: 0.3 * u }]} numberOfLines={1}>LIMITED TIME</Text>
+            </View>
+            <View style={[styles.boxes, { gap: px(tm.gap, u) }]}>
+              {([['D', cd.d], ['H', cd.h], ['M', cd.m], ['S', cd.s]] as const).map(([k, v]) => {
+                const num = mfont(tm.num, u);
+                const unit = mfont(tm.unit, u);
+                return (
+                  <View key={k} style={[styles.box, { width: px(tm.box, u), height: px(tm.boxH, u), borderRadius: px(4, u) }]}>
+                    <Text style={[styles.boxNum, { fontSize: num, lineHeight: num * 1.1 }]}>{String(v).padStart(2, '0')}</Text>
+                    <Text style={[styles.boxUnit, { fontSize: unit, lineHeight: unit * 1.1 }]}>{k}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : cd && !cd.ended ? (
           <View
             style={[styles.timer, { left: px(t.x, u), top: px(t.y, u), width: px(t.w, u), gap: px(3, u) }]}
             pointerEvents="none"
@@ -192,7 +247,7 @@ export function HeroBanner({
 
         {n > 1 ? (
           <View
-            style={[styles.dots, { top: px(HERO.dots.y, u) - px(HERO.dots.size / 2, u), gap: px(5, u) }]}
+            style={[styles.dots, { top: dotsTop, gap: px(mobile ? 4 : 5, u) }]}
             accessible
             accessibilityRole="adjustable"
             accessibilityLabel={`Slide ${index + 1} / ${n}: ${hero.slides[index]?.item.name ?? ''}`}
@@ -200,7 +255,7 @@ export function HeroBanner({
             onAccessibilityAction={onA11y}
           >
             {hero.slides.map((s, i) => {
-              const d = px(HERO.dots.size, u);
+              const d = dotSize;
               return (
                 <TouchableOpacity
                   key={s.item.itemId}
@@ -219,38 +274,43 @@ export function HeroBanner({
 }
 
 /** Static light burst behind the art: rays, sparks and a gold glow (hero px, scaled to W×H). */
-const HeroBurst = React.memo(function HeroBurst({ width, height, cx }: { width: number; height: number; cx: number }) {
-  const cy = 72;
+const HeroBurst = React.memo(function HeroBurst({
+  width, height, cx, cy = 72, vw = HERO.w, vh = HERO.h, k = 1,
+}: { width: number; height: number; cx: number; cy?: number; vw?: number; vh?: number; k?: number }) {
+  // k scales every radius / offset (1 = the 748 mock); desktop output is unchanged at k = 1.
   const rays: string[] = [];
-  for (let k = 0; k < 18; k++) {
-    const a = (k / 18) * Math.PI * 2;
-    const da = k % 2 === 0 ? 0.07 : 0.04;
-    const r = 460;
+  for (let j = 0; j < 18; j++) {
+    const a = (j / 18) * Math.PI * 2;
+    const da = j % 2 === 0 ? 0.07 : 0.04;
+    const r = 460 * k;
     rays.push(`M${cx} ${cy}L${(cx + r * Math.cos(a - da)).toFixed(1)} ${(cy + r * Math.sin(a - da)).toFixed(1)}L${(cx + r * Math.cos(a + da)).toFixed(1)} ${(cy + r * Math.sin(a + da)).toFixed(1)}Z`);
   }
-  const sparks: [number, number, number][] = [[cx - 150, 26, 1.6], [cx + 140, 30, 2], [cx - 110, 120, 1.4], [cx + 170, 112, 1.8], [cx - 40, 14, 1.2], [cx + 60, 132, 1.3], [cx + 100, 60, 1.1]];
+  const at = (dx: number, y: number, r: number): [number, number, number] => [cx + dx * k, cy + (y - 72) * k, r];
+  const sparks: [number, number, number][] = [at(-150, 26, 1.6), at(140, 30, 2), at(-110, 120, 1.4), at(170, 112, 1.8), at(-40, 14, 1.2), at(60, 132, 1.3), at(100, 60, 1.1)];
+  const pinkX = vw - 108 * k;
+  const pinkY = cy + (20 - 72) * k;
   return (
-    <Svg width={width} height={height} viewBox={`0 0 ${HERO.w} ${HERO.h}`} preserveAspectRatio="none" style={StyleSheet.absoluteFill} pointerEvents="none">
+    <Svg width={width} height={height} viewBox={`0 0 ${vw} ${vh}`} preserveAspectRatio="none" style={StyleSheet.absoluteFill} pointerEvents="none">
       <Defs>
-        <RadialGradient id="hb-ray" cx={cx} cy={cy} r={360} gradientUnits="userSpaceOnUse">
+        <RadialGradient id="hb-ray" cx={cx} cy={cy} r={360 * k} gradientUnits="userSpaceOnUse">
           <Stop offset="0" stopColor="#FFE7FF" stopOpacity={0.5} />
           <Stop offset="1" stopColor="#FFE7FF" stopOpacity={0} />
         </RadialGradient>
-        <RadialGradient id="hb-gold" cx={cx} cy={cy} r={110} gradientUnits="userSpaceOnUse">
+        <RadialGradient id="hb-gold" cx={cx} cy={cy} r={110 * k} gradientUnits="userSpaceOnUse">
           <Stop offset="0" stopColor="#FFD24A" stopOpacity={0.55} />
           <Stop offset="0.5" stopColor="#F59E0B" stopOpacity={0.2} />
           <Stop offset="1" stopColor="#F59E0B" stopOpacity={0} />
         </RadialGradient>
-        <RadialGradient id="hb-pink" cx={640} cy={20} r={180} gradientUnits="userSpaceOnUse">
+        <RadialGradient id="hb-pink" cx={pinkX} cy={pinkY} r={180 * k} gradientUnits="userSpaceOnUse">
           <Stop offset="0" stopColor="#F472B6" stopOpacity={0.35} />
           <Stop offset="1" stopColor="#F472B6" stopOpacity={0} />
         </RadialGradient>
       </Defs>
-      <Circle cx={640} cy={20} r={180} fill="url(#hb-pink)" />
+      <Circle cx={pinkX} cy={pinkY} r={180 * k} fill="url(#hb-pink)" />
       <G opacity={0.55}>
         {rays.map((d) => <Path key={d} d={d} fill="url(#hb-ray)" />)}
       </G>
-      <Circle cx={cx} cy={cy} r={110} fill="url(#hb-gold)" />
+      <Circle cx={cx} cy={cy} r={110 * k} fill="url(#hb-gold)" />
       {sparks.map(([x, y, r]) => <Circle key={`${x}-${y}`} cx={x} cy={y} r={r} fill="#FFF7D6" opacity={0.9} />)}
     </Svg>
   );
@@ -365,11 +425,107 @@ const SlideView = React.memo(function SlideView({
   );
 });
 
+/** One line of gold gradient text (react-native-svg), left-aligned, shrunk to fit `width`. */
+function GoldLine({ text, width, size, id }: { text: string; width: number; size: number; id: string }) {
+  const fs = fitFont(text, width, size, Math.min(size, 10));
+  const height = Math.ceil(fs * 1.12);
+  const y = height / 2 + fs * 0.35;
+  const common = { x: 1, y, fontSize: fs, fontFamily: TH.fonts.bold, textAnchor: 'start' as const };
+  return (
+    <View style={{ width, height }} pointerEvents="none">
+      <Svg width={width} height={height}>
+        <Defs>
+          <SvgLinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#FFF6C2" />
+            <Stop offset="0.45" stopColor="#FFD24A" />
+            <Stop offset="1" stopColor="#E08A00" />
+          </SvgLinearGradient>
+        </Defs>
+        <SvgText {...common} y={y + fs * 0.06} fill="rgba(20,0,40,0.55)">{text}</SvgText>
+        <SvgText {...common} fill="none" stroke="#3A0D12" strokeWidth={Math.max(1, fs * 0.08) * 2} strokeLinejoin="round">{text}</SvgText>
+        <SvgText {...common} fill={`url(#${id})`} stroke="#FFE9A8" strokeWidth={0.3}>{text}</SvgText>
+      </Svg>
+    </View>
+  );
+}
+
+/** "MYTHIC COLLECTION" caps → "Mythic Collection" for the second gold line of the phone hero. */
+const titleCase = (s: string) => s.toLowerCase().replace(/(^|\s)(\S)/g, (_m, sp: string, c: string) => sp + c.toUpperCase());
+
+/**
+ * One slide of the phone hero (HERO_M, 316×124 mock px): text column left
+ * (badge, two gold lines, the type line, CTA), the item art large on the
+ * right, bleeding past the edge.
+ */
+const MobileSlideView = React.memo(function MobileSlideView({
+  i, n, pos, slide, viewer, u, W, H, visible, onExplore, onOpen,
+}: {
+  i: number; n: number; pos: SharedValue<number>; slide: HeroSlide<StoreItemView>; viewer: Viewer; u: number; W: number; H: number; visible: boolean;
+  onExplore: () => void; onOpen: () => void;
+}) {
+  const moving = useAnimatedStyle(() => ({ transform: [{ translateX: slideOffset(i, pos.value, n) * W }] }));
+  const textW = px(HERO_M.textW, u);
+  const art = px(HERO_M.art, u);
+  const badgeFs = mfont(HERO_M.badge.text, u);
+  const badgeH = px(HERO_M.badge.h, u);
+  const ctaFs = mfont(HERO_M.cta.size, u);
+  const ctaH = px(HERO_M.cta.h, u);
+  const subFs = mfont(HERO_M.sub, u);
+  const line2 = slide.caps ? titleCase(slide.caps) : '';
+  return (
+    <Animated.View
+      style={[StyleSheet.absoluteFill, moving]}
+      accessibilityElementsHidden={!visible}
+      importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
+    >
+      <TouchableOpacity
+        onPress={onOpen}
+        activeOpacity={0.92}
+        accessibilityRole="button"
+        accessibilityLabel={`${slide.item.name} details`}
+        style={[styles.abs, { left: W - art + px(8, u), top: (H - art) / 2, width: art, height: art }]}
+      >
+        <ProductPreview item={slide.item} viewer={viewer} width={art} height={art} radius={px(14, u)} bare />
+      </TouchableOpacity>
+
+      <View style={[styles.abs, styles.columnLeft, { left: px(HERO_M.textX, u), top: 0, width: textW, height: H - px(10, u), gap: px(2, u) }]} pointerEvents="box-none">
+        <View pointerEvents="none">
+          <LinearGradient colors={['#FFD24A', '#F5A524']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeH, borderRadius: badgeH / 2, paddingHorizontal: px(6, u), gap: px(3, u) }]}>
+            <CrownLogo width={badgeFs * 1.2} height={badgeFs} />
+            <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: 0.5 * u }]} numberOfLines={1}>{slide.badge}</Text>
+          </LinearGradient>
+        </View>
+        <View accessible accessibilityRole="header" accessibilityLabel={`${slide.title} ${line2}`.trim()}>
+          <GoldLine text={slide.title} width={textW} size={mfont(HERO_M.line1, u)} id="hero-m-gold-1" />
+          {line2 ? <GoldLine text={line2} width={textW} size={mfont(HERO_M.line2, u)} id="hero-m-gold-2" /> : null}
+        </View>
+        {slide.subtitle ? (
+          <Text style={[styles.sub, { textAlign: 'left', width: textW, fontSize: subFs, lineHeight: subFs * 1.25 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+            {slide.subtitle}
+          </Text>
+        ) : null}
+        <TouchableOpacity onPress={onExplore} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel={slide.ctaLabel} style={{ marginTop: px(4, u) }}>
+          <LinearGradient
+            colors={['#FFE45C', '#FFC41A']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={[styles.cta, { width: px(HERO_M.cta.w, u), height: ctaH, borderRadius: ctaH / 2, paddingHorizontal: px(8, u), gap: px(4, u) }]}
+          >
+            <Text style={[styles.ctaText, { fontSize: ctaFs }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{slide.ctaLabel}</Text>
+            <ArrowIcon variant="arrow" direction="right" size={ctaFs} color="#1A1033" />
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  );
+});
+
 const styles = StyleSheet.create({
   clip: { overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(236,72,153,0.6)', backgroundColor: '#2A0A5E' },
   abs: { position: 'absolute' },
   center: { alignItems: 'center', justifyContent: 'center' },
   column: { alignItems: 'center', justifyContent: 'center' },
+  columnLeft: { alignItems: 'flex-start', justifyContent: 'center' },
   laurel: { position: 'absolute' },
   badge: { flexDirection: 'row', alignItems: 'center' },
   badgeText: { color: '#2A1300', fontFamily: TH.fonts.bold },

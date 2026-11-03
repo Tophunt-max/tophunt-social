@@ -4,7 +4,7 @@ import { BackButton } from '@/src/components/ui/BackButton';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { Ionicons } from '@/src/lib/icons';
 import { TH } from '@/src/theme/tophunt';
-import { FONT_FLOOR, MOCK, font, px } from './mock';
+import { FONT_FLOOR, MOCK, MOCK_M, font, mfont, px } from './mock';
 import { BagIcon, CoinArt, CrownLogo, CrownOrnament, DiamondArt, Laurel } from './ShopArt';
 
 /**
@@ -105,6 +105,101 @@ export function ShopHeader({
             Collect • Customize • Upgrade • Stand Out
           </Text>
           <Laurel width={lw} height={px(18, u)} flip />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Phone header (mobile mock, 340 px wide, scaled by u = width / 340): the
+ * small crown ornament at the top centre; crown + "TopHunt", the live DP coin
+ * and Diamond pills (skeletons until the server answers), cart with its
+ * count and the orders icon; then the title row: back (only when there is
+ * history to go back to), gold bag, "Shop" and the tagline between laurels.
+ */
+export function ShopHeaderMobile({
+  u, inner, live, dpcoin, diamonds, cartCount, onOrders, onCart, showBack,
+}: {
+  u: number;
+  inner: number;
+  live: boolean;
+  dpcoin: number;
+  diamonds: number;
+  cartCount: number;
+  onOrders: () => void;
+  onCart: () => void;
+  showBack: boolean;
+}) {
+  const H = MOCK_M.header;
+  const T = MOCK_M.title;
+  const pillH = px(H.pillH, u);
+  const pillFs = mfont(H.pillText, u);
+  const pillIcon = px(H.pillIcon, u);
+  const pill = { height: pillH, borderRadius: pillH / 2, paddingHorizontal: px(6, u), gap: px(4, u) };
+  const badge = px(H.badge, u);
+  const ornW = px(MOCK_M.crown.w, u);
+  const lw = px(T.laurel * 0.5, u);
+  const rowH = px(H.h - H.rowTop, u);
+  return (
+    <View style={{ width: inner }}>
+      <View style={[styles.ornament, { top: 0, left: (inner - ornW) / 2 }]} pointerEvents="none">
+        <CrownOrnament width={ornW} height={px(MOCK_M.crown.h, u)} />
+      </View>
+
+      <View style={[styles.row, { marginTop: px(H.rowTop, u), height: rowH, gap: px(H.gap, u) }]}>
+        <View style={[styles.row, { gap: px(4, u), flexShrink: 1, minWidth: 0 }]} accessible accessibilityRole="header" accessibilityLabel="TopHunt">
+          <CrownLogo width={px(H.logo, u)} height={px(H.logo * 0.82, u)} />
+          <Text style={[styles.word, { fontSize: mfont(H.word, u) }]} numberOfLines={1}>TopHunt</Text>
+        </View>
+        <View style={{ flex: 1 }} />
+        <View
+          style={[styles.pill, pill, { minWidth: px(H.dpW, u), borderColor: '#F5B935', borderWidth: Math.max(1, 1.2 * u) }]}
+          accessible
+          accessibilityLabel={live ? `${dpcoin.toLocaleString()} DP coin` : 'DP coin balance load ho raha hai'}
+        >
+          <CoinArt size={pillIcon} />
+          {live ? (
+            <Text style={[styles.pillText, { fontSize: pillFs }]} numberOfLines={1}>{dpcoin.toLocaleString()} DP</Text>
+          ) : (
+            <Skeleton width={px(40, u)} height={pillFs * 0.8} borderRadius={4} />
+          )}
+        </View>
+        <View
+          style={[styles.pill, pill, { minWidth: px(H.diaW, u), borderColor: '#22D3EE', borderWidth: Math.max(1, 1.2 * u) }]}
+          accessible
+          accessibilityLabel={live ? `${diamonds.toLocaleString()} Diamonds` : 'Diamond balance load ho raha hai'}
+        >
+          <DiamondArt size={pillIcon} />
+          {live ? (
+            <Text style={[styles.pillText, { fontSize: pillFs }]} numberOfLines={1}>{diamonds.toLocaleString()}</Text>
+          ) : (
+            <Skeleton width={px(30, u)} height={pillFs * 0.8} borderRadius={4} />
+          )}
+        </View>
+        <TouchableOpacity onPress={onCart} hitSlop={8} accessibilityRole="button" accessibilityLabel={cartCount ? `Cart, ${cartCount} items` : 'Cart, empty'}>
+          <Ionicons name="cart-outline" size={px(H.cart, u)} color="#FFFFFF" />
+          {cartCount > 0 ? (
+            <View style={[styles.badge, { minWidth: badge, height: badge, borderRadius: badge / 2, top: -badge * 0.4, right: -badge * 0.45 }]}>
+              <Text style={[styles.badgeText, { fontSize: badge * 0.62 }]}>{cartCount > 99 ? '99+' : cartCount}</Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={onOrders} hitSlop={8} accessibilityRole="button" accessibilityLabel="My orders">
+          <Ionicons name="receipt-outline" size={px(H.orders, u)} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={[styles.row, { marginTop: px(T.y - H.h, u), height: px(T.h, u), gap: px(6, u) }]}>
+        {showBack ? <BackButton size={px(T.back, u)} color="#FFFFFF" /> : null}
+        <BagIcon size={px(T.bag, u)} outline />
+        <Text style={[styles.title, { fontSize: mfont(T.size, u) }]} accessibilityRole="header">Shop</Text>
+        <View style={[styles.row, { flex: 1, minWidth: 0, gap: px(3, u), justifyContent: 'center' }]}>
+          <Laurel width={lw} height={px(T.laurel, u)} />
+          <Text style={[styles.tagline, { fontSize: mfont(T.tagline, u) }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+            Collect • Customize • Upgrade • Stand Out
+          </Text>
+          <Laurel width={lw} height={px(T.laurel, u)} flip />
         </View>
       </View>
     </View>

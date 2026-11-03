@@ -52,6 +52,7 @@ export function StoreTab() {
     mutationFn: (r: any) =>
       api.monetization.saveListing(r.itemId, {
         priceCoins: r.listing.priceCoins,
+        compareAtCoins: r.listing.compareAtCoins ?? null,
         stockLimit: r.listing.stockLimit ?? null,
         refundable: r.listing.refundable,
         active: !r.listing.active,
@@ -448,7 +449,15 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
         <div>
           <div className="flex items-baseline justify-between gap-2">
             <p className="font-bold text-base">{r.name}</p>
-            <p className="font-bold text-base whitespace-nowrap">{freeXp ? `Level ${Number(r.asset?.level) || 0}` : l ? `${fmtNumber(l.priceCoins)} DP coin` : "—"}</p>
+            <p className="font-bold text-base whitespace-nowrap">
+              {!freeXp && l && l.compareAtCoins > l.priceCoins ? (
+                <span className="text-xs font-medium text-muted-foreground line-through mr-1.5" aria-label={`Original price ${fmtNumber(l.compareAtCoins)} DP coin`}>{fmtNumber(l.compareAtCoins)}</span>
+              ) : null}
+              {freeXp ? `Level ${Number(r.asset?.level) || 0}` : l ? `${fmtNumber(l.priceCoins)} DP coin` : "—"}
+              {!freeXp && l && l.compareAtCoins > l.priceCoins ? (
+                <span className="ml-1.5 text-xs font-bold text-red-600">-{discountPercent(l.priceCoins, l.compareAtCoins)}%</span>
+              ) : null}
+            </p>
           </div>
           <p className="text-xs text-muted-foreground">{TYPE_LABEL[r.type] ?? r.type} · <span className="font-mono">{r.itemId}</span></p>
           {r.description ? <p className="text-sm text-muted-foreground mt-1">{r.description}</p> : null}
@@ -504,10 +513,26 @@ function Detail({ k, v, wide }: { k: string; v: React.ReactNode; wide?: boolean 
   );
 }
 
+/** Whole percent off (rounded down, as the app shows it). */
+function discountPercent(price: number, compareAt: number): number {
+  return compareAt > price && price > 0 ? Math.floor(((compareAt - price) / compareAt) * 100) : 0;
+}
+
+/** Live preview under the original-price field. */
+function compareHint(price: number, raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "Empty = no discount. Must be a price you really charged before; users pay the price above.";
+  const v = Number(s);
+  if (!Number.isInteger(v)) return "A whole number of DP coin.";
+  if (!(v > price)) return `Must be more than the price (${fmtNumber(price)}) to show a discount.`;
+  return `Shows ${fmtNumber(v)} struck through, -${discountPercent(price, v)}% off. Users pay ${fmtNumber(price)}.`;
+}
+
 function ListingDialog({ item, onClose, onDone }: { item: any; onClose: () => void; onDone: () => void }) {
   const l = item.listing;
   const [f, setF] = useState({
     priceCoins: l?.priceCoins ?? 50,
+    compareAtCoins: l?.compareAtCoins ?? "",
     stockLimit: l?.stockLimit ?? "",
     refundable: l?.refundable ?? true,
     active: l?.active ?? false,
@@ -519,6 +544,7 @@ function ListingDialog({ item, onClose, onDone }: { item: any; onClose: () => vo
     mutationFn: () =>
       api.monetization.saveListing(item.itemId, {
         priceCoins: Number(f.priceCoins),
+        compareAtCoins: String(f.compareAtCoins).trim() === "" ? null : Number(f.compareAtCoins),
         stockLimit: f.stockLimit === "" ? null : Number(f.stockLimit),
         refundable: f.refundable,
         active: f.active,
@@ -543,6 +569,12 @@ function ListingDialog({ item, onClose, onDone }: { item: any; onClose: () => vo
           <Num label="Price (DP coin)" value={f.priceCoins} onChange={(v) => setF({ ...f, priceCoins: v })} />
           <Text label="Stock limit (empty = unlimited)" value={String(f.stockLimit)} onChange={(v) => setF({ ...f, stockLimit: v })} hint="A real limit. Never show fake scarcity." />
         </div>
+        <Text
+          label="Original price (DP coin, optional — shows a real discount)"
+          value={String(f.compareAtCoins)}
+          onChange={(v) => setF({ ...f, compareAtCoins: v })}
+          hint={compareHint(Number(f.priceCoins), f.compareAtCoins)}
+        />
         <div className="grid grid-cols-2 gap-3">
           <label className="block"><span className="text-xs text-muted-foreground mb-1 block">On sale from</span><input type="datetime-local" className={field} value={f.startsAt} onChange={(e) => setF({ ...f, startsAt: e.target.value })} /></label>
           <label className="block"><span className="text-xs text-muted-foreground mb-1 block">On sale until</span><input type="datetime-local" className={field} value={f.endsAt} onChange={(e) => setF({ ...f, endsAt: e.target.value })} /></label>

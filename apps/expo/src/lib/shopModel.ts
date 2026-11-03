@@ -26,6 +26,8 @@ export interface ShopItem {
   startsAt?: number | null;
   createdAt?: number | null;
   soldCount?: number | null;
+  /** Admin compare-at ("original") price; a real discount only when above priceCoins. Older servers omit it. */
+  compareAtCoins?: number | null;
 }
 
 // ------------------------------------------------------------------ tabs
@@ -286,9 +288,11 @@ export interface DigitalFilter {
   wishlist?: boolean;
   /** Restrict to these rarities (the "Legendary collection" banner: legendary + mythic). */
   rarities?: string[] | null;
+  /** Only listings with a real compare-at price (the home "Mega Shop Deal"). */
+  discounted?: boolean;
 }
 
-export const NO_FILTER: DigitalFilter = { type: null, rarity: null, query: '', ids: null, wishlist: false, rarities: null };
+export const NO_FILTER: DigitalFilter = { type: null, rarity: null, query: '', ids: null, wishlist: false, rarities: null, discounted: false };
 
 /** The filter with the wishlist's current ids applied (un-hearting inside the view removes the item at once). */
 export function withWishlist(f: DigitalFilter, wishlistIds: readonly string[] | null | undefined): DigitalFilter {
@@ -305,6 +309,7 @@ export function filterDigital<T extends ShopItem>(items: T[], f: DigitalFilter):
       (!rar || rar.has(i.rarity)) &&
       (!f.type || i.type === f.type) &&
       (!f.rarity || i.rarity === f.rarity) &&
+      (!f.discounted || discountOf(i) > 0) &&
       (!q || `${i.name} ${i.description ?? ''} ${TYPE_LABEL[i.type] ?? i.type} ${i.rarity}`.toLowerCase().includes(q)),
   );
   if (!f.ids) return out;
@@ -696,4 +701,79 @@ export function dealsBlock<T extends PhysicalLike>(shopEnabled: boolean, product
     products: list.length ? physicalPicks(list, 3) : null,
     deal: hotDeals(list, 1)[0] ?? null,
   };
+}
+
+// ------------------------------------------------------------------ discounts (compare-at price)
+
+/**
+ * Whole percent off for a listing with a real compare-at price, rounded down
+ * (30 vs 40 → 25), else 0. Display only: the server charges priceCoins.
+ */
+export function discountOf(i: Pick<ShopItem, 'priceCoins' | 'compareAtCoins'>): number {
+  const was = Number(i.compareAtCoins);
+  const now = Number(i.priceCoins);
+  if (!Number.isFinite(was) || !Number.isFinite(now) || now <= 0 || was <= now) return 0;
+  return Math.floor(((was - now) / was) * 100);
+}
+
+export interface DealsSummary<T extends ShopItem = ShopItem> {
+  /** Live, not-owned listings with a real discount, biggest discount first. */
+  items: T[];
+  /** Biggest real discount among them (whole percent, rounded down); 0 when none. */
+  maxPercent: number;
+  /** Soonest real future sale end among them, or null (no timer). */
+  endsAt: number | null;
+}
+
+/**
+ * The home "Mega Shop Deal": every live listing with a compare-at price above
+ * its price. Owned items and listings whose sale already ended (client clock)
+ * are left out. Nothing here is invented: no items → maxPercent 0, no timer.
+ */
+export function dealsSummary<T extends ShopItem>(items: T[], now: number): DealsSummary<T> {
+  const live = items.filter((i) => !i.owned && discountOf(i) > 0 && !(validTs(i.endsAt) !== null && (i.endsAt as number) <= now));
+  live.sort((a, b) => discountOf(b) - discountOf(a) || a.itemId.localeCompare(b.itemId));
+  const ends = live.map((i) => i.endsAt).filter((e): e is number => isFutureDeadline(e, now));
+  return {
+    items: live,
+    maxPercent: live.reduce((m, i) => Math.max(m, discountOf(i)), 0),
+    endsAt: ends.length ? Math.min(...ends) : null,
+  };
+}
+
+export const DEAL_TIMER_HMS_MAX_MS = 7 * 86_400_000;
+
+/**
+ * Deal timer text: "HH:MM:SS" (hours may exceed 24) when the end is at most
+ * 7 days away, "Xd Yh" beyond that, null when there is no real future end.
+ */
+export function dealTimerLabel(endsAt: unknown, now: number): string | null {
+  if (!isFutureDeadline(endsAt, now)) return null;
+  const ms = (endsAt as number) - now;
+  const left = Math.floor(ms / 1000);
+  if (ms > DEAL_TIMER_HMS_MAX_MS) return `${Math.floor(left / 86_400)}d ${Math.floor((left % 86_400) / 3600)}h`;
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${two(Math.floor(left / 3600))}:${two(Math.floor((left % 3600) / 60))}:${two(left % 60)}`;
+}
+
+// ------------------------------------------------------------------ mobile home pickers
+
+/** Category tiles on the mobile home: 2 rows of 5 (Sound FX is dropped). */
+export function mobileCategoryTiles<T extends { key: TileKey }>(tiles: T[]): T[] {
+  return tiles.filter((t) => t.key !== 'sound').slice(0, 10);
+}
+
+/** Collection tiles on the mobile home: Frames, Themes, Badges, Titles, VS Effects. */
+export const MOBILE_COLLECTION_KEYS: TileKey[] = ['frame', 'theme', 'badge', 'title', 'vs'];
+export function mobileCollectionTiles<T extends { key: TileKey }>(tiles: T[]): T[] {
+  return MOBILE_COLLECTION_KEYS.map((k) => tiles.find((t) => t.key === k)).filter((t): t is T => !!t);
+}
+
+/** Rarities the "Upgrade Your Profile" banner opens on the Digital tab. */
+export const UPGRADE_RARITIES = ['epic', 'legendary', 'mythic'] as const;
+
+/** The "Upgrade Your Profile" banner: only when the store is on and sells at least one Epic+ item. */
+export function showUpgradeBanner(storeEnabled: boolean, items: ShopItem[]): boolean {
+  const ok = new Set<string>(UPGRADE_RARITIES);
+  return storeEnabled && items.some((i) => ok.has(i.rarity));
 }
