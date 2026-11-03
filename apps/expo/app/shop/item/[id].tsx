@@ -10,6 +10,7 @@ import { Ionicons } from '@/src/lib/icons';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import { ProductPreview } from '@/src/components/shop/premium/ProductPreview';
 import { RarityBadge } from '@/src/components/shop/premium/RarityBadge';
+import { WishlistHeart } from '@/src/components/shop/premium/WishlistHeart';
 import { EmptyState, ErrorState } from '@/src/components/shop/premium/ShopBlocks';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useCoinRate } from '@/src/hooks/useCoinRate';
@@ -76,10 +77,14 @@ export default function ShopItemScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: p.bg }]} edges={['top']}>
+    <LinearGradient colors={p.bgGradient} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={[styles.bar, { width: contentW, paddingHorizontal: pad }]}>
         <BackButton size={22} color={p.text} style={[styles.iconBtn, { backgroundColor: p.card, borderColor: p.border }]} />
         <Text style={[styles.barTitle, { color: p.text }]} accessibilityRole="header" numberOfLines={1}>{item?.name ?? 'Item details'}</Text>
+        {item ? (
+          <WishlistHeart itemId={item.itemId} name={item.name} size={18} color={p.text} bubble={false} style={[styles.iconBtn, { backgroundColor: p.card, borderColor: p.border }]} />
+        ) : null}
         <View style={[styles.coinPill, { backgroundColor: p.card, borderColor: p.border }]} accessible accessibilityLabel={live ? `${bal.dpcoin} DP coin` : 'DP coin balance load ho raha hai'}>
           <CoinIcon size={15} />
           {live ? <Text style={[styles.coinText, { color: p.text }]}>{bal.dpcoin.toLocaleString()}</Text> : <Skeleton width={30} height={12} borderRadius={6} />}
@@ -93,6 +98,7 @@ export default function ShopItemScreen() {
       </ScrollView>
       {dialog}
     </SafeAreaView>
+    </LinearGradient>
   );
 }
 

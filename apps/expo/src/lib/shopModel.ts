@@ -282,16 +282,27 @@ export interface DigitalFilter {
   query: string;
   /** Restrict to these ids (the featured drop's "Explore"). */
   ids: string[] | null;
+  /** Show only the viewer's wishlist (its ids are read live, see withWishlist). */
+  wishlist?: boolean;
+  /** Restrict to these rarities (the "Legendary collection" banner: legendary + mythic). */
+  rarities?: string[] | null;
 }
 
-export const NO_FILTER: DigitalFilter = { type: null, rarity: null, query: '', ids: null };
+export const NO_FILTER: DigitalFilter = { type: null, rarity: null, query: '', ids: null, wishlist: false, rarities: null };
+
+/** The filter with the wishlist's current ids applied (un-hearting inside the view removes the item at once). */
+export function withWishlist(f: DigitalFilter, wishlistIds: readonly string[] | null | undefined): DigitalFilter {
+  return f.wishlist ? { ...f, ids: [...(wishlistIds ?? [])] } : f;
+}
 
 export function filterDigital<T extends ShopItem>(items: T[], f: DigitalFilter): T[] {
   const q = f.query.trim().toLowerCase();
   const ids = f.ids ? new Set(f.ids) : null;
+  const rar = f.rarities?.length ? new Set(f.rarities) : null;
   const out = items.filter(
     (i) =>
       (!ids || ids.has(i.itemId)) &&
+      (!rar || rar.has(i.rarity)) &&
       (!f.type || i.type === f.type) &&
       (!f.rarity || i.rarity === f.rarity) &&
       (!q || `${i.name} ${i.description ?? ''} ${TYPE_LABEL[i.type] ?? i.type} ${i.rarity}`.toLowerCase().includes(q)),
@@ -369,4 +380,228 @@ export function purchaseErrorView(e: unknown): PurchaseErrorView {
     return view('network', 'Connection nahi hua', 'Network issue. Dobara try karo: ye wahi request hai, isliye double charge nahi hoga.', { retrySameRequest: true });
   }
   return view('other', 'Purchase nahi hua', err.message || 'Kuch galat ho gaya. Thodi der baad try karo.');
+}
+
+// ------------------------------------------------------------------ reference home layout
+
+/** Accent colours for the category / collection tiles (one per tile, dark-neon look). */
+export const TILE_ACCENTS = {
+  frame: '#A855F7',
+  theme: '#38BDF8',
+  badge: '#22C55E',
+  title: '#FFC857',
+  vs: '#F97316',
+  victory: '#FACC15',
+  effect: '#EC4899',
+  gifts: '#F43F5E',
+  emotes: '#FB923C',
+  sound: '#22D3EE',
+  more: '#8B5CF6',
+} as const;
+
+export type TileKey = keyof typeof TILE_ACCENTS;
+
+export interface CategoryTile {
+  key: TileKey;
+  label: string;
+  /** Icon name from src/lib/icons.tsx. */
+  icon: string;
+  accent: string;
+  /** Store item type the tile filters by, or null (gifts / more / not built yet). */
+  type: string | null;
+  /** What tapping does; null = "Jaldi" (coming soon), not tappable. */
+  target: 'type' | 'gifts' | 'all' | null;
+  /** Live listings of this type (0 for tiles without a type). */
+  count: number;
+}
+
+const TILE_DEFS: { key: TileKey; label: string; icon: string; type: string | null }[] = [
+  { key: 'frame', label: 'Frames', icon: 'radio-button-off', type: 'frame' },
+  { key: 'theme', label: 'Themes', icon: 'color-palette', type: 'theme' },
+  { key: 'badge', label: 'Badges', icon: 'ribbon', type: 'badge' },
+  { key: 'title', label: 'Titles', icon: 'trophy', type: 'title' },
+  { key: 'vs', label: 'VS Effects', icon: 'flash', type: null },
+  { key: 'victory', label: 'Victory FX', icon: 'medal', type: null },
+  { key: 'effect', label: 'Profile FX', icon: 'person-circle', type: 'effect' },
+  { key: 'gifts', label: 'Gifts', icon: 'gift', type: null },
+  { key: 'emotes', label: 'Emotes', icon: 'happy', type: null },
+  { key: 'sound', label: 'Sound FX', icon: 'musical-notes', type: null },
+  { key: 'more', label: 'More', icon: 'apps', type: null },
+];
+
+/**
+ * The "Shop Categories" grid of the reference layout. Every tile is drawn, but
+ * only tiles backed by something real are tappable: a type with live listings,
+ * Gifts when gifts are on and the catalogue has gifts, and More when the store
+ * has anything. The rest (VS Effects, Victory FX, Emotes, Sound FX: no such
+ * item type exists yet, and real types with no listings) are "Jaldi".
+ */
+export function categoryTiles(items: ShopItem[], gifts: { enabled: boolean; count: number | null | undefined }): CategoryTile[] {
+  const counts = new Map<string, number>();
+  for (const i of items) if (i?.type) counts.set(i.type, (counts.get(i.type) ?? 0) + 1);
+  return TILE_DEFS.map((d) => {
+    const count = d.type ? counts.get(d.type) ?? 0 : 0;
+    let target: CategoryTile['target'] = null;
+    if (d.type) target = count > 0 ? 'type' : null;
+    else if (d.key === 'gifts') target = giftsCategory(gifts.enabled, gifts.count) ? 'gifts' : null;
+    else if (d.key === 'more') target = items.length > 0 ? 'all' : null;
+    return { ...d, accent: TILE_ACCENTS[d.key], count, target };
+  });
+}
+
+export const FEATURED_COLLECTION_MAX = 8;
+
+/**
+ * "Featured Collection": the admin's drop items when one is live, else the
+ * Legendary collection followed by Epic items. Never padded with anything else.
+ */
+export function featuredCollection<T extends ShopItem>(items: T[], feature: FeaturedView<T> | null, max = FEATURED_COLLECTION_MAX): T[] {
+  if (feature) return feature.items.slice(0, max);
+  const epic = items.filter((i) => i.rarity === 'epic').sort(byRarityThenPrice);
+  return [...legendaryCollection(items, max), ...epic].slice(0, max);
+}
+
+/** "Trending Items" (by real units sold) when something has sold; otherwise "Shop Items" in store order. */
+export function trendingItems<T extends ShopItem>(items: T[], max = 6): { title: string; trending: boolean; items: T[] } {
+  const g = trendingGrid(items, max);
+  const trending = g.title === 'Trending';
+  return { title: trending ? 'Trending Items' : 'Shop Items', trending, items: g.items };
+}
+
+export interface HeroSlides<T extends ShopItem = ShopItem> {
+  /** 'drop' = the admin's featured drop; 'legendary' = honest fallback, no drop / limited wording. */
+  mode: 'drop' | 'legendary';
+  badge: string;
+  title: string;
+  subtitle: string;
+  ctaLabel: string;
+  /** One slide per item, hero first. */
+  slides: T[];
+  /** Real future end of the drop only; never set for the fallback. */
+  endsAt: number | null;
+}
+
+/**
+ * Hero banner content. The configured drop when live; else the store's top
+ * Legendary / Mythic item labelled "Legendary collection" (CTA opens the
+ * Digital tab on legendary + mythic); else nothing.
+ */
+export function heroSlides<T extends ShopItem>(items: T[], feature: FeaturedView<T> | null, max = FEATURED_COLLECTION_MAX): HeroSlides<T> | null {
+  if (feature) {
+    const rest = feature.items.filter((i) => i.itemId !== feature.hero.itemId);
+    return {
+      mode: 'drop',
+      badge: feature.badge,
+      title: feature.title,
+      subtitle: feature.subtitle,
+      ctaLabel: feature.ctaLabel,
+      slides: [feature.hero, ...rest].slice(0, max),
+      endsAt: feature.endsAt,
+    };
+  }
+  const top = legendaryCollection(items, 1)[0];
+  if (!top) return null;
+  return {
+    mode: 'legendary',
+    badge: 'Legendary collection',
+    title: top.name,
+    subtitle: 'Shop ke sabse rare Legendary aur Mythic items',
+    ctaLabel: 'Explore Collection',
+    slides: [top],
+    endsAt: null,
+  };
+}
+
+export interface CountdownParts {
+  d: number;
+  h: number;
+  m: number;
+  s: number;
+  ended: boolean;
+}
+
+/** D/H/M/S left until `endsAt`, or null when there is no real deadline. Never negative. */
+export function countdownParts(endsAt: unknown, now: number): CountdownParts | null {
+  const end = validTs(endsAt);
+  if (end === null) return null;
+  const left = Math.max(0, Math.floor((end - now) / 1000));
+  return {
+    d: Math.floor(left / 86_400),
+    h: Math.floor((left % 86_400) / 3600),
+    m: Math.floor((left % 3600) / 60),
+    s: left % 60,
+    ended: left === 0,
+  };
+}
+
+export type CardTagKind = 'new' | 'limited' | 'rarity';
+export interface CardTag {
+  kind: CardTagKind;
+  label: string;
+  /** Rarity id for kind 'rarity' (colour comes from the rarity token). */
+  rarity?: string;
+}
+
+/**
+ * The corner pill on a Featured / Trending card: NEW (arrived in the last 30
+ * days), else LIMITED (real stock limit or real future sale end), else the
+ * rarity name. Each label is backed by a field the server sent.
+ */
+export function cardTag(i: ShopItem, now: number): CardTag {
+  const at = arrivedAt(i);
+  if (at !== null && at <= now && now - at <= NEW_WINDOW_MS) return { kind: 'new', label: 'NEW' };
+  if (!i.owned && (hasRealStock(i) || isFutureDeadline(i.endsAt, now))) return { kind: 'limited', label: 'LIMITED' };
+  return { kind: 'rarity', label: rarityLabelOf(i.rarity).toUpperCase(), rarity: i.rarity };
+}
+
+const RARITY_LABELS: Record<string, string> = { common: 'Common', uncommon: 'Uncommon', rare: 'Rare', epic: 'Epic', legendary: 'Legendary', mythic: 'Mythic' };
+const rarityLabelOf = (r: string) => RARITY_LABELS[r] ?? 'Common';
+
+export interface CollectionTile {
+  key: TileKey;
+  label: string;
+  icon: string;
+  accent: string;
+  count: number;
+}
+
+/**
+ * "My Collection" tiles: owned (not revoked) inventory items by type. The
+ * server's `owned` is already false for revoked rows. VS Effects / Victory FX
+ * have no item type yet, so they read 0. Gifts is left out: no cheap source
+ * for a received-gifts count exists on this screen.
+ */
+export function collectionTiles(inventory: { type: string; owned?: boolean; revokedAt?: number | null }[] | null | undefined): { total: number; tiles: CollectionTile[] } {
+  const counts = new Map<string, number>();
+  let total = 0;
+  for (const i of inventory ?? []) {
+    if (!i?.owned || i.revokedAt) continue;
+    total += 1;
+    counts.set(i.type, (counts.get(i.type) ?? 0) + 1);
+  }
+  const keys: TileKey[] = ['frame', 'theme', 'badge', 'title', 'vs', 'victory', 'effect'];
+  const tiles = keys.map((k) => {
+    const d = TILE_DEFS.find((x) => x.key === k)!;
+    return { key: k, label: d.label, icon: d.icon, accent: TILE_ACCENTS[k], count: d.type ? counts.get(d.type) ?? 0 : 0 };
+  });
+  return { total, tiles };
+}
+
+/** The physical fields the Shop home reads (services/shop ShopProduct). */
+export interface PhysicalLike {
+  id: string;
+  featured: boolean;
+  variants: { inStock: boolean }[];
+}
+
+const inStock = (p: PhysicalLike) => p.variants.some((v) => v.inStock);
+
+/** "Physical Products" row: in-stock products first, store order kept within each group. */
+export function physicalPicks<T extends PhysicalLike>(products: T[], max = 3): T[] {
+  return [...products.filter(inStock), ...products.filter((p) => !inStock(p))].slice(0, max);
+}
+
+/** "Hot Deals": products the admin marked featured that are in stock. No discount is implied. */
+export function hotDeals<T extends PhysicalLike>(products: T[], max = 8): T[] {
+  return products.filter((p) => p.featured && inStock(p)).slice(0, max);
 }

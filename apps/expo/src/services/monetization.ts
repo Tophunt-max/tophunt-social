@@ -110,6 +110,7 @@ export const MONETIZATION_KEYS = {
   giftHistory: (d: 'sent' | 'received') => ['gift-history', d] as const,
   giftWall: (uid: string) => ['gift-wall', uid] as const,
   store: ['digital-store'] as const,
+  wishlist: ['store-wishlist'] as const,
   sponsored: ['sponsored-feed'] as const,
 };
 
@@ -210,6 +211,54 @@ export function useBuyStoreItem() {
       qc.invalidateQueries({ queryKey: MONETIZATION_KEYS.store });
       qc.invalidateQueries({ queryKey: GAMIFICATION_KEYS.inventory });
       qc.invalidateQueries({ queryKey: ['profile'] });
+    },
+  });
+}
+
+// ------------------------------------------------------------------ wishlist
+
+/** The caller's wishlisted store item ids (worker lib/wishlist.ts), newest first. */
+export function useWishlist(enabled: boolean) {
+  return useQuery({
+    queryKey: MONETIZATION_KEYS.wishlist,
+    queryFn: async () => ((await callApi('getWishlist')) as { itemIds: string[] }).itemIds,
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+const WISHLIST_MUTATION = ['store-wishlist', 'set'] as const;
+
+/**
+ * Add / remove one item. Optimistic: the heart flips at once and rolls back if
+ * the server refuses (unknown item, list full, offline). The server's list is
+ * applied only when no other toggle is still in flight, so fast taps on
+ * several hearts do not flicker.
+ */
+export function useToggleWishlist() {
+  const qc = useQueryClient();
+  const key = MONETIZATION_KEYS.wishlist;
+  return useMutation({
+    mutationKey: WISHLIST_MUTATION,
+    mutationFn: (v: { itemId: string; on: boolean }) => callApi('setWishlist', v) as Promise<{ itemIds: string[] }>,
+    onMutate: async (v) => {
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<string[]>(key);
+      qc.setQueryData<string[]>(key, (old = []) =>
+        v.on ? (old.includes(v.itemId) ? old : [v.itemId, ...old]) : old.filter((x) => x !== v.itemId),
+      );
+      return { prev };
+    },
+    onError: (_e, v, ctx) => {
+      // Undo only this toggle (other in-flight toggles keep their optimistic state).
+      const had = !!ctx?.prev?.includes(v.itemId);
+      qc.setQueryData<string[]>(key, (old = []) => {
+        if (v.on) return had ? old : old.filter((x) => x !== v.itemId);
+        return had && !old.includes(v.itemId) ? [v.itemId, ...old] : old;
+      });
+    },
+    onSuccess: (r) => {
+      if (qc.isMutating({ mutationKey: WISHLIST_MUTATION }) <= 1 && Array.isArray(r?.itemIds)) qc.setQueryData(key, r.itemIds);
     },
   });
 }

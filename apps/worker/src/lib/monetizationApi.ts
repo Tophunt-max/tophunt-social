@@ -11,6 +11,7 @@ import { httpsError } from "./http";
 import { consumeRateLimit, rateLimit } from "./rateLimit";
 import { giftHistory, listLiveGifts, sendGift } from "./gifts";
 import { buyStoreItem, listStore } from "./store";
+import { getWishlist, setWishlist } from "./wishlist";
 import { recordAdEvents } from "./adMetrics";
 import { adsSuppressedUntil, ivtCheck } from "./adStats";
 import { recordCampaignEvent } from "./sponsored";
@@ -32,6 +33,8 @@ export const MONETIZATION_ACTIONS = new Set([
   "getGiftHistory",
   "getStore",
   "buyStoreItem",
+  "getWishlist",
+  "setWishlist",
   "recordAdEvents",
   "getAdStatus",
   "recordSponsoredEvent",
@@ -112,6 +115,17 @@ export async function handleMonetizationAction(action: string, ctx: Ctx): Promis
       const purchase = await buyStoreItem(env, uid, { itemId: body.itemId, expectedPrice: body.expectedPrice, requestId: body.requestId });
       if (!purchase.replayed) ctx.purgeProfile();
       return { success: true, purchase };
+    }
+
+    // ---------------------------------------------------------- wishlist (lib/wishlist.ts)
+    case "getWishlist": {
+      await rateLimit(env, `wishget:${uid}`, 60, 60);
+      return getWishlist(env, uid);
+    }
+
+    case "setWishlist": {
+      await rateLimit(env, `wishset:${uid}`, 60, 60, { failClosed: true });
+      return setWishlist(env, uid, { itemId: body.itemId, on: body.on });
     }
 
     case "recordAdEvents": {

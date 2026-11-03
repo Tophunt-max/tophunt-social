@@ -1901,6 +1901,20 @@ export const userInventory = sqliteTable(
   }),
 );
 
+/** Shop wishlist (migration 0080, lib/wishlist.ts). Purged on account deletion. */
+export const storeWishlist = sqliteTable(
+  "store_wishlist",
+  {
+    uid: text("uid").notNull(),
+    itemId: text("item_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.uid, t.itemId] }),
+    uidIdx: index("idx_store_wishlist_uid").on(t.uid, t.createdAt),
+  }),
+);
+
 export const rewardGrants = sqliteTable(
   "reward_grants",
   {

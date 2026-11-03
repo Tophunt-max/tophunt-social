@@ -359,6 +359,80 @@ describe('digital store', () => {
 });
 
 // ===========================================================================
+describe('store wishlist', () => {
+  async function setup() {
+    const { env } = makeEnv();
+    await seedConfig(env, { store: { enabled: true } });
+    await seedUser(env, 'alice');
+    await seedUser(env, 'bob');
+    await seedUser(env, 'boss', 0, 0, { role: 'admin' });
+    const items = (await env.DB.prepare(`SELECT id FROM reward_catalog WHERE active = 1 ORDER BY id LIMIT 3`).all<any>()).results!.map((r: any) => r.id);
+    for (const id of items) expect((await admin(env, 'PUT', `/monetization/store/${id}`, { priceCoins: 30, active: true })).status).toBe(200);
+    return { env, items };
+  }
+  const set = (env: TestEnv, uid: string, itemId: unknown, on: unknown) => call(env, uid, 'setWishlist', { itemId, on });
+
+  it('requires sign-in', async () => {
+    const { env, items } = await setup();
+    expect((await call(env, null, 'getWishlist')).status).toBeGreaterThanOrEqual(401);
+    expect((await set(env, null as any, items[0], true)).status).toBeGreaterThanOrEqual(401);
+  });
+
+  it('adds, is idempotent, and removes', async () => {
+    const { env, items } = await setup();
+    expect((await call(env, 'alice', 'getWishlist')).body).toEqual({ itemIds: [] });
+    const a = await set(env, 'alice', items[0], true);
+    expect(a.status).toBe(200);
+    expect(a.body.itemIds).toEqual([items[0]]);
+    expect((await set(env, 'alice', items[0], true)).body.itemIds).toEqual([items[0]]);
+    await set(env, 'alice', items[1], true);
+    expect(new Set((await call(env, 'alice', 'getWishlist')).body.itemIds)).toEqual(new Set([items[0], items[1]]));
+    expect((await set(env, 'alice', items[0], false)).body.itemIds).toEqual([items[1]]);
+    // Removing something not on the list is a no-op.
+    expect((await set(env, 'alice', items[0], false)).status).toBe(200);
+  });
+
+  it('rejects malformed ids, a non-boolean flag, and items not on sale', async () => {
+    const { env, items } = await setup();
+    expect((await set(env, 'alice', 'Bad Id!', true)).status).toBe(400);
+    expect((await set(env, 'alice', 42, true)).status).toBe(400);
+    expect((await set(env, 'alice', items[0], 'yes')).status).toBe(400);
+    const unknown = await set(env, 'alice', 'no_such_item', true);
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.error.reason).toBe('item_unavailable');
+    // An unlisted (but real) catalogue item cannot be added either.
+    await admin(env, 'PUT', `/monetization/store/${items[2]}`, { priceCoins: 30, active: false });
+    expect((await set(env, 'alice', items[2], true)).status).toBe(404);
+    expect((await call(env, 'alice', 'getWishlist')).body.itemIds).toEqual([]);
+  });
+
+  it('caps the list at 200 items per user', async () => {
+    const { env, items } = await setup();
+    const ts = Date.now();
+    for (let i = 0; i < 200; i++) {
+      await env.DB.prepare(`INSERT INTO store_wishlist (uid, item_id, created_at) VALUES ('alice', ?, ?)`).bind(`old_${i}`, ts - i).run();
+    }
+    const full = await set(env, 'alice', items[0], true);
+    expect(full.status).toBe(429);
+    expect(full.body.error.reason).toBe('wishlist_full');
+    // Re-adding an item already on the list is still fine, and removing frees a slot.
+    await set(env, 'alice', 'old_0', false);
+    expect((await set(env, 'alice', items[0], true)).status).toBe(200);
+    expect((await call(env, 'alice', 'getWishlist')).body.itemIds).toHaveLength(200);
+  });
+
+  it("keeps each user's list separate", async () => {
+    const { env, items } = await setup();
+    await set(env, 'alice', items[0], true);
+    await set(env, 'bob', items[1], true);
+    expect((await call(env, 'alice', 'getWishlist')).body.itemIds).toEqual([items[0]]);
+    expect((await call(env, 'bob', 'getWishlist')).body.itemIds).toEqual([items[1]]);
+    await set(env, 'bob', items[0], false);
+    expect((await call(env, 'alice', 'getWishlist')).body.itemIds).toEqual([items[0]]);
+  });
+});
+
+// ===========================================================================
 describe('store featured drop', () => {
   const NOW = 1_800_000_000_000;
   const featured = (f: any = {}) => ({ enabled: true, title: 'Mythic Week', itemIds: ['frame_a', 'frame_b'], ...f });
