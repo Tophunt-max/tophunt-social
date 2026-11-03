@@ -237,6 +237,7 @@ function Roadmap({ data, p, avatarUri, name }: { data: ProgressionView; p: Explo
       <Text style={[styles.cardTitle, { color: p.text }]}>Level roadmap</Text>
       <LevelRoadmap
         roadmap={data.roadmap}
+        currentXp={data.levelInfo?.xp}
         p={p}
         avatarUri={avatarUri}
         name={name}

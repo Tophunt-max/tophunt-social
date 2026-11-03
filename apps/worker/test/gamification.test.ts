@@ -903,7 +903,26 @@ describe('visual layer contract', () => {
     await env.DB.prepare(`INSERT INTO reward_grants (id, uid, source_type, source_id, coins, status, created_at, updated_at) VALUES ('level:2:alice','alice','level','2',10,'claimed',1,1), ('level:3:alice','alice','level','3',10,'claimable',1,1)`).run();
     const r = await call(env, 'alice', 'getProgression');
     const byLevel = Object.fromEntries(r.body.roadmap.map((m: any) => [m.level, m.rewardState]));
-    expect(byLevel).toEqual({ 2: 'claimed', 3: 'claimable', 5: 'pending', 6: 'none' });
+    expect(byLevel).toMatchObject({ 1: 'none', 2: 'claimed', 3: 'claimable', 4: 'none', 5: 'pending', 6: 'none' });
+  });
+
+  it('roadmap lists every level 1-100 with its free XP item, named after it when nothing else is configured', async () => {
+    const env = env0();
+    await on(env, { milestones: [{ level: 5, title: 'Five', description: 'Custom', items: [], feature: null, coins: 0 }] });
+    await seedUser(env, 'alice', { xp: xpForLevel(2, CURVE) });
+    const r = await call(env, 'alice', 'getProgression');
+    expect(r.body.roadmap.map((m: any) => m.level)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+    const lv1 = r.body.roadmap[0];
+    expect(lv1).toMatchObject({ level: 1, unlocked: true, title: 'Default', xp: xpForLevel(1, CURVE) });
+    expect(lv1.items.map((i: any) => i.id)).toContain('xp40_frame_default');
+    expect(r.body.roadmap[2]).toMatchObject({ level: 3, unlocked: false });
+    // A configured milestone keeps its own copy and still shows the level's XP item.
+    const lv5 = r.body.roadmap[4];
+    expect(lv5).toMatchObject({ title: 'Five', description: 'Custom' });
+    expect(lv5.items.length).toBeGreaterThanOrEqual(1);
+    // The effective config always has one milestone per level (admin editor shows all 100).
+    const cfg = await admin(env, 'GET', '/gamification/config');
+    expect(cfg.body.progression.milestones.map((m: any) => m.level)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
   });
 
   it('with the experience off, the roadmap shows no coin rewards', async () => {

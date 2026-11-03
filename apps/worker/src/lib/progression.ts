@@ -170,6 +170,27 @@ export const DEFAULT_MILESTONES: Milestone[] = [
   m(100, "Legend", "Legendary title, frame, celebration effect and lifetime showcase.", ["title_legend", "frame_legendary", "effect_legend_burst"], "lifetime_showcase"),
 ];
 
+/** Title/description of an auto-filled level with nothing configured on it. */
+export const fillerMilestone = (level: number): Milestone => m(level, `Level ${level}`, `Reach level ${level}.`);
+/** True for an auto-filled level (no rewards, default copy): not announced on level-up. */
+export const isFillerMilestone = (ms: Milestone): boolean =>
+  ms.title === `Level ${ms.level}` && !ms.items?.length && !ms.feature && !(ms.coins > 0);
+
+/**
+ * Every level 1..maxLevel has exactly one milestone row: configured rows are
+ * kept, missing levels get a filler. The roadmap and the admin editor then
+ * show all levels, not only the ones that grant something.
+ */
+export function fillMilestones(list: unknown[], maxLevel: number): Milestone[] {
+  const byLevel = new Map<number, Milestone>();
+  for (const raw of list) {
+    const ms = raw as Milestone;
+    if (ms && Number.isInteger(ms.level) && ms.level >= 1 && !byLevel.has(ms.level)) byLevel.set(ms.level, ms);
+  }
+  for (let l = 1; l <= maxLevel; l++) if (!byLevel.has(l)) byLevel.set(l, fillerMilestone(l));
+  return [...byLevel.values()].sort((a, b) => a.level - b.level);
+}
+
 export const DEFAULT_QUESTS: QuestDef[] = [
   { id: "weekly_votes", title: "Vote in 25 battles this week", period: "week", metric: "votes", target: 25, xp: 25, minLevel: 1, enabled: true },
   { id: "weekly_entries", title: "Enter 3 battles this week", period: "week", metric: "entries", target: 3, xp: 25, minLevel: 1, enabled: true },
@@ -306,7 +327,7 @@ export function sanitizeProgression(raw: unknown): ProgressionConfig {
     maxLevel,
     rules: mergeRules(p.rules),
     ranks: Array.isArray(p.ranks) && p.ranks.length ? p.ranks : DEFAULT_RANKS,
-    milestones: Array.isArray(p.milestones) ? p.milestones : DEFAULT_MILESTONES,
+    milestones: fillMilestones(Array.isArray(p.milestones) ? p.milestones : DEFAULT_MILESTONES, maxLevel),
     quests: Array.isArray(p.quests) ? p.quests : DEFAULT_QUESTS,
     pinnedLimit: isInt(p.pinnedLimit, 0, 12) ? p.pinnedLimit : DEFAULT_PROGRESSION.pinnedLimit,
     rewardBudgetId: typeof p.rewardBudgetId === "string" && p.rewardBudgetId ? p.rewardBudgetId : null,

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { formatXp, FEATURE_LABELS, type LevelInfo } from '@/src/lib/progression';
-import { milestoneState, tierForRank, type MilestoneState } from '@/src/lib/gamificationAssets';
+import { milestoneState, roadmapWindow, tierForRank, type MilestoneState } from '@/src/lib/gamificationAssets';
 import type { ExplorePalette } from '@/src/components/explore/theme';
 import type { RoadmapEntry } from '@/src/services/gamification';
 import { LevelBadge } from './LevelBadge';
@@ -69,8 +69,11 @@ export function LevelRoadmap({
   onClaim,
   claimableGrantFor,
   busy,
+  currentXp,
 }: {
   roadmap: RoadmapEntry[];
+  /** Lifetime XP, for "X XP to go" on the next level. */
+  currentXp?: number;
   p: ExplorePalette;
   avatarUri?: string | null;
   name?: string | null;
@@ -79,14 +82,31 @@ export function LevelRoadmap({
   busy?: boolean;
 }) {
   const [open, setOpen] = useState<RoadmapEntry | null>(null);
+  const [showPast, setShowPast] = useState(false);
+  const [showFuture, setShowFuture] = useState(false);
+  const win = roadmapWindow(roadmap, { showPast, showFuture });
+  const rows = win.rows;
   return (
     <View>
-      {roadmap.map((m, i) => {
+      <Text style={[styles.sub, { color: p.sub, marginBottom: 10 }]}>
+        Level {Math.max(1, win.currentLevel)} / {roadmap.length} · har level par ek free reward
+      </Text>
+      {win.pastHidden > 0 || (showPast && win.currentLevel > 1) ? (
+        <TouchableOpacity onPress={() => setShowPast((v) => !v)} style={[styles.fold, { backgroundColor: p.chip }]} accessibilityRole="button">
+          <GamificationIcon assetKey="reward.claimed" size={16} />
+          <Text style={[styles.foldText, { color: p.text }]}>
+            {showPast ? 'Purane levels chhupayein' : `Level 1–${win.currentLevel - 1} unlocked · dekhein`}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+      {rows.map((m, i) => {
         const st = milestoneState(m);
+        const isNext = m.level === win.nextLevel;
+        const xpLeft = isNext && typeof m.xp === 'number' && typeof currentXp === 'number' ? Math.max(0, m.xp - currentXp) : null;
         return (
           <TouchableOpacity
             key={m.level}
-            style={styles.node}
+            style={[styles.node, isNext && [styles.nextNode, { borderColor: '#FF4D67', backgroundColor: p.chip }]]}
             onPress={() => setOpen(m)}
             accessibilityRole="button"
             accessibilityLabel={`Level ${m.level}: ${m.title}. ${NODE_LABEL[st]}.`}
@@ -99,14 +119,18 @@ export function LevelRoadmap({
                   color={st === 'locked' ? undefined : '#FFFFFF'}
                 />
               </View>
-              {i < roadmap.length - 1 ? <View style={[styles.line, { backgroundColor: m.unlocked ? '#22C55E66' : p.border }]} /> : null}
+              {i < rows.length - 1 ? <View style={[styles.line, { backgroundColor: m.unlocked ? '#22C55E66' : p.border }]} /> : null}
             </View>
             <View style={{ flex: 1, paddingBottom: 14 }}>
-              <Text style={[styles.nodeTitle, { color: m.unlocked ? p.text : p.sub }]}>Level {m.level} · {m.title}</Text>
-              <Text style={[styles.sub, { color: NODE_COLORS[st] }]}>{NODE_LABEL[st]}</Text>
+              {isNext ? <Text style={styles.nextTag}>AGLA LEVEL</Text> : null}
+              <Text style={[styles.nodeTitle, { color: m.unlocked || isNext ? p.text : p.sub }]}>Level {m.level} · {m.title}</Text>
+              <Text style={[styles.sub, { color: isNext ? '#FF4D67' : NODE_COLORS[st] }]}>
+                {isNext ? (xpLeft !== null ? `${formatXp(xpLeft)} XP aur chahiye` : 'Agla unlock') : m.level === win.currentLevel ? 'Aapka level' : NODE_LABEL[st]}
+              </Text>
+              {isNext && m.description ? <Text style={[styles.sub, { color: p.sub }]} numberOfLines={2}>{m.description}</Text> : null}
               <View style={styles.previews}>
                 {m.items.slice(0, 4).map((it) => (
-                  <CosmeticPreview key={it.id} item={{ ...it, owned: it.owned ?? m.unlocked }} size={34} avatarUri={avatarUri} name={name} />
+                  <CosmeticPreview key={it.id} item={{ ...it, owned: it.owned ?? m.unlocked }} size={isNext ? 52 : 34} avatarUri={avatarUri} name={name} />
                 ))}
                 {m.coins > 0 ? (
                   <View style={[styles.chip, { backgroundColor: p.chip }]}>
@@ -124,6 +148,14 @@ export function LevelRoadmap({
           </TouchableOpacity>
         );
       })}
+      {win.futureHidden > 0 || showFuture ? (
+        <TouchableOpacity onPress={() => setShowFuture((v) => !v)} style={[styles.fold, { backgroundColor: p.chip }]} accessibilityRole="button">
+          <GamificationIcon assetKey="reward.locked" size={16} />
+          <Text style={[styles.foldText, { color: p.text }]}>
+            {showFuture ? 'Kam dikhayein' : `Baaki ${win.futureHidden} levels dekhein (Level ${roadmap.length} tak)`}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
       <RewardSheet visible={!!open} onClose={() => setOpen(null)} p={p} title={open ? `Level ${open.level} · ${open.title}` : ''}>
         {open ? (
           <View style={{ gap: 10 }}>
@@ -173,6 +205,10 @@ const styles = StyleSheet.create({
   nextRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
   next: { fontSize: 13, fontFamily: 'Urbanist-Medium', flexShrink: 1 },
   node: { flexDirection: 'row', gap: 12 },
+  nextNode: { borderWidth: 1.5, borderRadius: 16, padding: 10, marginBottom: 8, marginLeft: -10, marginRight: -4 },
+  nextTag: { color: '#FF4D67', fontSize: 10, fontFamily: 'Urbanist-Bold', letterSpacing: 0.8, marginBottom: 2 },
+  fold: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
+  foldText: { fontSize: 13, fontFamily: 'Urbanist-SemiBold', flexShrink: 1 },
   rail: { alignItems: 'center', width: 30 },
   dot: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
   line: { width: 2, flex: 1, marginTop: 2 },

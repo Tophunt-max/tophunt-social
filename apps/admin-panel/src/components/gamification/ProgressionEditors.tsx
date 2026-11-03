@@ -92,30 +92,60 @@ export function RanksEditor({ rows, onChange }: { rows: RankRow[]; onChange: (ro
   );
 }
 
-export function MilestonesEditor({ rows, onChange, itemIds }: { rows: MilestoneRow[]; onChange: (rows: MilestoneRow[]) => void; itemIds: string[] }) {
-  const r = useRows(rows, onChange);
+/** An auto-filled level (worker progression.ts fillerMilestone): nothing configured on it. */
+export const isFillerRow = (m: MilestoneRow) => m.title === `Level ${m.level}` && !m.items?.length && !m.feature && !(Number(m.coins) > 0);
+const fillerRow = (level: number): MilestoneRow => ({ level, title: `Level ${level}`, description: `Reach level ${level}.`, items: [], feature: null, coins: 0 });
+
+/** One row per level 1..maxLevel; missing levels are filled, so all levels are always listed. */
+export function fillMilestoneRows(rows: MilestoneRow[], maxLevel: number): MilestoneRow[] {
+  const byLevel = new Map<number, MilestoneRow>();
+  for (const r of rows) if (Number.isInteger(Number(r.level)) && !byLevel.has(Number(r.level))) byLevel.set(Number(r.level), { ...r, level: Number(r.level) });
+  for (let l = 1; l <= maxLevel; l++) if (!byLevel.has(l)) byLevel.set(l, fillerRow(l));
+  return [...byLevel.values()].sort((a, b) => a.level - b.level);
+}
+
+/**
+ * Level milestones, one row per level 1..maxLevel. The level is fixed per row
+ * (it is the row); "Reset" turns a level back into a plain filler. Each row
+ * shows that level's free XP item (Gamification → XP level rewards), which is
+ * granted on its own: milestone items are extra rewards on top of it.
+ */
+export function MilestonesEditor({ rows, onChange, itemIds, maxLevel, xpRewardByLevel }: {
+  rows: MilestoneRow[]; onChange: (rows: MilestoneRow[]) => void; itemIds: string[]; maxLevel: number; xpRewardByLevel?: Map<number, string>;
+}) {
+  const [onlyConfigured, setOnlyConfigured] = useState(false);
+  const all = fillMilestoneRows(rows, maxLevel);
+  const set = (level: number, patch: Partial<MilestoneRow>) => onChange(all.map((r) => (r.level === level ? { ...r, ...patch } : r)));
+  const shown = all.filter((r) => r.level <= maxLevel && (!onlyConfigured || !isFillerRow(r)));
+  const beyond = all.filter((r) => r.level > maxLevel).length;
   return (
     <div className="overflow-x-auto">
       <datalist id="gam-item-ids">{itemIds.map((id) => <option key={id} value={id} />)}</datalist>
+      <label className="flex items-center gap-2 text-xs mb-2">
+        <input type="checkbox" checked={onlyConfigured} onChange={(e) => setOnlyConfigured(e.target.checked)} />
+        Only levels with a custom title, items, feature or Diamond ({all.filter((r) => !isFillerRow(r)).length} of {maxLevel})
+      </label>
+      {beyond > 0 && <p className="text-xs text-amber-700 mb-2">{beyond} milestone(s) are above the max level ({maxLevel}) and can never be reached.</p>}
       <table className="w-full">
-        <thead><tr><th className={th}>Level</th><th className={th}>Title</th><th className={th}>Description</th><th className={th}>Items (catalog ids)</th><th className={th}>Feature key</th><th className={th}>Diamond</th><th /></tr></thead>
+        <thead><tr><th className={th}>Level</th><th className={th}>Free XP item</th><th className={th}>Title</th><th className={th}>Description</th><th className={th}>Extra items (catalog ids)</th><th className={th}>Feature key</th><th className={th}>Diamond</th><th /></tr></thead>
         <tbody>
-          {rows.map((row, i) => (
-            <tr key={i}>
-              <td className={td}><NumberCell min={1} value={row.level} onChange={(v) => r.set(i, { level: v as number })} /></td>
-              <td className={td}><input className={`${input} min-w-[140px]`} value={row.title} onChange={(e) => r.set(i, { title: e.target.value })} /></td>
-              <td className={td}><input className={`${input} min-w-[200px]`} value={row.description} onChange={(e) => r.set(i, { description: e.target.value })} /></td>
-              <td className={`${td} min-w-[200px]`}><IdListCell listId="gam-item-ids" value={row.items} onChange={(items) => r.set(i, { items })} /></td>
-              <td className={td}><input className={`${input} w-36`} placeholder="none" value={row.feature ?? ""} onChange={(e) => r.set(i, { feature: e.target.value.trim() || null })} /></td>
-              <td className={td}><NumberCell min={0} value={row.coins} onChange={(v) => r.set(i, { coins: v as number })} /></td>
-              <td className={td}><RowActions i={i} n={rows.length} move={r.move} remove={r.remove} /></td>
+          {shown.map((row) => (
+            <tr key={row.level} className={isFillerRow(row) ? "opacity-70" : ""}>
+              <td className={`${td} font-semibold`}>{row.level}</td>
+              <td className={`${td} text-xs text-muted-foreground whitespace-nowrap`}>{xpRewardByLevel?.get(row.level) ?? "—"}</td>
+              <td className={td}><input className={`${input} min-w-[140px]`} value={row.title} onChange={(e) => set(row.level, { title: e.target.value })} /></td>
+              <td className={td}><input className={`${input} min-w-[200px]`} value={row.description} onChange={(e) => set(row.level, { description: e.target.value })} /></td>
+              <td className={`${td} min-w-[200px]`}><IdListCell listId="gam-item-ids" value={row.items} onChange={(items) => set(row.level, { items })} /></td>
+              <td className={td}><input className={`${input} w-36`} placeholder="none" value={row.feature ?? ""} onChange={(e) => set(row.level, { feature: e.target.value.trim() || null })} /></td>
+              <td className={td}><NumberCell min={0} value={row.coins} onChange={(v) => set(row.level, { coins: v as number })} /></td>
+              <td className={td}>
+                {!isFillerRow(row) && <button type="button" className={`${small} text-red-600`} onClick={() => set(row.level, fillerRow(row.level))}>Reset</button>}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <button type="button" className={`${small} mt-2`} disabled={rows.length >= 200}
-        onClick={() => r.add({ level: (Math.max(0, ...rows.map((m) => Number(m.level) || 0))) + 1, title: "", description: "", items: [], feature: null, coins: 0 })}>+ Add milestone</button>
-      {itemIds.length > 0 && <p className="text-xs text-muted-foreground mt-2">Catalog ids: {itemIds.join(", ")}</p>}
+      <p className="text-xs text-muted-foreground mt-2">A plain "Level N" row grants nothing extra and is not announced on level-up; the app names it after its free XP item.</p>
     </div>
   );
 }
