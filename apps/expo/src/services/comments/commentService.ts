@@ -14,6 +14,9 @@ export interface Comment {
   likedByMe?: boolean;
   /** Admin-granted blue check on the commenter, from users.verified. */
   verified?: boolean;
+  /** An owned sticker sent with (or instead of) the text; worker lib/stickers.ts. */
+  stickerId?: string | null;
+  sticker?: { id: string; name: string; rarity?: string | null; asset: Record<string, any> } | null;
   /** Marks a locally-inserted comment that hasn't been confirmed by the server. */
   pending?: boolean;
 }
@@ -78,12 +81,14 @@ export const commentService = {
     text: string,
     collectionName: string = 'posts',
     clientId?: string,
+    stickerId?: string | null,
   ): Promise<string> => {
     const res: any = await callApi('addComment', {
       targetType: collectionName,
       targetId: postId,
       text,
       clientId: clientId || clientToken(),
+      ...(stickerId ? { stickerId } : {}),
     });
     return res.commentId as string;
   },

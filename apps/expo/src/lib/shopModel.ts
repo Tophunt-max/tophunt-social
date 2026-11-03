@@ -84,10 +84,10 @@ export const EQUIP_WHERE: Record<string, string> = {
   theme: 'Aapke profile ka background banega.',
   badge: 'Aapke naam ke saath: profile, posts aur comments mein.',
   title: 'Aapke naam ke neeche title chip ke roop mein.',
-  effect: 'Aapke profile par animated effect.',
+  effect: 'Aapke profile par DP ke around animated effect.',
   accessory: 'Aapki DP par accessory.',
-  sticker: 'Aapke profile showcase mein dikhega.',
-  collectible: 'Aapke profile showcase mein dikhega.',
+  sticker: 'Chat (DM) aur comments mein bhej sakte hain.',
+  collectible: 'Aapke Inventory collection mein rahega.',
 };
 
 export interface CategoryCard<T extends ShopItem = ShopItem> extends CategoryDef {

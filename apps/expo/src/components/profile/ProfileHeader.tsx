@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import { isLevelInfo } from '@/src/lib/progression';
 import { LevelProgressBar } from '@/src/components/gamification/LevelProgressBar';
 import { ProfileFrame } from '@/src/components/gamification/ProfileFrame';
+import { ProfileEffect } from '@/src/components/gamification/ProfileEffect';
 import { CosmeticBadge, CosmeticTitleChip, ThemeBackdrop } from '@/src/components/gamification/CosmeticBits';
 import { LinearGradient } from 'expo-linear-gradient';
 import { LevelBadge } from '@/src/components/gamification/LevelBadge';
@@ -315,6 +316,8 @@ const ProfileHeader: React.FC<ProfileHeaderProps> = ({
             <AppImage source={profileImage} displayWidth={100} style={styles.avatarImage} contentFit="cover" />
           </View>
         </ProfileFrame>
+        {/* Equipped effect cosmetic, around the 100 pt avatar. */}
+        <ProfileEffect effect={cosmetics?.effect ?? null} avatarSize={100} />
         {equippedBadge && (
             <View style={[styles.equippedBadgeIcon, { backgroundColor }]}>
                 <Ionicons name="trophy" size={18} color="#FFD700" />
