@@ -13,6 +13,7 @@ import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import { DigitalItemCard } from '@/src/components/shop/premium/DigitalItemCard';
 import { HeroBanner } from '@/src/components/shop/premium/HeroBanner';
 import {
+  AdminDealsCard,
   CollectionRow,
   CategoryGrid,
   DealsCard,
@@ -26,6 +27,7 @@ import {
 import { BagIcon, BoltIcon, BoxIcon, ClockIcon, CrownIcon, FlameIcon, GoldBoxIcon, HeartIcon, ShirtIcon, StarIcon } from '@/src/components/shop/premium/ShopArt';
 import { MOCK, MOCK_M, MOCK_MARGIN, MOCK_M_MARGIN, cellWidth, isMobileShop, mobileScale, mockScale, px } from '@/src/components/shop/premium/mock';
 import { ShopHeader, ShopHeaderMobile } from '@/src/components/shop/premium/ShopHeader';
+import { DealPager } from '@/src/components/shop/premium/DealPager';
 import { ShopNavigationTabs, ShopNavigationTabsMobile } from '@/src/components/shop/premium/ShopNavigationTabs';
 import {
   CategoryGridM,
@@ -54,6 +56,7 @@ import {
   UPGRADE_RARITIES,
   dealsBlock,
   dealsSummary,
+  dealsTitle,
   deriveCategories,
   featuredCollection,
   featuredView,
@@ -66,11 +69,13 @@ import {
   parseShopTab,
   physicalPicks,
   presentRarities,
+  resolveDealCards,
   showUpgradeBanner,
   trendingItems,
   withWishlist,
   type CategoryTile,
   type DigitalFilter,
+  type ShopNav,
   type ShopTab,
 } from '@/src/lib/shopModel';
 import { useInventory } from '@/src/services/gamification';
@@ -194,7 +199,12 @@ export default function ShopScreen() {
   const now = useMinuteClock();
   const digital = useMemo(() => store.data ?? [], [store.data]);
   const feature = useMemo(() => featuredView(cfg.store.featured, digital, now), [cfg.store.featured, digital, now]);
-  const hero = useMemo(() => heroSlides(digital, feature), [digital, feature]);
+  // Admin slider first (product targets are kept while products load), else the featured drop / fallback.
+  const productsOrNull = useMemo(() => (cfg.shop.enabled ? products.data ?? null : []), [cfg.shop.enabled, products.data]);
+  const hero = useMemo(
+    () => heroSlides(digital, feature, { slider: cfg.store.slider, products: productsOrNull, shopEnabled: cfg.shop.enabled, now }),
+    [digital, feature, cfg.store.slider, productsOrNull, cfg.shop.enabled, now],
+  );
   const categories = useMemo(() => deriveCategories(digital), [digital]);
   const tiles = useMemo(() => categoryTiles(digital, { enabled: cfg.gifts.enabled, count: gifts.data?.length }), [digital, cfg.gifts.enabled, gifts.data?.length]);
   const featured = useMemo(() => featuredCollection(digital, feature, MOCK.feat.cols), [digital, feature]);
@@ -221,6 +231,14 @@ export default function ShopScreen() {
   const deals = useMemo(() => hotDeals(allProducts), [allProducts]);
   const homeDeals = useMemo(() => dealsBlock(cfg.shop.enabled, allProducts), [cfg.shop.enabled, allProducts]);
   const physM = useMemo(() => (cfg.shop.enabled && allProducts.length ? physicalPicks(allProducts, MOCK_M.phys.cols) : null), [cfg.shop.enabled, allProducts]);
+  // Admin deal cards (their discount computed from real compare-at prices); none live → the automatic card below.
+  const dealCards = useMemo(
+    () => resolveDealCards(cfg.store.deals, cfg.store.enabled ? digital : [], cfg.shop.enabled ? allProducts : null, now),
+    [cfg.store.deals, cfg.store.enabled, digital, cfg.shop.enabled, allProducts, now],
+  );
+  const dealsHeading = dealCards.length ? dealsTitle(cfg.store.deals) : 'Special Offers & Daily Deals';
+  const [dealIdx, setDealIdx] = useState(0);
+  const dealCur = dealCards[Math.min(dealIdx, Math.max(0, dealCards.length - 1))];
   // Phone deal card: a real store discount first, else an admin-featured product, else the honest placeholder.
   const dealContent: DealCardContent = cfg.store.enabled && deals0.items.length
     ? { kind: 'discount', summary: deals0 }
@@ -240,6 +258,12 @@ export default function ShopScreen() {
   const openItem = useCallback((id: string) => router.push(`/shop/item/${encodeURIComponent(id)}` as any), [router]);
   const openProduct = useCallback((id: string) => router.push(`/shop/${encodeURIComponent(id)}` as any), [router]);
   const openCollection = useCallback(() => router.push('/rewards/inventory' as any), [router]);
+  /** Admin slide / deal card target → Digital tab filter, Physical tab or an in-app route. */
+  const followNav = useCallback((nav: ShopNav) => {
+    if (nav.kind === 'digital') openDigital(nav.filter);
+    else if (nav.kind === 'physical') setTab('physical');
+    else router.push(nav.path as any);
+  }, [openDigital, setTab, router]);
   const canAfford = (coins: number) => !live || bal.dpcoin >= coins;
   const short = (i: StoreItemView) => isShort(bal.dpcoin, i.priceCoins, live);
   // Back only when there is somewhere to go: native always (BackButton falls back to /home), web only with history.
@@ -310,13 +334,7 @@ export default function ShopScreen() {
     <View style={{ paddingHorizontal: margin }}>
       {hero && cfg.store.enabled ? (
         <View style={{ marginTop: gapY(MOCK.tabs.y + MOCK.tabs.h, MOCK.hero.y, u) }}>
-          <HeroBanner
-            hero={hero}
-            viewer={viewer}
-            u={u}
-            onExplore={() => openDigital({ ids: hero.itemIds })}
-            onOpenItem={openItem}
-          />
+          <HeroBanner hero={hero} viewer={viewer} u={u} onNav={followNav} onOpenItem={openItem} />
         </View>
       ) : null}
       {digitalState ? (
@@ -368,7 +386,11 @@ export default function ShopScreen() {
 
       <View style={[styles.row, { marginTop: gapY(MOCK.trend.y + MOCK.trend.h, MOCK.physHead.y, u), gap: px(MOCK.deals.x - MOCK.physHead.blockW - 26, u), alignItems: 'flex-start' }]}>
         <PhysicalBlock products={homeDeals.products} u={u} onAll={() => setTab('physical')} onOpen={openProduct} />
-        <DealsCard product={homeDeals.deal} u={u} onGrab={openProduct} onContest={() => router.push('/explore/battles' as any)} />
+        {dealCards.length ? (
+          <AdminDealsCard title={dealsHeading} cards={dealCards} u={u} onNav={followNav} />
+        ) : (
+          <DealsCard product={homeDeals.deal} u={u} onGrab={openProduct} onContest={() => router.push('/explore/battles' as any)} />
+        )}
       </View>
 
       {user ? (
@@ -423,7 +445,7 @@ export default function ShopScreen() {
     <View style={{ paddingHorizontal: margin }}>
       {hero && cfg.store.enabled ? (
         <View style={{ marginTop: px(MOCK_M.hero.y - MOCK_M.tabs.y - MOCK_M.tabs.h, uM) }}>
-          <HeroBanner hero={hero} viewer={viewer} u={uM} variant="mobile" onExplore={() => openDigital({ ids: hero.itemIds })} onOpenItem={openItem} />
+          <HeroBanner hero={hero} viewer={viewer} u={uM} variant="mobile" onNav={followNav} onOpenItem={openItem} />
         </View>
       ) : null}
       {digitalState ? (
@@ -463,18 +485,43 @@ export default function ShopScreen() {
         u={uM}
         style={{ marginTop: mGap }}
         icon={<BoltIcon size={mIcon} />}
-        title="Special Offers & Daily Deals"
-        right={dealContent.kind === 'discount' && dealContent.summary.endsAt ? <DealTimerPill endsAt={dealContent.summary.endsAt} u={uM} /> : null}
+        title={dealsHeading}
+        right={
+          dealCards.length
+            ? dealCur?.endsAt ? <DealTimerPill endsAt={dealCur.endsAt} u={uM} /> : null
+            : dealContent.kind === 'discount' && dealContent.summary.endsAt ? <DealTimerPill endsAt={dealContent.summary.endsAt} u={uM} /> : null
+        }
       />
       <View style={{ marginTop: mHead }}>
-        <DealCardM
-          content={dealContent}
-          u={uM}
-          width={inner}
-          onDeals={() => openDigital({ discounted: true })}
-          onProduct={openProduct}
-          onContest={() => router.push('/explore/battles' as any)}
-        />
+        {dealCards.length ? (
+          <DealPager
+            count={dealCards.length}
+            width={inner}
+            u={uM}
+            onIndex={setDealIdx}
+            labelOf={(i) => dealCards[i]?.title ?? ''}
+            renderPage={(i) => (
+              <DealCardM
+                content={{ kind: 'admin', card: dealCards[i] }}
+                u={uM}
+                width={inner}
+                onDeals={() => openDigital({ discounted: true })}
+                onProduct={openProduct}
+                onContest={() => router.push('/explore/battles' as any)}
+                onNav={followNav}
+              />
+            )}
+          />
+        ) : (
+          <DealCardM
+            content={dealContent}
+            u={uM}
+            width={inner}
+            onDeals={() => openDigital({ discounted: true })}
+            onProduct={openProduct}
+            onContest={() => router.push('/explore/battles' as any)}
+          />
+        )}
       </View>
 
       <SectionHeaderM

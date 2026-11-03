@@ -9,13 +9,13 @@
  * discount, timer and count comes from server data; a block with nothing real
  * behind it is an honest placeholder without prices, timers or discounts.
  */
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { Ionicons } from '@/src/lib/icons';
-import { dealTimerLabel, discountOf, type CardTag, type CategoryTile, type CollectionTile, type DealsSummary } from '@/src/lib/shopModel';
+import { discountOf, type CardTag, type CategoryTile, type CollectionTile, type DealCardView, type DealsSummary, type ShopNav } from '@/src/lib/shopModel';
 import { TH, glowShadow } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
@@ -24,7 +24,10 @@ import { MOCK_M, cellWidth, mfont, px } from './mock';
 import { ProductPreview } from './ProductPreview';
 import { ChestArt, CoinArt, CrownIcon, CubeLine, DealRibbon, TileArt, WingedCrownArt } from './ShopArt';
 import { CARD_FILL, tagColors } from './ShopHomeSections';
+import { DealTimerPill } from './DealPager';
 import { WishlistHeart } from './WishlistHeart';
+
+export { DealTimerPill };
 
 const TILE_FILL = '#150A31';
 const LINK = '#60A5FA';
@@ -218,43 +221,74 @@ export const TrendCardM = React.memo(function TrendCardM({ item, u, width, viewe
 
 // ------------------------------------------------------------------ special offers
 
-/** Red "⏱ 12:36:59" pill: only for a real future end; ticks every second when ≤ 7 days away, else every minute. */
-export function DealTimerPill({ endsAt, u }: { endsAt: number; u: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  const near = endsAt - now <= 7 * 86_400_000;
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), near ? 1000 : 60_000);
-    return () => clearInterval(t);
-  }, [near]);
-  const label = dealTimerLabel(endsAt, now);
-  if (!label) return null;
-  const D = MOCK_M.deals;
-  const fs = mfont(D.timer, u);
-  return (
-    <View style={[styles.timer, { height: px(D.timerH, u), borderRadius: px(D.timerH / 2, u), paddingHorizontal: px(7, u), gap: px(3, u), marginRight: px(2, u) }]} accessible accessibilityLabel={`Deal ${label} mein khatam`}>
-      <Ionicons name="time" size={fs} color="#FFF" />
-      <Text style={[styles.timerText, { fontSize: fs }]}>{label}</Text>
-    </View>
-  );
-}
-
 export type DealCardContent =
+  /** An admin deal card (monetization.store.deals), its discount computed from real compare-at prices. */
+  | { kind: 'admin'; card: DealCardView<StoreItemView, ShopProduct> }
   | { kind: 'discount'; summary: DealsSummary<StoreItemView> }
   | { kind: 'product'; product: ShopProduct }
   | { kind: 'soon' };
 
-/** The deal card (inner × 92): a real store discount, else an admin-featured product, else the honest placeholder. */
+/** The real percent behind a deal card's ribbon (0 = no ribbon). */
+export function dealPercent(content: DealCardContent): number {
+  switch (content.kind) {
+    case 'admin':
+      return content.card.percent;
+    case 'discount':
+      return content.summary.maxPercent;
+    case 'product':
+      return discountOf(content.product);
+    default:
+      return 0;
+  }
+}
+
+/**
+ * The deal card (inner × 92): an admin card, else a real store discount, else
+ * an admin-featured product, else the honest placeholder. An admin card's
+ * image replaces the chest art.
+ */
 export function DealCardM({
-  content, u, width, onDeals, onProduct, onContest,
-}: { content: DealCardContent; u: number; width: number; onDeals: () => void; onProduct: (id: string) => void; onContest: () => void }) {
+  content, u, width, onDeals, onProduct, onContest, onNav,
+}: { content: DealCardContent; u: number; width: number; onDeals: () => void; onProduct: (id: string) => void; onContest: () => void; onNav?: (nav: ShopNav) => void }) {
   const D = MOCK_M.deals;
   const h = px(D.h, u);
   const r = px(D.radius, u);
   const titleFs = mfont(D.title, u);
   const subFs = mfont(D.sub, u);
-  const ribbon = content.kind === 'discount';
+  const pct = dealPercent(content);
+  const ribbon = pct > 0;
+  const image = content.kind === 'admin' ? content.card.imageUrl : null;
   let body: React.ReactNode;
-  if (content.kind === 'discount') {
+  if (content.kind === 'admin') {
+    const c = content.card;
+    const p = c.product;
+    body = (
+      <>
+        <Text style={[styles.dealTitle, { fontSize: titleFs }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{c.title}</Text>
+        {c.subtitle ? (
+          <Text style={[styles.dealSub, { fontSize: subFs, lineHeight: subFs * 1.25 }]} numberOfLines={p ? 1 : 2}>{c.subtitle}</Text>
+        ) : null}
+        {p ? (
+          <View style={[styles.price, { gap: px(3, u), marginTop: px(2, u) }]}>
+            <CoinArt size={px(12, u)} />
+            <Text style={[styles.priceText, { fontSize: mfont(11, u) }]} numberOfLines={1}>{p.priceCoins.toLocaleString()} DP</Text>
+            {discountOf(p) > 0 ? <Text style={[styles.was, { fontSize: mfont(8.5, u) }]} numberOfLines={1}>{Number(p.compareAtCoins).toLocaleString()}</Text> : null}
+          </View>
+        ) : null}
+        <View style={{ marginTop: px(p ? 4 : 5, u) }}>
+          <YellowButton
+            label={c.ctaLabel}
+            onPress={() => onNav?.(c.nav)}
+            u={u}
+            width={D.ctaW}
+            height={D.ctaH}
+            size={D.cta}
+            a11y={`${c.ctaLabel}: ${c.title}${c.discounted > 1 ? `, ${c.discounted} discounted items` : ''}`}
+          />
+        </View>
+      </>
+    );
+  } else if (content.kind === 'discount') {
     body = (
       <>
         <Text style={[styles.dealTitle, { fontSize: titleFs }]} numberOfLines={1}>Mega Shop Deal</Text>
@@ -273,6 +307,7 @@ export function DealCardM({
         <View style={[styles.price, { gap: px(3, u), marginTop: px(2, u) }]}>
           <CoinArt size={px(12, u)} />
           <Text style={[styles.priceText, { fontSize: mfont(11, u) }]}>{p.priceCoins.toLocaleString()} DP</Text>
+          {pct ? <Text style={[styles.was, { fontSize: mfont(8.5, u) }]} numberOfLines={1}>{Number(p.compareAtCoins).toLocaleString()}</Text> : null}
         </View>
         <View style={{ marginTop: px(4, u) }}>
           <YellowButton label="Grab Now" onPress={() => onProduct(p.id)} u={u} width={D.ctaW} height={D.ctaH} size={D.cta} a11y={`Grab now: ${p.title}`} />
@@ -294,15 +329,19 @@ export function DealCardM({
     <View style={[{ width, height: h, borderRadius: r }, glow('#EC4899', u)]}>
       <LinearGradient colors={['#3B0A55', '#24104E']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.deals, { width, height: h, borderRadius: r }]}>
         <View style={{ width: px(D.chestW, u), height: px(D.chestH, u), marginLeft: px(2, u) }}>
-          <ChestArt width={px(D.chestW, u)} height={px(D.chestH, u)} />
+          {image ? (
+            <AppImage source={{ uri: image }} displayWidth={px(D.chestW, u)} style={[styles.dealImg, { width: px(D.chestW, u), height: px(D.chestH, u), borderRadius: px(8, u) }]} contentFit="cover" transition={150} accessibilityIgnoresInvertColors />
+          ) : (
+            <ChestArt width={px(D.chestW, u)} height={px(D.chestH, u)} />
+          )}
         </View>
         <View style={{ flex: 1, minWidth: 0, marginLeft: px(4, u), marginRight: ribbon ? px(D.ribbonW + 10, u) : px(10, u) }}>{body}</View>
         {ribbon ? (
-          <View style={[styles.abs, { right: px(8, u), top: 0, width: px(D.ribbonW, u), height: px(D.ribbonH, u) }]} accessible accessibilityLabel={`Up to ${content.summary.maxPercent}% off`}>
+          <View style={[styles.abs, { right: px(8, u), top: 0, width: px(D.ribbonW, u), height: px(D.ribbonH, u) }]} accessible accessibilityLabel={`Up to ${pct}% off`}>
             <DealRibbon width={px(D.ribbonW, u)} height={px(D.ribbonH, u)} />
             <View style={[StyleSheet.absoluteFill, styles.ribbonText, { paddingBottom: px(8, u) }]}>
               <Text style={[styles.ribbonSmall, { fontSize: mfont(7, u), lineHeight: mfont(8, u) }]}>UP TO</Text>
-              <Text style={[styles.ribbonBig, { fontSize: mfont(content.summary.maxPercent >= 100 ? 14 : 16, u), lineHeight: mfont(18, u) }]} numberOfLines={1}>{content.summary.maxPercent}%</Text>
+              <Text style={[styles.ribbonBig, { fontSize: mfont(pct >= 100 ? 14 : 16, u), lineHeight: mfont(18, u) }]} numberOfLines={1}>{pct}%</Text>
               <Text style={[styles.ribbonSmall, { fontSize: mfont(8, u), lineHeight: mfont(9, u) }]}>OFF</Text>
             </View>
           </View>
@@ -331,13 +370,16 @@ const PhysicalCardM = React.memo(function PhysicalCardM({ product, u, width, onP
   if (!product) return <View style={frame} accessible={false}>{imgBox}</View>;
   const fs = mfont(P.title, u);
   const ps = mfont(P.price, u);
+  const pct = discountOf(product);
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.88} accessibilityRole="button" accessibilityLabel={`${product.title}, ${product.priceCoins} DP coin`} style={frame}>
+    <TouchableOpacity onPress={onPress} activeOpacity={0.88} accessibilityRole="button" accessibilityLabel={`${product.title}, ${product.priceCoins} DP coin${pct ? `, ${pct}% off` : ''}`} style={frame}>
       {imgBox}
+      <OffPill pct={pct} u={u} style={{ top: px(3, u), right: px(3, u) }} />
       <Text style={[styles.cardName, { fontSize: fs, marginTop: px(4, u), paddingHorizontal: px(4, u), textAlign: 'left' }]} numberOfLines={1}>{product.title}</Text>
       <View style={[styles.price, { gap: px(2, u), paddingHorizontal: px(4, u), marginTop: px(2, u) }]}>
         <CoinArt size={px(10, u)} />
-        <Text style={[styles.priceText, { fontSize: ps }]} numberOfLines={1}>{product.priceCoins.toLocaleString()} DP</Text>
+        <Text style={[styles.priceText, { fontSize: ps }]} numberOfLines={1}>{pct ? product.priceCoins.toLocaleString() : `${product.priceCoins.toLocaleString()} DP`}</Text>
+        {pct ? <Text style={[styles.was, { fontSize: mfont(7.5, u) }]} numberOfLines={1}>{Number(product.compareAtCoins).toLocaleString()}</Text> : null}
       </View>
     </TouchableOpacity>
   );
@@ -480,8 +522,7 @@ const styles = StyleSheet.create({
   price: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0 },
   priceText: { color: '#FFFFFF', fontFamily: TH.fonts.bold, flexShrink: 1 },
   was: { color: '#B8A9D9', fontFamily: TH.fonts.medium, textDecorationLine: 'line-through', flexShrink: 1 },
-  timer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EF4444' },
-  timerText: { color: '#FFF', fontFamily: TH.fonts.bold, fontVariant: ['tabular-nums'] },
+  dealImg: { backgroundColor: '#1A0F3D' },
   deals: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(236,72,153,0.7)', overflow: 'hidden' },
   dealTitle: { color: '#FFFFFF', fontFamily: TH.fonts.bold, flexShrink: 1 },
   dealSub: { color: '#E9D5FF', fontFamily: TH.fonts.medium },

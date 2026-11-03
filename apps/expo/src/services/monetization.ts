@@ -15,7 +15,7 @@ import { setAdsSuppressedUntil } from '@/src/ads/optimizer';
 import { useAppConfig } from '@/src/services/appSettings';
 import type { SlotRule, SponsoredCampaign } from '@/src/lib/adSlots';
 import { GAMIFICATION_KEYS } from '@/src/services/gamification';
-import type { PublicFeaturedDrop } from '@/src/lib/shopModel';
+import type { PublicDeals, PublicFeaturedDrop, PublicSlider } from '@/src/lib/shopModel';
 
 // ------------------------------------------------------------------ config
 
@@ -36,8 +36,11 @@ export interface MonetizationPublicConfig {
   };
   sponsored: SlotRule & { enabled: boolean };
   gifts: { enabled: boolean; maxQuantity: number; maxCoinsPerSend: number };
-  /** `featured` is sent only while the admin's featured drop is live (worker publicFeatured). */
-  store: { enabled: boolean; featured?: PublicFeaturedDrop };
+  /**
+   * `featured`, `slider` and `deals` are sent only while live (worker
+   * publicFeatured / lib/shopHomeConfig.ts); missing = the app's automatic blocks.
+   */
+  store: { enabled: boolean; featured?: PublicFeaturedDrop; slider?: PublicSlider; deals?: PublicDeals };
   shop: { enabled: boolean };
   earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
 }

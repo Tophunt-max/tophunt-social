@@ -20,6 +20,8 @@ export interface ShopProduct {
   priceInr: number;
   shippingInr: number;
   priceCoins: number;
+  /** Display-only "original" DP coin price (admin compare-at, delivery included); a real discount only when above priceCoins. Older servers omit it. */
+  compareAtCoins?: number | null;
   returnDays: number;
   featured: boolean;
   variants: ShopVariant[];

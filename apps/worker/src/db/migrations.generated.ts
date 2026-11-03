@@ -83,6 +83,7 @@ import m_0078_ad_optimization_sql from "../../migrations/0078_ad_optimization.sq
 import m_0079_free_xp_cosmetics_sql from "../../migrations/0079_free_xp_cosmetics.sql";
 import m_0080_store_wishlist_sql from "../../migrations/0080_store_wishlist.sql";
 import m_0081_store_compare_price_sql from "../../migrations/0081_store_compare_price.sql";
+import m_0082_shop_product_compare_price_sql from "../../migrations/0082_shop_product_compare_price.sql";
 
 export interface Migration {
   name: string;
@@ -172,4 +173,5 @@ export const MIGRATIONS: Migration[] = [
   { name: "0079_free_xp_cosmetics.sql", sql: m_0079_free_xp_cosmetics_sql },
   { name: "0080_store_wishlist.sql", sql: m_0080_store_wishlist_sql },
   { name: "0081_store_compare_price.sql", sql: m_0081_store_compare_price_sql },
+  { name: "0082_shop_product_compare_price.sql", sql: m_0082_shop_product_compare_price_sql },
 ];

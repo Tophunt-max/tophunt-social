@@ -479,7 +479,10 @@ export function trendingItems<T extends ShopItem>(items: T[], max = 6): { title:
 export const HERO_MAX = 4;
 
 export interface HeroSlide<T extends ShopItem = ShopItem> {
-  item: T;
+  /** Stable React key (the admin slide id, else the item id). */
+  key: string;
+  /** Item drawn as the art. null only for an admin slide that has an image instead. */
+  item: T | null;
   /** Gold pill above the title ("LEGENDARY DROP", "MYTHIC COLLECTION"). */
   badge: string;
   /** Big gold line of the title. */
@@ -489,16 +492,29 @@ export interface HeroSlide<T extends ShopItem = ShopItem> {
   /** One line under the caps (admin subtitle, or the real item types of the slides). */
   subtitle: string;
   ctaLabel: string;
+  /** Admin artwork drawn as the full slide background (desktop), or null. */
+  imageUrl: string | null;
+  /** Admin artwork for phones (falls back to imageUrl), or null. */
+  mobileImageUrl: string | null;
+  /** Where the CTA and a tap on the slide go. */
+  nav: ShopNav;
+  /** Real future end to count down to, or null (no countdown on this slide). */
+  endsAt: number | null;
 }
 
 export interface HeroSlides<T extends ShopItem = ShopItem> {
-  /** 'drop' = the admin's featured drop; 'collection' = honest fallback, no drop / limited wording, no timer. */
-  mode: 'drop' | 'collection';
+  /**
+   * 'admin' = the admin's slider (monetization.store.slider); 'drop' = the
+   * featured drop; 'collection' = honest fallback, no drop / limited wording, no timer.
+   */
+  mode: 'admin' | 'drop' | 'collection';
   slides: HeroSlide<T>[];
-  /** Items the CTA opens on the Digital tab. */
+  /** Items the slides draw / open (all slides). */
   itemIds: string[];
-  /** Real future end of the drop only; never set for the fallback. */
+  /** Real future end of the drop only; never set for the fallback or the admin slider (each slide has its own). */
   endsAt: number | null;
+  /** Autoplay period (the admin's autoplaySec, else 4 s). */
+  autoplayMs: number;
 }
 
 /** Short plural label per type for the hero line ("Frames • Themes"). */
@@ -538,13 +554,32 @@ export function heroFallbackItems<T extends ShopItem>(items: T[], max = HERO_MAX
   return items.filter((i) => ok.has(i.rarity)).sort(byRarityThenPrice).slice(0, max);
 }
 
+export interface HeroOpts {
+  /** The public `monetization.store.slider` block (may be missing or malformed). */
+  slider?: unknown;
+  /** Live physical products, or null while not loaded (product targets are then kept). */
+  products?: PhysicalLike[] | null;
+  /** Physical shop open (physical / product targets need it). */
+  shopEnabled?: boolean;
+  now?: number;
+  /** Max slides of the featured / fallback modes. */
+  max?: number;
+}
+
 /**
- * Hero slider content. The configured drop when live (its badge, title and
- * CTA on every slide, one slide per drop item, hero first, its real end);
- * else up to 4 top-rarity items, each labelled "<RARITY> COLLECTION" with its
- * own name as the title and no timer; else nothing.
+ * Hero slider content, in order of preference:
+ *  1. the admin slider, when it has at least one slide that can be drawn and
+ *     leads somewhere real (adminHeroSlides);
+ *  2. the configured drop when live (its badge, title and CTA on every slide,
+ *     one slide per drop item, hero first, its real end);
+ *  3. up to 4 top-rarity items, each labelled "<RARITY> COLLECTION" with its
+ *     own name as the title and no timer;
+ *  4. nothing.
  */
-export function heroSlides<T extends ShopItem>(items: T[], feature: FeaturedView<T> | null, max = HERO_MAX): HeroSlides<T> | null {
+export function heroSlides<T extends ShopItem>(items: T[], feature: FeaturedView<T> | null, opts: HeroOpts = {}): HeroSlides<T> | null {
+  const max = opts.max ?? HERO_MAX;
+  const admin = adminHeroSlides(opts.slider, items, { products: opts.products ?? null, shopEnabled: !!opts.shopEnabled, now: opts.now ?? Date.now() });
+  if (admin) return admin;
   if (feature) {
     const rest = feature.items.filter((i) => i.itemId !== feature.hero.itemId);
     const list = [feature.hero, ...rest].slice(0, max);
@@ -553,10 +588,14 @@ export function heroSlides<T extends ShopItem>(items: T[], feature: FeaturedView
       mode: 'drop',
       slides: list.map((item) => {
         const lines = heroTitleLines(feature.title, TYPE_LABEL[item.type] ?? item.type);
-        return { item, badge: feature.badge.toUpperCase(), title: lines.title, caps: lines.caps, subtitle, ctaLabel: feature.ctaLabel };
+        return {
+          key: item.itemId, item, badge: feature.badge.toUpperCase(), title: lines.title, caps: lines.caps, subtitle, ctaLabel: feature.ctaLabel,
+          imageUrl: null, mobileImageUrl: null, nav: { kind: 'digital', filter: { ids: feature.itemIds } }, endsAt: feature.endsAt,
+        };
       }),
       itemIds: feature.itemIds,
       endsAt: feature.endsAt,
+      autoplayMs: HERO_AUTOPLAY_MS,
     };
   }
   const list = heroFallbackItems(items, max);
@@ -566,11 +605,171 @@ export function heroSlides<T extends ShopItem>(items: T[], feature: FeaturedView
     mode: 'collection',
     slides: list.map((item) => {
       const lines = heroTitleLines(item.name, TYPE_LABEL[item.type] ?? item.type);
-      return { item, badge: `${rarityLabelOf(item.rarity).toUpperCase()} COLLECTION`, title: lines.title, caps: lines.caps, subtitle, ctaLabel: 'Explore Collection' };
+      return {
+        key: item.itemId, item, badge: `${rarityLabelOf(item.rarity).toUpperCase()} COLLECTION`, title: lines.title, caps: lines.caps, subtitle, ctaLabel: 'Explore Collection',
+        imageUrl: null, mobileImageUrl: null, nav: { kind: 'digital', filter: { ids: list.map((i) => i.itemId) } }, endsAt: null,
+      };
     }),
     itemIds: list.map((i) => i.itemId),
     endsAt: null,
+    autoplayMs: HERO_AUTOPLAY_MS,
   };
+}
+
+// ------------------------------------------------------------------ admin slider + navigation
+
+/** Default autoplay period of the hero (the admin may set 2-15 s). */
+export const HERO_AUTOPLAY_MS = 4000;
+/** Max admin slides (worker SLIDER_LIMITS.maxSlides). */
+export const SLIDER_MAX = 8;
+
+/** Where a slide / deal card leads (worker lib/shopHomeConfig.ts SlideTarget). */
+export type SlideTarget =
+  | { kind: 'items' }
+  | { kind: 'item'; itemId: string }
+  | { kind: 'digital'; type: string | null; rarities: string[] }
+  | { kind: 'physical' }
+  | { kind: 'product'; productId: string }
+  | { kind: 'url'; path: string };
+
+/** One live slide of the public `monetization.store.slider` (worker publicSlider). */
+export interface PublicSlide {
+  id: string;
+  badge: string;
+  title: string;
+  subtitle: string;
+  ctaLabel: string;
+  imageUrl: string | null;
+  mobileImageUrl: string | null;
+  itemIds: string[];
+  target: SlideTarget;
+  endsAt: number | null;
+  showCountdown: boolean;
+}
+
+export interface PublicSlider {
+  autoplaySec: number;
+  slides: PublicSlide[];
+}
+
+/** A navigation descriptor the screen turns into a tab switch or a route push. */
+export type ShopNav =
+  | { kind: 'digital'; filter: Partial<DigitalFilter> }
+  | { kind: 'physical' }
+  | { kind: 'route'; path: string };
+
+/** An in-app path: one leading "/", no scheme, no "//", ≤120 chars (same rule as the worker). */
+export function isSafeAppPath(v: unknown): v is string {
+  return typeof v === 'string' && v.length <= 120 && v.startsWith('/') && !v.includes('//') && !v.includes('\\') && /^\/[A-Za-z0-9\-._~/?=&%#+]*$/.test(v);
+}
+
+const isHttpsUrl = (v: unknown): v is string => typeof v === 'string' && /^https:\/\/[^\s]+$/i.test(v);
+
+/** Target → navigation, or null when it cannot lead anywhere safe. `itemIds` = the slide's live ids (kind 'items'). */
+export function targetNav(target: unknown, itemIds: string[]): ShopNav | null {
+  const t = target as Partial<SlideTarget & { itemId: unknown; type: unknown; rarities: unknown; productId: unknown; path: unknown }> | null;
+  if (!t || typeof t !== 'object') return null;
+  switch (t.kind) {
+    case 'items':
+      return itemIds.length ? { kind: 'digital', filter: { ids: [...itemIds] } } : null;
+    case 'item':
+      return typeof t.itemId === 'string' && t.itemId ? { kind: 'route', path: `/shop/item/${encodeURIComponent(t.itemId)}` } : null;
+    case 'digital': {
+      const rarities = Array.isArray(t.rarities) ? t.rarities.filter((r): r is string => typeof r === 'string') : [];
+      return { kind: 'digital', filter: { type: typeof t.type === 'string' && t.type ? t.type : null, rarities: rarities.length ? rarities : null } };
+    }
+    case 'physical':
+      return { kind: 'physical' };
+    case 'product':
+      return typeof t.productId === 'string' && t.productId ? { kind: 'route', path: `/shop/${encodeURIComponent(t.productId)}` } : null;
+    case 'url':
+      return isSafeAppPath(t.path) ? { kind: 'route', path: t.path } : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * The admin slides that can be shown, or null. A slide is dropped when:
+ *  - it has ended (client clock, after the server's check);
+ *  - it has no image and none of its items is live (nothing to draw);
+ *  - its target cannot lead anywhere real: 'items' with no live item, 'item'
+ *    not in the store, 'digital' whose filter matches nothing, 'physical' /
+ *    'product' while the physical shop is closed, a product that is not live
+ *    (once products are loaded), or an unsafe path.
+ * The countdown is kept only for a real, future end with showCountdown on.
+ */
+export function adminHeroSlides<T extends ShopItem>(
+  slider: unknown,
+  items: T[],
+  opts: { products: PhysicalLike[] | null; shopEnabled: boolean; now: number },
+): HeroSlides<T> | null {
+  const cfg = slider as Partial<PublicSlider> | null | undefined;
+  if (!cfg || typeof cfg !== 'object' || !Array.isArray(cfg.slides)) return null;
+  const byId = new Map(items.map((i) => [i.itemId, i]));
+  const sec = Number(cfg.autoplaySec);
+  const autoplayMs = Number.isInteger(sec) && sec >= 2 && sec <= 15 ? sec * 1000 : HERO_AUTOPLAY_MS;
+  const out: HeroSlide<T>[] = [];
+  const seen = new Set<string>();
+  for (const raw of cfg.slides as Partial<PublicSlide>[]) {
+    if (out.length >= SLIDER_MAX) break;
+    if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || seen.has(raw.id)) continue;
+    if (typeof raw.title !== 'string' || !raw.title.trim()) continue;
+    const end = validTs(raw.endsAt);
+    if (end !== null && end <= opts.now) continue;
+    const ids = Array.isArray(raw.itemIds) ? raw.itemIds.filter((x): x is string => typeof x === 'string') : [];
+    const liveItems = ids.map((id) => byId.get(id)).filter((i): i is T => !!i);
+    const imageUrl = isHttpsUrl(raw.imageUrl) ? raw.imageUrl : null;
+    const mobileImageUrl = isHttpsUrl(raw.mobileImageUrl) ? raw.mobileImageUrl : null;
+    const art = liveItems[0] ?? null;
+    if (!imageUrl && !mobileImageUrl && !art) continue;
+    const nav = targetNav(raw.target, liveItems.map((i) => i.itemId));
+    if (!nav || !targetReachable(raw.target as SlideTarget, items, byId, opts)) continue;
+    seen.add(raw.id);
+    const typeLabel = art ? TYPE_LABEL[art.type] ?? art.type : '';
+    const lines = heroTitleLines(raw.title, typeLabel);
+    out.push({
+      key: raw.id,
+      item: art,
+      badge: typeof raw.badge === 'string' ? raw.badge.trim().toUpperCase() : '',
+      title: lines.title,
+      caps: lines.caps,
+      subtitle: typeof raw.subtitle === 'string' && raw.subtitle.trim() ? raw.subtitle.trim() : liveItems.length ? typeLine(liveItems) : '',
+      ctaLabel: typeof raw.ctaLabel === 'string' && raw.ctaLabel.trim() ? raw.ctaLabel.trim() : 'Explore Collection',
+      imageUrl,
+      mobileImageUrl,
+      nav,
+      endsAt: raw.showCountdown === true && end !== null ? end : null,
+    });
+  }
+  if (!out.length) return null;
+  const allIds = [...new Set(out.flatMap((s) => (s.item ? [s.item.itemId] : [])))];
+  return { mode: 'admin', slides: out, itemIds: allIds, endsAt: null, autoplayMs };
+}
+
+function targetReachable<T extends ShopItem>(
+  t: SlideTarget,
+  items: T[],
+  byId: Map<string, T>,
+  opts: { products: PhysicalLike[] | null; shopEnabled: boolean },
+): boolean {
+  switch (t.kind) {
+    case 'item':
+      return byId.has(t.itemId);
+    case 'digital':
+      return filterDigital(items, { ...NO_FILTER, type: t.type ?? null, rarities: t.rarities?.length ? t.rarities : null }).length > 0;
+    case 'physical':
+      return opts.shopEnabled;
+    case 'product':
+      return opts.shopEnabled && (opts.products === null || opts.products.some((p) => p.id === t.productId));
+    default:
+      return true;
+  }
+}
+
+/** The slide image for a variant: phones prefer mobileImageUrl, desktop imageUrl; each falls back to the other. */
+export function slideImage(s: Pick<HeroSlide, 'imageUrl' | 'mobileImageUrl'>, mobile: boolean): string | null {
+  return mobile ? s.mobileImageUrl ?? s.imageUrl : s.imageUrl ?? s.mobileImageUrl;
 }
 
 export interface CountdownParts {
@@ -754,6 +953,148 @@ export function dealTimerLabel(endsAt: unknown, now: number): string | null {
   if (ms > DEAL_TIMER_HMS_MAX_MS) return `${Math.floor(left / 86_400)}d ${Math.floor((left % 86_400) / 3600)}h`;
   const two = (n: number) => String(n).padStart(2, '0');
   return `${two(Math.floor(left / 3600))}:${two(Math.floor((left % 3600) / 60))}:${two(left % 60)}`;
+}
+
+// ------------------------------------------------------------------ admin deal cards
+
+export type DealSource =
+  | { kind: 'digital_items'; itemIds: string[] }
+  | { kind: 'product'; productId: string }
+  | { kind: 'all_discounts' };
+
+/** One live card of the public `monetization.store.deals` (worker publicDeals). No discount field: computed here. */
+export interface PublicDealCard {
+  id: string;
+  title: string;
+  subtitle: string;
+  ctaLabel: string;
+  imageUrl: string | null;
+  source: DealSource;
+  ribbon: 'auto' | 'none';
+  endsAt: number | null;
+  showTimer: boolean;
+}
+
+export interface PublicDeals {
+  title: string;
+  cards: PublicDealCard[];
+}
+
+export const DEALS_TITLE = 'Special Offers & Daily Deals';
+
+/** The product fields a deal card reads. */
+export interface DealProductLike extends PhysicalLike {
+  title: string;
+  priceCoins: number;
+  compareAtCoins?: number | null;
+}
+
+export interface DealCardView<T extends ShopItem = ShopItem, P extends DealProductLike = DealProductLike> {
+  id: string;
+  kind: DealSource['kind'];
+  title: string;
+  subtitle: string;
+  ctaLabel: string;
+  imageUrl: string | null;
+  /** "UP TO X% OFF": the biggest REAL discount of the source's live items; 0 = no ribbon. */
+  percent: number;
+  /** How many live items carry a real discount (the percent is the max over them). */
+  discounted: number;
+  /** Real future end for the timer, or null (no timer). */
+  endsAt: number | null;
+  nav: ShopNav;
+  /** Live items behind the card (digital sources). */
+  items: T[];
+  /** The product behind the card (product source). */
+  product: P | null;
+}
+
+const productInStock = (p: PhysicalLike) => p.variants.some((v) => v.inStock);
+
+/**
+ * The admin deal cards that can be shown, in order, or [] (the screen then
+ * keeps the automatic deal block). A card is hidden when it has ended (client
+ * clock) or its source has nothing live:
+ *  - digital_items: none of its items is in the store;
+ *  - all_discounts: no live, not-owned listing has a real compare-at price;
+ *  - product: the product is not live or out of stock (or products are not loaded).
+ * The ribbon percent is computed from compare-at prices only (never typed by
+ * the admin) and is 0 with ribbon 'none' or when nothing is discounted. The
+ * timer is the card's own end when set; digital sources without one may use
+ * the soonest real sale end of their live items.
+ */
+export function resolveDealCards<T extends ShopItem, P extends DealProductLike>(
+  cfg: unknown,
+  items: T[],
+  products: P[] | null,
+  now: number,
+): DealCardView<T, P>[] {
+  const d = cfg as Partial<PublicDeals> | null | undefined;
+  if (!d || typeof d !== 'object' || !Array.isArray(d.cards)) return [];
+  const byId = new Map(items.map((i) => [i.itemId, i]));
+  const out: DealCardView<T, P>[] = [];
+  const seen = new Set<string>();
+  for (const c of d.cards as Partial<PublicDealCard>[]) {
+    if (!c || typeof c !== 'object' || typeof c.id !== 'string' || seen.has(c.id) || !c.source || typeof c.title !== 'string' || !c.title.trim()) continue;
+    const end = validTs(c.endsAt);
+    if (end !== null && end <= now) continue;
+    const auto = c.ribbon !== 'none';
+    const ownEnd = c.showTimer === true && end !== null ? end : null;
+    const base = {
+      id: c.id,
+      title: c.title.trim(),
+      subtitle: typeof c.subtitle === 'string' ? c.subtitle.trim() : '',
+      ctaLabel: typeof c.ctaLabel === 'string' && c.ctaLabel.trim() ? c.ctaLabel.trim() : 'Grab Now',
+      imageUrl: isHttpsUrl(c.imageUrl) ? c.imageUrl : null,
+    };
+    let view: DealCardView<T, P> | null = null;
+    const src = c.source as DealSource;
+    if (src.kind === 'digital_items') {
+      const ids = Array.isArray(src.itemIds) ? src.itemIds : [];
+      const live = ids.map((id) => byId.get(id)).filter((i): i is T => !!i && !(validTs(i.endsAt) !== null && (i.endsAt as number) <= now));
+      if (!live.length) continue;
+      const disc = live.filter((i) => !i.owned && discountOf(i) > 0);
+      const ends = live.map((i) => i.endsAt).filter((e): e is number => isFutureDeadline(e, now));
+      view = {
+        ...base, kind: 'digital_items', items: live, product: null,
+        percent: auto ? disc.reduce((m, i) => Math.max(m, discountOf(i)), 0) : 0,
+        discounted: disc.length,
+        endsAt: c.showTimer === true ? ownEnd ?? (ends.length ? Math.min(...ends) : null) : null,
+        nav: { kind: 'digital', filter: { ids: live.map((i) => i.itemId) } },
+      };
+    } else if (src.kind === 'all_discounts') {
+      const sum = dealsSummary(items, now);
+      if (!sum.items.length) continue;
+      view = {
+        ...base, kind: 'all_discounts', items: sum.items, product: null,
+        percent: auto ? sum.maxPercent : 0,
+        discounted: sum.items.length,
+        endsAt: c.showTimer === true ? ownEnd ?? sum.endsAt : null,
+        nav: { kind: 'digital', filter: { discounted: true } },
+      };
+    } else if (src.kind === 'product') {
+      const p = (products ?? []).find((x) => x.id === src.productId);
+      if (!p || !productInStock(p)) continue;
+      const pct = discountOf(p);
+      view = {
+        ...base, kind: 'product', items: [], product: p,
+        percent: auto ? pct : 0,
+        discounted: pct > 0 ? 1 : 0,
+        endsAt: ownEnd,
+        nav: { kind: 'route', path: `/shop/${encodeURIComponent(p.id)}` },
+      };
+    }
+    if (!view) continue;
+    seen.add(c.id);
+    out.push(view);
+  }
+  return out;
+}
+
+/** The deals section title: the admin's, else the default. */
+export function dealsTitle(cfg: unknown): string {
+  const t = (cfg as Partial<PublicDeals> | null | undefined)?.title;
+  return typeof t === 'string' && t.trim() ? t.trim() : DEALS_TITLE;
 }
 
 // ------------------------------------------------------------------ mobile home pickers

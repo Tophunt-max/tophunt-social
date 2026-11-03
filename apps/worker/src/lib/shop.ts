@@ -65,6 +65,12 @@ export interface ProductView {
   shippingInr: number;
   /** DP coins per unit, delivery included. */
   priceCoins: number;
+  /**
+   * Display-only "original" price in DP coin (compare_at_inr_paise, migration
+   * 0082) with the same conversion as priceCoins (delivery included), so the
+   * app's -X% matches. null = no discount. Checkout always charges priceCoins.
+   */
+  compareAtCoins: number | null;
   returnDays: number;
   featured: boolean;
   variants: { id: string; label: string; inStock: boolean; stock: number }[];
@@ -87,6 +93,18 @@ export async function shopMonthSpendPaise(env: Env, ts = Date.now()): Promise<nu
 /** DP coin price for one unit: (₹ price + ₹ delivery) at the current rate. */
 export function unitCoins(priceInrPaise: number, shippingInrPaise: number, dpCoinInr: number): number {
   return Math.max(1, dpCoinsForPaise(priceInrPaise + shippingInrPaise, dpCoinInr));
+}
+
+/**
+ * DP coin "original" price of a product, or null: the ₹ compare-at price run
+ * through the same conversion as the real price (unitCoins), and only when it
+ * still comes out above the price after rounding.
+ */
+export function compareAtCoinsOf(compareAtPaise: unknown, pricePaise: number, shippingPaise: number, dpCoinInr: number): number | null {
+  const v = compareAtPaise == null ? NaN : Number(compareAtPaise);
+  if (!Number.isInteger(v) || v <= pricePaise) return null;
+  const was = unitCoins(v, shippingPaise, dpCoinInr);
+  return was > unitCoins(pricePaise, shippingPaise, dpCoinInr) ? was : null;
 }
 
 export async function listProducts(env: Env, opts: { category?: string | null; productId?: string | null } = {}): Promise<ProductView[]> {
@@ -120,6 +138,7 @@ export async function listProducts(env: Env, opts: { category?: string | null; p
       priceInr: Number(p.price_inr_paise) / 100,
       shippingInr: Number(p.shipping_inr_paise) / 100,
       priceCoins: unitCoins(Number(p.price_inr_paise), Number(p.shipping_inr_paise), dpCoinInr),
+      compareAtCoins: compareAtCoinsOf(p.compare_at_inr_paise, Number(p.price_inr_paise), Number(p.shipping_inr_paise), dpCoinInr),
       returnDays: Number(p.return_days),
       featured: !!p.featured,
       variants: (byProduct.get(p.id) ?? []).map((v) => ({ id: v.id, label: v.label, stock: Number(v.stock), inStock: Number(v.stock) > 0 })),
@@ -394,6 +413,13 @@ export function validateProductInput(body: any) {
   const shippingInr = Number(body?.shippingInr ?? 0);
   if (!Number.isFinite(priceInr) || priceInr < 1 || priceInr > 1_000_000) bad("Price: ₹1 to ₹10,00,000.");
   if (!Number.isFinite(shippingInr) || shippingInr < 0 || shippingInr > 100_000) bad("Delivery charge: ₹0 to ₹1,00,000.");
+  // Display-only original price (migration 0082): empty = no discount; else whole ₹ above the price.
+  const rawCompare = body?.compareAtInr;
+  const compareAtInr = rawCompare == null || rawCompare === "" ? null : Number(rawCompare);
+  if (compareAtInr !== null) {
+    if (!Number.isInteger(compareAtInr) || compareAtInr < 1 || compareAtInr > 1_000_000) bad("Original price: whole ₹ up to ₹10,00,000, or empty for no discount.");
+    if (compareAtInr <= priceInr) bad(`Original price must be more than the price (₹${priceInr}), or empty for no discount.`);
+  }
   const returnDays = Number(body?.returnDays ?? 7);
   if (!Number.isInteger(returnDays) || returnDays < 0 || returnDays > 60) bad("Return window: 0-60 days.");
   const variants = Array.isArray(body?.variants) && body.variants.length ? body.variants : [{ label: "Standard", stock: 0 }];
@@ -420,6 +446,7 @@ export function validateProductInput(body: any) {
     images: JSON.stringify(images),
     pricePaise: Math.round(priceInr * 100),
     shippingPaise: Math.round(shippingInr * 100),
+    compareAtPaise: compareAtInr === null ? null : compareAtInr * 100,
     returnDays,
     active: body?.active === true ? 1 : 0,
     featured: body?.featured === true ? 1 : 0,

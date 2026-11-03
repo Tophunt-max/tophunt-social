@@ -45,6 +45,24 @@ Earning (free) → 💎 Diamond → contest entry → win → 🪙 DP coin → S
   notification at each step. Addresses are scrubbed on account deletion; an open order defers deletion.
 - Shipping is manual (the admin enters courier + tracking). No courier API, GST invoice or payment gateway is involved.
 
+### Product images and compare-at price (migration 0082)
+
+- Images: Shopping → Physical products → Edit has an **Upload images** button (multi-select, sequential,
+  progress) using `api.uploadProductImage` → `POST /admin/media/product-image` (the Contests prize-image
+  route), plus reorder, remove and **Set cover** (the first image is the cover). The URL textarea stays as
+  "Edit URLs (advanced)". `validateProductInput` still requires ≤8 https URLs. Images uploaded in the dialog
+  but not saved are deleted again on close (best effort); `DELETE /admin/media/product-image` now also refuses
+  an image used by a shop product or an order line, not only by contests and prize claims.
+- `shop_products.compare_at_inr_paise` (nullable INTEGER, paise like the other money columns): the admin
+  field "Original price (₹, optional)" takes whole rupees above the price (`compareAtInr`; empty/null = none;
+  anything else is refused). The panel shows the live result ("App shows 549 DP coin struck through, -36%").
+- `listProducts` / `getShopProducts` return `compareAtCoins = unitCoins(compareAt + delivery, rate)`, the same
+  conversion as `priceCoins`, so the app's -X% is consistent with the coin prices it shows; null when not set
+  or when rounding leaves it at or below the price. **Display only**: checkout still prices from
+  `price_inr_paise + shipping_inr_paise`, the line gate and the `price_changed` check are untouched.
+- App: strike-through + "-X%" on the phone / desktop home product cards, the Physical tab tiles, Hot deals
+  cards and the product detail; automatic and admin product deal cards get a real "UP TO X% OFF" ribbon.
+
 ### Shop fraud protection (`lib/shopRisk.ts`, admin Shopping → Fraud rules)
 
 Free Diamonds can end as real products, so checkout applies two kinds of rule (all thresholds editable):
@@ -206,6 +224,88 @@ featured: { enabled, badge (≤24, "Legendary Drop"), title (≤60), subtitle (�
   clock passes `endsAt`, and skips items that are not live listings; with none live, no banner.
 - It only points at listings: price, stock and sale window still come from `store_listings`. The countdown is
   shown only for a real `endsAt`.
+- When the Shop slider (below) has a live slide, the app shows the slider instead; the featured drop is the
+  fallback and keeps working unchanged.
+
+### Shop slider (`appConfig.monetization.store.slider`, `lib/shopHomeConfig.ts`)
+
+Admin: Shopping → **Shop home** → Shop slider (own tab: the Digital items tab already holds the listing grid,
+featured drop and purchases, and slides can also point at physical products). Saved with
+`api.saveAppSettings({ monetization: { store: { slider } } })` → `POST /admin/app-settings` (full admin, recent
+sign-in, `settings.monetization.update` audit row). Arrays replace on save, so the panel always sends the whole
+slide list.
+
+```
+slider: { enabled (false), autoplaySec (2-15, 4), slides: Slide[] (≤8) }
+Slide:  { id /^[a-z0-9_-]{2,40}$/ unique, enabled (false), badge (≤24, optional), title (1-60),
+          subtitle (≤140), ctaLabel (1-24, "Explore Collection"),
+          imageUrl / mobileImageUrl (https or null; upload via /admin/media/shop-banner),
+          itemIds (0-12 catalogue ids; the art when there is no image),
+          target, startsAt (ms|null), endsAt (ms|null, > startsAt), showCountdown }
+target: { kind: 'items' }                       Digital tab filtered to itemIds (needs ≥1 item)
+      | { kind: 'item', itemId }                /shop/item/<id>
+      | { kind: 'digital', type?, rarities[] }  Digital tab, type in ITEM_TYPES, rarities ⊂ RARITIES
+      | { kind: 'physical' }                    Physical tab
+      | { kind: 'product', productId }          /shop/<id>
+      | { kind: 'url', path }                   in-app path only: starts with "/", no scheme, no "//", ≤120
+```
+
+- Refused, not clamped: unknown keys, bad / duplicate ids, >8 slides, bad text lengths, non-https or
+  credentialed image URLs, an external / protocol-relative `url` path, `endsAt <= startsAt`, a slide with no
+  image and no items. A past `endsAt` is allowed (the whole list is re-saved; ended slides simply don't show).
+  Image URLs follow the Explore banner rule (https); they are not pinned to our media host because
+  `validateMonetizationPatch` has no env. The panel only offers uploads.
+- `parseSlider` never throws: a malformed stored slide is dropped, not the slider.
+- Public (`publicMonetizationConfig().store.slider`): only when `store.enabled && slider.enabled`, and only
+  slides that are enabled and inside `startsAt..endsAt` by server time; `showCountdown` is sent true only with
+  an `endsAt`. No live slide → no `slider` key, and the app falls back to `featured` / top-rarity items.
+  `/read/app-config` is edge-cached 30 s, so a scheduled slide appears within ~30 s of its start once the app
+  refetches the config.
+- App (`shopModel.adminHeroSlides`, pure + tested): drops slides that ended (client clock), slides with no image
+  and no live item, and slides whose target leads nowhere real ('items' with nothing live, an item not in the
+  store, a digital filter that matches nothing, physical / product while the shop is closed, a product that is
+  not live once products are loaded, an unsafe path). `HeroBanner` draws `imageUrl` (desktop) /
+  `mobileImageUrl` (phone, falls back to `imageUrl`) as the full slide background (cover) with a dark gradient
+  on the text side; otherwise the first live item's art as before. CTA and a tap on the slide follow the
+  target (`targetNav` → Digital filter / Physical tab / route). Autoplay = `autoplaySec`, never under reduced
+  motion. The countdown belongs to the current slide and shows only for a real future `endsAt`.
+
+### Special Offers & Daily Deals (`appConfig.monetization.store.deals`)
+
+Admin: Shopping → **Shop home** → Special Offers & Daily Deals.
+
+```
+deals: { enabled (false), title (1-40, "Special Offers & Daily Deals"), cards: DealCard[] (≤6) }
+DealCard: { id unique, enabled (false), title (1-40), subtitle (≤90), ctaLabel (1-20, "Grab Now"),
+            imageUrl (https|null, replaces the chest art), ribbon 'auto' | 'none',
+            source: { kind: 'digital_items', itemIds (1-24) } | { kind: 'product', productId } | { kind: 'all_discounts' },
+            startsAt, endsAt (> startsAt), showTimer }
+```
+
+- There is no discount field (a `discountPercent` key is refused as unknown). With `ribbon: 'auto'` the app
+  computes "UP TO X% OFF" from real compare-at prices: digital sources use the largest `discountOf` among the
+  source's live, not-owned listings (`compare_at_coins`); a product uses its `compareAtCoins` (below). 0 → no
+  ribbon. The panel previews the same number ("UP TO 40% OFF (from 3 discounted items)") or warns that the
+  ribbon will be hidden.
+- Public: only while `deals.enabled`, cards enabled and inside their window by server time, and only when their
+  side is open (digital sources need `store.enabled`, product cards `shop.enabled`).
+- App (`shopModel.resolveDealCards`): hides a card whose source has nothing live (no listed item / no
+  discounted listing for `all_discounts` / product missing or out of stock). Timer only with `showTimer`: the
+  card's own `endsAt`, else for digital sources the soonest real sale end of their live items; product cards
+  need their own `endsAt`. CTA: `digital_items` → Digital tab filtered to the live ids; `all_discounts` → Digital
+  tab, discounted filter; `product` → `/shop/<id>`. Phone: the first card keeps the `DealCardM` geometry, more
+  cards page horizontally (`DealPager`, a paging ScrollView with dots; deals never autoplay); the header timer
+  follows the card in view. Desktop: the same cards in the Hot Deals box. No live card → the automatic card
+  (store discounts, else a featured product, else "Deals jaldi aa rahe hain").
+
+### Shop banner upload (`POST /admin/media/shop-banner`)
+
+- Same intake as `/admin/media/explore-banner`: full admin, `Content-Type` must be JPEG / PNG / WebP, declared
+  length and body capped at 5 MB, bytes must match the declared type (`uploadToR2`), stored under
+  `shop-banners/<yyyy>/<mm>/…` (media category `shop-banners`, immutable cache), returns
+  `{ publicUrl, fileKey, contentType }`, audited as `shop.banner.upload`. Listed in `SENSITIVE_ADMIN_ROUTES`
+  (recent sign-in). Used by both slider slides and deal cards. A flat `shop-banners` prefix (not
+  `shop/banners`) matches `explore-banners` and the one-segment prefix convention of `mediaCategories.ts`.
 
 ### Mythic rarity
 
