@@ -1140,6 +1140,8 @@ async function phaseSocial(env: Env, uid: string): Promise<void> {
     db.delete(schema.userInventory).where(eq(schema.userInventory.uid, uid)),
     db.delete(schema.questClaims).where(eq(schema.questClaims.uid, uid)),
     db.delete(schema.rewardGrants).where(eq(schema.rewardGrants.uid, uid)),
+    // Shop wishlist (migration 0080): personal, serves no one else.
+    db.delete(schema.storeWishlist).where(eq(schema.storeWishlist.uid, uid)),
     // Every notification naming them as the actor in someone else's inbox. Only
     // follow-request notifications were removed, so likes, comments and follows by
     // a deleted account stayed in other people's lists. (Reports they filed are

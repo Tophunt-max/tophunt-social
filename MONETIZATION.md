@@ -162,6 +162,19 @@ and re-checks price and availability inside the transaction.
   (`soldCount > 0`) and "Limited edition" (real stock left or a future sale end) from them and omits a rail
   with nothing in it (`apps/expo/src/lib/shopModel.ts`).
 
+### Wishlist (migration 0080, `apps/worker/src/lib/wishlist.ts`)
+
+- Table `store_wishlist (uid, item_id, created_at)`, primary key `(uid, item_id)`, index on `uid`.
+  Purged on account deletion (personal, serves no one else).
+- `/api` actions (sign-in required): `getWishlist` → `{ itemIds }` (newest first);
+  `setWishlist { itemId, on }` → `{ itemIds }`. Adding needs a valid id (`^[a-z0-9_-]{2,40}$`) of an active
+  catalogue item with an active store listing (else `item_unavailable`); at most 200 per user
+  (`wishlist_full`). Add is `INSERT OR IGNORE`, remove is `DELETE` (always allowed, even for delisted items).
+  Rate limits: 60/min each, `setWishlist` fail-closed.
+- App: `useWishlist` / `useToggleWishlist` (optimistic, rolled back on error) in
+  `apps/expo/src/services/monetization.ts`; the heart (`WishlistHeart`) is on the Shop home cards, the Digital
+  cards and the item detail header. Shop → Wishlist opens the Digital tab filtered to the live wishlist.
+
 ### Featured drop (`appConfig.monetization.store.featured`)
 
 Admin: Monetization → Store → **Featured drop**, saved through `POST /admin/app-settings` (full admins only).
@@ -188,7 +201,11 @@ migration was needed.
 
 ### App routes
 
-- `/shop`: tabs Shop (overview: featured drop, categories from the item types on sale, rails, grid), Digital
+- `/shop`: tabs Shop (home in the neon reference layout: header with live DP coin / Diamond pills, hero
+  banner = featured drop slides with a countdown only for a real `endsAt`, else the top Legendary/Mythic item
+  labelled "Legendary collection"; Shop Categories tiles where types with no listings are "Jaldi"; Featured
+  Collection; Trending Items (only when something sold, else "Shop Items"); Physical Products + Hot Deals
+  (admin-featured, in-stock; no timer, no discount); My Collection counts; quick actions), Digital
   (search, category and rarity filters), Physical, and My Collection (links to `/rewards/inventory`).
   `?tab=digital|physical` deep-links. On web the Shop home and item detail are not drawn in the phone column;
   they lay out in 2/3/4 columns (≥700 / ≥1100 px), content capped at 1200 px.

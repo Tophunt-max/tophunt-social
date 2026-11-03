@@ -1,7 +1,7 @@
 /**
  * Premium card for one digital item: live preview on the viewer, rarity
  * badge, real stock / sale-end chips (only when the listing has them), price
- * or Owned, and a small Buy button that opens the purchase sheet. Tapping the
+ * or Owned, the wishlist heart, and a small Buy button that opens the purchase sheet. Tapping the
  * card opens the item detail screen.
  */
 import React from 'react';
@@ -16,6 +16,7 @@ import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
 import { ProductPreview } from './ProductPreview';
 import { RarityBadge } from './RarityBadge';
+import { WishlistHeart } from './WishlistHeart';
 
 export const DigitalItemCard = React.memo(function DigitalItemCard({
   item, width, p, viewer, busy, short, onOpen, onBuy,
@@ -69,6 +70,9 @@ export const DigitalItemCard = React.memo(function DigitalItemCard({
               <Text style={styles.chipText}>{left}</Text>
             </View>
           ) : null}
+          <View style={styles.bottomRight}>
+            <WishlistHeart itemId={item.itemId} name={item.name} size={14} />
+          </View>
         </View>
         <View style={styles.body}>
           <Text style={[styles.name, { color: p.text }]} numberOfLines={1}>{item.name}</Text>
@@ -119,6 +123,7 @@ const styles = StyleSheet.create({
   topLeft: { position: 'absolute', top: 8, left: 8 },
   topRight: { top: 8, right: 8 },
   bottomLeft: { bottom: 8, left: 8 },
+  bottomRight: { position: 'absolute', bottom: 8, right: 8 },
   chip: { position: 'absolute', flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: TH.radii.pill, paddingHorizontal: 7, paddingVertical: 3, backgroundColor: 'rgba(8,8,23,0.72)' },
   chipText: { color: '#FFF', fontFamily: TH.fonts.bold, fontSize: 9.5, letterSpacing: 0.3 },
   ownedCorner: { position: 'absolute', top: 8, right: 8, width: 22, height: 22, borderRadius: 11, backgroundColor: TH.colors.success, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#FFF' },

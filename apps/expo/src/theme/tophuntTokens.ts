@@ -14,8 +14,14 @@ export const TH = {
   colors: {
     primary: '#8B5CF6',
     royal: '#6D28D9',
-    deep: '#080817',
-    card: '#14142B',
+    /** Neon store background (reference layout): #0B0620 → #120A2E. */
+    deep: '#0B0620',
+    deep2: '#120A2E',
+    card: '#1A0F3D',
+    /** Purple glow border on dark cards. */
+    neonBorder: 'rgba(168,85,247,0.45)',
+    neon: '#A855F7',
+    lilac: '#C4B5FD',
     gold: '#FFC857',
     goldDeep: '#F59E0B',
     electric: '#38BDF8',
@@ -31,6 +37,16 @@ export const TH = {
     gold: ['#FFC857', '#F59E0B'] as [string, string],
     diamond: ['#22D3EE', '#38BDF8'] as [string, string],
     pink: ['#EC4899', '#8B5CF6'] as [string, string],
+    /** Page background (dark mode). */
+    neonBg: ['#0B0620', '#120A2E'] as [string, string],
+    /** Active tab pill: light purple. */
+    tabOn: ['#C4B5FD', '#A855F7'] as [string, string],
+    /** Yellow CTA. */
+    cta: ['#FFE066', '#FFC857'] as [string, string],
+    /** Hero banner (purple / magenta). */
+    banner: ['#2A0B5E', '#4C1D95', '#831843'] as [string, string, string],
+    /** Gold title text fill (used as a solid fallback where gradients are not drawn on text). */
+    goldText: ['#FFE8A3', '#FFC857', '#F59E0B'] as [string, string, string],
     /** Dark preview stage behind item artwork (both modes: items are designed on dark). */
     stage: ['#1A1440', '#14142B', '#0D0D22'] as [string, string, string],
   },
@@ -57,18 +73,30 @@ export interface TophuntSurfaces {
   /** Translucent fill for chips/buttons laid over cards. */
   glass: string;
   skeleton: string;
+  /** Page background gradient. */
+  bgGradient: [string, string];
+  /** Bordered "glow" cards of the reference layout. */
+  glowBorder: string;
+  /** Shadow colour for the glow (iOS / web); Android gets a small elevation. */
+  glowShadow: string;
+  /** Gold accent text that reads on `card`. */
+  gold: string;
 }
 
 export const TH_DARK: TophuntSurfaces = {
   isDark: true,
   bg: TH.colors.deep,
   card: TH.colors.card,
-  cardAlt: '#1C1C3A',
-  border: '#2A2A4A',
+  cardAlt: '#241452',
+  border: '#2E1D5E',
   text: '#FFFFFF',
-  sub: TH.colors.sub,
+  sub: '#B9AEDC',
   glass: 'rgba(255,255,255,0.08)',
-  skeleton: '#1F1F3B',
+  skeleton: '#251653',
+  bgGradient: TH.gradients.neonBg,
+  glowBorder: TH.colors.neonBorder,
+  glowShadow: TH.colors.neon,
+  gold: TH.colors.gold,
 };
 
 export const TH_LIGHT: TophuntSurfaces = {
@@ -81,6 +109,10 @@ export const TH_LIGHT: TophuntSurfaces = {
   sub: '#6B6890',
   glass: 'rgba(109,40,217,0.07)',
   skeleton: '#E9E6FA',
+  bgGradient: ['#F6F5FF', '#EEE8FF'],
+  glowBorder: 'rgba(139,92,246,0.35)',
+  glowShadow: '#8B5CF6',
+  gold: '#B45309',
 };
 
 export const surfacesFor = (isDark: boolean): TophuntSurfaces => (isDark ? TH_DARK : TH_LIGHT);
@@ -130,4 +162,27 @@ export function gridColumns(width: number): 2 | 3 | 4 {
 export function gridCellWidth(contentWidth: number, columns: number, gap: number, pad: number): number {
   const inner = Math.max(0, contentWidth - pad * 2 - gap * (columns - 1));
   return Math.floor(inner / Math.max(1, columns));
+}
+
+/**
+ * Soft glow for bordered cards: a coloured shadow on iOS / web, a small
+ * elevation on Android (an Android shadow cannot be coloured cheaply). Static:
+ * no animation.
+ */
+export function glowShadow(color: string, isDark: boolean, strength: 'sm' | 'md' = 'sm') {
+  const md = strength === 'md';
+  return {
+    shadowColor: color,
+    shadowOpacity: isDark ? (md ? 0.55 : 0.35) : md ? 0.25 : 0.15,
+    shadowRadius: md ? 18 : 10,
+    shadowOffset: { width: 0, height: md ? 4 : 2 },
+    elevation: md ? 6 : 2,
+  };
+}
+
+/** Column count for a tile grid of the reference layout at a content width. */
+export function tileColumns(width: number, wide: number, phone: number): number {
+  if (width >= 1100) return wide;
+  if (width >= 700) return Math.max(phone, Math.round((wide + phone) / 2));
+  return phone;
 }
