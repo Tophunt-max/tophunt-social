@@ -384,18 +384,18 @@ export function purchaseErrorView(e: unknown): PurchaseErrorView {
 
 // ------------------------------------------------------------------ reference home layout
 
-/** Accent colours for the category / collection tiles (one per tile, dark-neon look). */
+/** Accent colours for the category / collection tiles (reference mock). */
 export const TILE_ACCENTS = {
-  frame: '#A855F7',
-  theme: '#38BDF8',
-  badge: '#22C55E',
-  title: '#FFC857',
-  vs: '#F97316',
-  victory: '#FACC15',
-  effect: '#EC4899',
-  gifts: '#F43F5E',
-  emotes: '#FB923C',
-  sound: '#22D3EE',
+  frame: '#F59E0B',
+  theme: '#8B5CF6',
+  badge: '#F59E0B',
+  title: '#F5B935',
+  vs: '#A855F7',
+  victory: '#EAB308',
+  effect: '#A855F7',
+  gifts: '#EC4899',
+  emotes: '#38BDF8',
+  sound: '#C026D3',
   more: '#8B5CF6',
 } as const;
 
@@ -409,8 +409,10 @@ export interface CategoryTile {
   accent: string;
   /** Store item type the tile filters by, or null (gifts / more / not built yet). */
   type: string | null;
-  /** What tapping does; null = "Jaldi" (coming soon), not tappable. */
+  /** What tapping does; null = coming soon (a "SOON" ribbon, tapping shows a toast). */
   target: 'type' | 'gifts' | 'all' | null;
+  /** Nothing real behind the tile yet: drawn in full colour with a "SOON" ribbon, not navigable. */
+  soon: boolean;
   /** Live listings of this type (0 for tiles without a type). */
   count: number;
 }
@@ -431,10 +433,10 @@ const TILE_DEFS: { key: TileKey; label: string; icon: string; type: string | nul
 
 /**
  * The "Shop Categories" grid of the reference layout. Every tile is drawn, but
- * only tiles backed by something real are tappable: a type with live listings,
+ * only tiles backed by something real navigate: a type with live listings,
  * Gifts when gifts are on and the catalogue has gifts, and More when the store
  * has anything. The rest (VS Effects, Victory FX, Emotes, Sound FX: no such
- * item type exists yet, and real types with no listings) are "Jaldi".
+ * item type exists yet, and real types with no listings) are `soon`.
  */
 export function categoryTiles(items: ShopItem[], gifts: { enabled: boolean; count: number | null | undefined }): CategoryTile[] {
   const counts = new Map<string, number>();
@@ -445,7 +447,7 @@ export function categoryTiles(items: ShopItem[], gifts: { enabled: boolean; coun
     if (d.type) target = count > 0 ? 'type' : null;
     else if (d.key === 'gifts') target = giftsCategory(gifts.enabled, gifts.count) ? 'gifts' : null;
     else if (d.key === 'more') target = items.length > 0 ? 'all' : null;
-    return { ...d, accent: TILE_ACCENTS[d.key], count, target };
+    return { ...d, accent: TILE_ACCENTS[d.key], count, target, soon: target === null };
   });
 }
 
@@ -468,46 +470,100 @@ export function trendingItems<T extends ShopItem>(items: T[], max = 6): { title:
   return { title: trending ? 'Trending Items' : 'Shop Items', trending, items: g.items };
 }
 
-export interface HeroSlides<T extends ShopItem = ShopItem> {
-  /** 'drop' = the admin's featured drop; 'legendary' = honest fallback, no drop / limited wording. */
-  mode: 'drop' | 'legendary';
+/** Max slides of the hero slider (the mock shows 4 pager dots). */
+export const HERO_MAX = 4;
+
+export interface HeroSlide<T extends ShopItem = ShopItem> {
+  item: T;
+  /** Gold pill above the title ("LEGENDARY DROP", "MYTHIC COLLECTION"). */
   badge: string;
+  /** Big gold line of the title. */
   title: string;
+  /** White caps line under it. */
+  caps: string;
+  /** One line under the caps (admin subtitle, or the real item types of the slides). */
   subtitle: string;
   ctaLabel: string;
-  /** One slide per item, hero first. */
-  slides: T[];
+}
+
+export interface HeroSlides<T extends ShopItem = ShopItem> {
+  /** 'drop' = the admin's featured drop; 'collection' = honest fallback, no drop / limited wording, no timer. */
+  mode: 'drop' | 'collection';
+  slides: HeroSlide<T>[];
+  /** Items the CTA opens on the Digital tab. */
+  itemIds: string[];
   /** Real future end of the drop only; never set for the fallback. */
   endsAt: number | null;
 }
 
+/** Short plural label per type for the hero line ("Frames • Themes"). */
+const TYPE_SHORT: Record<string, string> = {
+  frame: 'Frames', theme: 'Themes', badge: 'Badges', title: 'Titles', effect: 'Effects', sticker: 'Stickers', collectible: 'Collectibles', accessory: 'Accessories',
+};
+
+/** "Frames • Themes • Titles": the distinct types of `items`, in display order. */
+export function typeLine(items: ShopItem[]): string {
+  const present = new Set(items.map((i) => i.type));
+  const known = CATEGORY_DEFS.map((d) => d.type).filter((t) => present.has(t));
+  const extra = [...present].filter((t) => t && !TYPE_SHORT[t]).sort();
+  return [...known, ...extra].map((t) => TYPE_SHORT[t] ?? t.charAt(0).toUpperCase() + t.slice(1)).join(' • ');
+}
+
 /**
- * Hero banner content. The configured drop when live; else the store's top
- * Legendary / Mythic item labelled "Legendary collection" (CTA opens the
- * Digital tab on legendary + mythic); else nothing.
+ * Split a hero title into the big gold line and the white caps line. One
+ * word: the word, then `fallbackCaps` (the item type). Two or more: the first
+ * half of the words (rounded up), then the rest.
  */
-export function heroSlides<T extends ShopItem>(items: T[], feature: FeaturedView<T> | null, max = FEATURED_COLLECTION_MAX): HeroSlides<T> | null {
+export function heroTitleLines(title: string, fallbackCaps: string): { title: string; caps: string } {
+  const words = title.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return { title: (words[0] ?? '').toUpperCase(), caps: fallbackCaps.toUpperCase() };
+  const k = Math.ceil(words.length / 2);
+  return { title: words.slice(0, k).join(' ').toUpperCase(), caps: words.slice(k).join(' ').toUpperCase() };
+}
+
+/** Rarities the fallback slider picks from, highest first. */
+export const HERO_FALLBACK_RARITIES = ['mythic', 'legendary', 'epic', 'rare'] as const;
+
+/**
+ * The fallback slides when no drop is live: the store's top items by rarity
+ * (Mythic, Legendary, Epic, then Rare; price breaks ties), at most `max`.
+ */
+export function heroFallbackItems<T extends ShopItem>(items: T[], max = HERO_MAX): T[] {
+  const ok = new Set<string>(HERO_FALLBACK_RARITIES);
+  return items.filter((i) => ok.has(i.rarity)).sort(byRarityThenPrice).slice(0, max);
+}
+
+/**
+ * Hero slider content. The configured drop when live (its badge, title and
+ * CTA on every slide, one slide per drop item, hero first, its real end);
+ * else up to 4 top-rarity items, each labelled "<RARITY> COLLECTION" with its
+ * own name as the title and no timer; else nothing.
+ */
+export function heroSlides<T extends ShopItem>(items: T[], feature: FeaturedView<T> | null, max = HERO_MAX): HeroSlides<T> | null {
   if (feature) {
     const rest = feature.items.filter((i) => i.itemId !== feature.hero.itemId);
+    const list = [feature.hero, ...rest].slice(0, max);
+    const subtitle = feature.subtitle || typeLine(list);
     return {
       mode: 'drop',
-      badge: feature.badge,
-      title: feature.title,
-      subtitle: feature.subtitle,
-      ctaLabel: feature.ctaLabel,
-      slides: [feature.hero, ...rest].slice(0, max),
+      slides: list.map((item) => {
+        const lines = heroTitleLines(feature.title, TYPE_LABEL[item.type] ?? item.type);
+        return { item, badge: feature.badge.toUpperCase(), title: lines.title, caps: lines.caps, subtitle, ctaLabel: feature.ctaLabel };
+      }),
+      itemIds: feature.itemIds,
       endsAt: feature.endsAt,
     };
   }
-  const top = legendaryCollection(items, 1)[0];
-  if (!top) return null;
+  const list = heroFallbackItems(items, max);
+  if (!list.length) return null;
+  const subtitle = typeLine(list);
   return {
-    mode: 'legendary',
-    badge: 'Legendary collection',
-    title: top.name,
-    subtitle: 'Shop ke sabse rare Legendary aur Mythic items',
-    ctaLabel: 'Explore Collection',
-    slides: [top],
+    mode: 'collection',
+    slides: list.map((item) => {
+      const lines = heroTitleLines(item.name, TYPE_LABEL[item.type] ?? item.type);
+      return { item, badge: `${rarityLabelOf(item.rarity).toUpperCase()} COLLECTION`, title: lines.title, caps: lines.caps, subtitle, ctaLabel: 'Explore Collection' };
+    }),
+    itemIds: list.map((i) => i.itemId),
     endsAt: null,
   };
 }
@@ -563,28 +619,44 @@ export interface CollectionTile {
   icon: string;
   accent: string;
   count: number;
+  /** The count is a lower bound (more gift history pages exist). */
+  more?: boolean;
+}
+
+/** Received gifts for the Gifts tile: the first page of the gift history (gifts on only). */
+export interface ReceivedGifts {
+  enabled: boolean;
+  /** Rows on the first page, or null while loading. */
+  firstPage: number | null | undefined;
+  /** The history has more pages (the count is a lower bound: shown as "30+"). */
+  more?: boolean;
 }
 
 /**
  * "My Collection" tiles: owned (not revoked) inventory items by type. The
  * server's `owned` is already false for revoked rows. VS Effects / Victory FX
- * have no item type yet, so they read 0. Gifts is left out: no cheap source
- * for a received-gifts count exists on this screen.
+ * have no item type yet, so they read 0; Profile FX counts `effect` items.
+ * Gifts counts gifts received (first page of the history) when gifts are on,
+ * else 0. `total` is the sum of the tiles.
  */
-export function collectionTiles(inventory: { type: string; owned?: boolean; revokedAt?: number | null }[] | null | undefined): { total: number; tiles: CollectionTile[] } {
+export function collectionTiles(
+  inventory: { type: string; owned?: boolean; revokedAt?: number | null }[] | null | undefined,
+  gifts: ReceivedGifts = { enabled: false, firstPage: 0 },
+): { total: number; more: boolean; tiles: CollectionTile[] } {
   const counts = new Map<string, number>();
-  let total = 0;
   for (const i of inventory ?? []) {
     if (!i?.owned || i.revokedAt) continue;
-    total += 1;
     counts.set(i.type, (counts.get(i.type) ?? 0) + 1);
   }
-  const keys: TileKey[] = ['frame', 'theme', 'badge', 'title', 'vs', 'victory', 'effect'];
+  const giftCount = gifts.enabled ? Math.max(0, Number(gifts.firstPage) || 0) : 0;
+  const more = gifts.enabled && !!gifts.more;
+  const keys: TileKey[] = ['frame', 'theme', 'badge', 'title', 'vs', 'victory', 'effect', 'gifts'];
   const tiles = keys.map((k) => {
     const d = TILE_DEFS.find((x) => x.key === k)!;
-    return { key: k, label: d.label, icon: d.icon, accent: TILE_ACCENTS[k], count: d.type ? counts.get(d.type) ?? 0 : 0 };
+    const count = k === 'gifts' ? giftCount : d.type ? counts.get(d.type) ?? 0 : 0;
+    return { key: k, label: d.label, icon: d.icon, accent: TILE_ACCENTS[k], count, more: k === 'gifts' && more };
   });
-  return { total, tiles };
+  return { total: tiles.reduce((n, t) => n + t.count, 0), more, tiles };
 }
 
 /** The physical fields the Shop home reads (services/shop ShopProduct). */
@@ -604,4 +676,24 @@ export function physicalPicks<T extends PhysicalLike>(products: T[], max = 3): T
 /** "Hot Deals": products the admin marked featured that are in stock. No discount is implied. */
 export function hotDeals<T extends PhysicalLike>(products: T[], max = 8): T[] {
   return products.filter((p) => p.featured && inStock(p)).slice(0, max);
+}
+
+export type DealsBlock<T extends PhysicalLike> = {
+  /** Left: up to 3 products, or placeholder frames ("Products jaldi aa rahe hain"). */
+  products: T[] | null;
+  /** Right: an admin-featured in-stock product ("Hot Deals"), or null (placeholder card with the contest CTA). */
+  deal: T | null;
+};
+
+/**
+ * The Physical Products + Hot Deals row of the home. Both blocks always draw
+ * (same geometry as the mock); a block with nothing real behind it becomes
+ * an honest placeholder: no prices, no timer, no discount.
+ */
+export function dealsBlock<T extends PhysicalLike>(shopEnabled: boolean, products: T[] | null | undefined): DealsBlock<T> {
+  const list = shopEnabled ? products ?? [] : [];
+  return {
+    products: list.length ? physicalPicks(list, 3) : null,
+    deal: hotDeals(list, 1)[0] ?? null,
+  };
 }

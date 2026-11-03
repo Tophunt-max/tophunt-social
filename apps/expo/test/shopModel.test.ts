@@ -28,6 +28,10 @@ import {
   physicalPicks,
   hotDeals,
   withWishlist,
+  dealsBlock,
+  heroFallbackItems,
+  heroTitleLines,
+  typeLine,
   type ShopItem,
 } from '@/src/lib/shopModel';
 import { isCrownRarity, rarityColor, rarityRank } from '@/src/lib/progression';
@@ -257,23 +261,31 @@ describe('purchase', () => {
 describe('reference home: category tiles', () => {
   const store = [item('f1'), item('f2'), item('t1', { type: 'theme' }), item('e1', { type: 'effect' })];
 
-  it('draws every tile in reference order; only real, stocked ones are tappable', () => {
+  it('draws every tile in reference order; only real, stocked ones navigate, the rest are "soon"', () => {
     const tiles = categoryTiles(store, { enabled: true, count: 3 });
     expect(tiles.map((t) => t.label)).toEqual(['Frames', 'Themes', 'Badges', 'Titles', 'VS Effects', 'Victory FX', 'Profile FX', 'Gifts', 'Emotes', 'Sound FX', 'More']);
     const by = Object.fromEntries(tiles.map((t) => [t.key, t]));
     expect(by.frame).toMatchObject({ target: 'type', type: 'frame', count: 2 });
     expect(by.theme.target).toBe('type');
     expect(by.effect).toMatchObject({ target: 'type', type: 'effect', count: 1 });
-    // Real types with no listings, and types that do not exist yet, are "Jaldi".
-    for (const k of ['badge', 'title', 'vs', 'victory', 'emotes', 'sound']) expect(by[k].target).toBeNull();
+    // Real types with no listings, and types that do not exist yet, are "soon" (full colour, toast on tap).
+    for (const k of ['badge', 'title', 'vs', 'victory', 'emotes', 'sound']) expect(by[k]).toMatchObject({ target: null, soon: true });
+    for (const k of ['frame', 'theme', 'effect', 'gifts', 'more']) expect(by[k].soon).toBe(false);
     expect(by.gifts.target).toBe('gifts');
     expect(by.more.target).toBe('all');
-    expect(new Set(tiles.map((t) => t.accent)).size).toBe(tiles.length);
+    // Mock accents.
+    expect(by.frame.accent).toBe('#F59E0B');
+    expect(by.theme.accent).toBe('#8B5CF6');
+    expect(by.gifts.accent).toBe('#EC4899');
+    expect(by.emotes.accent).toBe('#38BDF8');
+    expect(by.sound.accent).toBe('#C026D3');
   });
 
   it('gifts need the feature on and a non-empty catalogue; More needs any item', () => {
-    expect(categoryTiles(store, { enabled: false, count: 3 }).find((t) => t.key === 'gifts')!.target).toBeNull();
-    expect(categoryTiles(store, { enabled: true, count: 0 }).find((t) => t.key === 'gifts')!.target).toBeNull();
+    expect(categoryTiles(store, { enabled: false, count: 3 }).find((t) => t.key === 'gifts')).toMatchObject({ target: null, soon: true });
+    expect(categoryTiles(store, { enabled: true, count: 0 }).find((t) => t.key === 'gifts')!.soon).toBe(true);
+    // Profile FX is "soon" when the store has no effect items.
+    expect(categoryTiles([item('f1')], { enabled: true, count: 1 }).find((t) => t.key === 'effect')!.soon).toBe(true);
     expect(categoryTiles([], { enabled: true, count: 1 }).find((t) => t.key === 'more')!.target).toBeNull();
   });
 });
@@ -306,18 +318,50 @@ describe('reference home: featured collection, trending, hero', () => {
     expect(t.items).toHaveLength(6);
   });
 
-  it('hero: the drop (hero first, real end) or an honest legendary fallback, or nothing', () => {
-    const f = featuredView({ title: 'Mythic Week', itemIds: ['e1', 'm1'], heroItemId: 'm1', endsAt: NOW + DAY }, store, NOW);
+  it('hero: the drop (hero first, real end, its copy on every slide)', () => {
+    const f = featuredView({ title: 'Mythic Week', badge: 'Legendary Drop', itemIds: ['e1', 'm1'], heroItemId: 'm1', endsAt: NOW + DAY }, store, NOW);
     const h = heroSlides(store, f)!;
     expect(h.mode).toBe('drop');
-    expect(h.slides.map((i) => i.itemId)).toEqual(['m1', 'e1']);
+    expect(h.slides.map((s) => s.item.itemId)).toEqual(['m1', 'e1']);
+    expect(h.itemIds).toEqual(['e1', 'm1']);
     expect(h.endsAt).toBe(NOW + DAY);
-    const fb = heroSlides(store, null)!;
-    expect(fb).toMatchObject({ mode: 'legendary', badge: 'Legendary collection', endsAt: null });
-    expect(fb.slides.map((i) => i.itemId)).toEqual(['m1']);
-    expect(`${fb.badge} ${fb.subtitle} ${fb.ctaLabel}`.toLowerCase()).not.toMatch(/drop|limited/);
+    expect(h.slides[0]).toMatchObject({ badge: 'LEGENDARY DROP', title: 'MYTHIC', caps: 'WEEK', ctaLabel: 'Explore Now' });
+    // No admin subtitle: a line from the real item types.
+    expect(h.slides[0].subtitle).toBe('Frames');
+    expect(heroSlides(store, featuredView({ title: 'X', subtitle: 'Admin line', itemIds: ['e1'] }, store, NOW))!.slides[0].subtitle).toBe('Admin line');
+  });
+
+  it('hero fallback: top items by rarity (mythic, legendary, epic, rare), max 4, honest copy, no timer', () => {
+    const shop = [
+      item('c1'),
+      item('r1', { rarity: 'rare', priceCoins: 50 }),
+      item('e1', { rarity: 'epic', priceCoins: 100, type: 'theme' }),
+      item('l1', { rarity: 'legendary', priceCoins: 300, name: 'Golden Crown' }),
+      item('m1', { rarity: 'mythic', priceCoins: 200, name: 'Nebula' }),
+      item('e2', { rarity: 'epic', priceCoins: 200 }),
+      item('u1', { rarity: 'uncommon' }),
+    ];
+    expect(heroFallbackItems(shop).map((i) => i.itemId)).toEqual(['m1', 'l1', 'e2', 'e1']);
+    expect(heroFallbackItems([item('c'), item('u', { rarity: 'uncommon' })])).toEqual([]);
+    const fb = heroSlides(shop, null)!;
+    expect(fb).toMatchObject({ mode: 'collection', endsAt: null });
+    expect(fb.slides).toHaveLength(4);
+    expect(fb.itemIds).toEqual(['m1', 'l1', 'e2', 'e1']);
+    expect(fb.slides[0]).toMatchObject({ badge: 'MYTHIC COLLECTION', title: 'NEBULA', caps: 'AVATAR FRAMES', ctaLabel: 'Explore Collection' });
+    expect(fb.slides[1]).toMatchObject({ badge: 'LEGENDARY COLLECTION', title: 'GOLDEN', caps: 'CROWN' });
+    for (const s of fb.slides) expect(`${s.badge} ${s.title} ${s.caps} ${s.subtitle} ${s.ctaLabel}`.toLowerCase()).not.toMatch(/drop|limited/);
+    expect(fb.slides[0].subtitle).toBe('Frames • Themes');
+    // Only rare items: still a slider.
+    expect(heroSlides([item('r', { rarity: 'rare' })], null)!.slides[0].badge).toBe('RARE COLLECTION');
     expect(heroSlides([item('c')], null)).toBeNull();
     expect(heroSlides([], null)).toBeNull();
+  });
+
+  it('hero title lines split the words; one word takes the type as caps', () => {
+    expect(heroTitleLines('Legendary Collection', 'x')).toEqual({ title: 'LEGENDARY', caps: 'COLLECTION' });
+    expect(heroTitleLines('Neon Night Drop', 'x')).toEqual({ title: 'NEON NIGHT', caps: 'DROP' });
+    expect(heroTitleLines('Nebula', 'Avatar Frames')).toEqual({ title: 'NEBULA', caps: 'AVATAR FRAMES' });
+    expect(typeLine([item('a', { type: 'title' }), item('b'), item('c', { type: 'title' })])).toBe('Frames • Titles');
   });
 });
 
@@ -342,7 +386,7 @@ describe('reference home: countdown parts and card tags', () => {
 });
 
 describe('reference home: collection, physical and wishlist helpers', () => {
-  it('counts owned, non-revoked inventory by type; VS / Victory read 0; no Gifts tile', () => {
+  it('counts owned, non-revoked inventory by type; VS / Victory read 0; Gifts = received gifts', () => {
     const inv = [
       { type: 'frame', owned: true },
       { type: 'frame', owned: true },
@@ -351,12 +395,35 @@ describe('reference home: collection, physical and wishlist helpers', () => {
       { type: 'effect', owned: true },
       { type: 'sticker', owned: true },
     ];
-    const c = collectionTiles(inv);
-    expect(c.total).toBe(4);
+    const c = collectionTiles(inv, { enabled: true, firstPage: 5 });
+    expect(c.tiles.map((t) => t.label)).toEqual(['Frames', 'Themes', 'Badges', 'Titles', 'VS Effects', 'Victory FX', 'Profile FX', 'Gifts']);
     const by = Object.fromEntries(c.tiles.map((t) => [t.key, t.count]));
-    expect(by).toEqual({ frame: 2, theme: 0, badge: 0, title: 0, vs: 0, victory: 0, effect: 1 });
-    expect(c.tiles.some((t) => t.key === 'gifts')).toBe(false);
+    expect(by).toEqual({ frame: 2, theme: 0, badge: 0, title: 0, vs: 0, victory: 0, effect: 1, gifts: 5 });
+    // N = sum of the tiles (stickers have no tile).
+    expect(c.total).toBe(8);
+    expect(c.more).toBe(false);
+    // Gifts off: 0 whatever the history says.
+    expect(collectionTiles(inv, { enabled: false, firstPage: 9 }).tiles.find((t) => t.key === 'gifts')!.count).toBe(0);
+    // A full first page with more pages is a lower bound.
+    const more = collectionTiles([], { enabled: true, firstPage: 30, more: true });
+    expect(more).toMatchObject({ total: 30, more: true });
+    expect(more.tiles.find((t) => t.key === 'gifts')).toMatchObject({ count: 30, more: true });
     expect(collectionTiles(undefined)).toMatchObject({ total: 0 });
+    expect(collectionTiles([], { enabled: true, firstPage: null })).toMatchObject({ total: 0 });
+  });
+
+  it('deals row: real products and a featured in-stock deal, else honest placeholders', () => {
+    const p = (id: string, featured: boolean, stock: boolean) => ({ id, featured, variants: [{ inStock: stock }] });
+    const list = [p('a', false, false), p('b', true, true), p('c', false, true), p('d', false, true)];
+    const live = dealsBlock(true, list);
+    expect(live.products!.map((x) => x.id)).toEqual(['b', 'c', 'd']);
+    expect(live.deal!.id).toBe('b');
+    // Products but nothing featured in stock: products shown, deal is the placeholder.
+    expect(dealsBlock(true, [p('a', true, false), p('c', false, true)])).toMatchObject({ deal: null });
+    // Shop off or empty: both placeholders.
+    expect(dealsBlock(false, list)).toEqual({ products: null, deal: null });
+    expect(dealsBlock(true, [])).toEqual({ products: null, deal: null });
+    expect(dealsBlock(true, undefined)).toEqual({ products: null, deal: null });
   });
 
   it('physical picks put in-stock first; hot deals are featured and in stock only', () => {

@@ -1,97 +1,110 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { BackButton } from '@/src/components/ui/BackButton';
-import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
 import { Skeleton } from '@/src/components/ui/Skeleton';
-import { Ionicons, MaterialCommunityIcons } from '@/src/lib/icons';
-import { TH, type TophuntPalette } from '@/src/theme/tophunt';
+import { Ionicons } from '@/src/lib/icons';
+import { TH } from '@/src/theme/tophunt';
+import { FONT_FLOOR, MOCK, font, px } from './mock';
+import { BagIcon, CoinArt, CrownLogo, CrownOrnament, DiamondArt, Laurel } from './ShopArt';
 
 /**
- * Shop top bar (reference layout): crown + "TopHunt" wordmark, then the live DP coin and Diamond pills (skeletons until the server answers,
- * never a fake 0), cart with its count and orders. Below: a compact back
- * (the screen is pushed), the bag icon, the
- * big "Shop" title and the gold tagline between laurels.
+ * Top of the Shop (reference mock, y 14..104, scaled by u): the centred crown
+ * ornament; the crown + "TopHunt" wordmark with the live DP coin and Diamond
+ * pills (skeletons until the server answers, never a fake 0), cart with its
+ * count and orders; then the title row: back (only when there is somewhere
+ * to go back to), the gold bag, "Shop" and the tagline between laurels.
  */
 export function ShopHeader({
-  p, live, dpcoin, diamonds, cartCount, onOrders, onCart, pad, compact,
+  u, inner, live, dpcoin, diamonds, cartCount, onOrders, onCart, showBack,
 }: {
-  p: TophuntPalette;
+  u: number;
+  inner: number;
   live: boolean;
   dpcoin: number;
   diamonds: number;
   cartCount: number;
   onOrders: () => void;
   onCart: () => void;
-  pad: number;
-  /** Phone width: smaller wordmark and no "DP" suffix on the coin pill. */
-  compact: boolean;
+  showBack: boolean;
 }) {
-  const btn = [styles.iconBtn, { backgroundColor: p.card, borderColor: p.glowBorder }];
-  const gold = p.gold;
+  const H = MOCK.header;
+  const T = MOCK.title;
+  const pillH = px(H.pillH, u);
+  const pillFs = font(H.pillText, u, FONT_FLOOR.label);
+  const pillIcon = Math.max(pillFs, px(H.pillIcon, u));
+  const pill = { height: pillH, borderRadius: pillH / 2, paddingHorizontal: px(8, u), gap: px(5, u) };
+  const badge = Math.max(px(H.badge, u), 11);
+  const ornW = px(MOCK.crown.w, u);
+  const lw = px(9, u);
   return (
-    <View style={{ paddingHorizontal: pad }}>
-      <View style={styles.bar}>
-        <View style={styles.brand} accessible accessibilityRole="header" accessibilityLabel="TopHunt">
-          <LinearGradient colors={TH.gradients.gold} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.crown}>
-            <MaterialCommunityIcons name="crown" size={14} color="#2A1A00" />
-          </LinearGradient>
-          <Text style={[styles.wordmark, compact && { fontSize: 17 }, { color: p.text }]} numberOfLines={1}>Top<Text style={{ color: gold }}>Hunt</Text></Text>
+    <View style={{ width: inner }}>
+      <View style={[styles.ornament, { top: px(MOCK.crown.y, u), left: (inner - ornW) / 2 }]} pointerEvents="none">
+        <CrownOrnament width={ornW} height={px(MOCK.crown.h, u)} />
+      </View>
+
+      <View style={[styles.row, { marginTop: px(H.y, u), height: px(H.h, u), gap: px(H.gap, u) }]}>
+        <View style={[styles.row, { gap: px(5, u), flexShrink: 1, minWidth: 0 }]} accessible accessibilityRole="header" accessibilityLabel="TopHunt">
+          <CrownLogo width={px(H.logoW, u)} height={px(H.logoH, u)} />
+          <Text style={[styles.word, { fontSize: font(H.word, u, FONT_FLOOR.title) }]} numberOfLines={1}>TopHunt</Text>
         </View>
         <View style={{ flex: 1 }} />
         <View
-          style={[styles.pill, { backgroundColor: p.card, borderColor: `${TH.colors.gold}88` }]}
+          style={[styles.pill, pill, { minWidth: px(H.dpW, u), borderColor: '#F5B935', borderWidth: Math.max(1, 1.5 * u) }]}
           accessible
           accessibilityLabel={live ? `${dpcoin.toLocaleString()} DP coin` : 'DP coin balance load ho raha hai'}
         >
-          <CoinIcon size={15} />
+          <CoinArt size={pillIcon} />
           {live ? (
-            <Text style={[styles.pillText, { color: gold }]} numberOfLines={1}>
-              {dpcoin.toLocaleString()}{compact ? '' : ' DP'}
-            </Text>
+            <Text style={[styles.pillText, { fontSize: pillFs }]} numberOfLines={1}>{dpcoin.toLocaleString()} DP</Text>
           ) : (
-            <Skeleton width={34} height={11} borderRadius={6} />
+            <Skeleton width={px(60, u)} height={pillFs * 0.8} borderRadius={4} />
           )}
         </View>
         <View
-          style={[styles.pill, { backgroundColor: p.card, borderColor: `${TH.colors.diamond}88` }]}
+          style={[styles.pill, pill, { minWidth: px(H.diaW, u), borderColor: '#22D3EE', borderWidth: Math.max(1, 1.5 * u) }]}
           accessible
           accessibilityLabel={live ? `${diamonds.toLocaleString()} Diamonds` : 'Diamond balance load ho raha hai'}
         >
-          <DiamondIcon size={14} />
+          <DiamondArt size={pillIcon} />
           {live ? (
-            <Text style={[styles.pillText, { color: p.isDark ? TH.colors.diamond : '#0E7490' }]} numberOfLines={1}>{diamonds.toLocaleString()}</Text>
+            <Text style={[styles.pillText, { fontSize: pillFs }]} numberOfLines={1}>{diamonds.toLocaleString()}</Text>
           ) : (
-            <Skeleton width={26} height={11} borderRadius={6} />
+            <Skeleton width={px(44, u)} height={pillFs * 0.8} borderRadius={4} />
           )}
         </View>
-        <TouchableOpacity onPress={onCart} style={btn} accessibilityRole="button" accessibilityLabel={cartCount ? `Cart, ${cartCount} items` : 'Cart, empty'}>
-          <Ionicons name="cart-outline" size={18} color={p.text} />
+        <TouchableOpacity onPress={onCart} hitSlop={10} accessibilityRole="button" accessibilityLabel={cartCount ? `Cart, ${cartCount} items` : 'Cart, empty'}>
+          <Ionicons name="cart-outline" size={Math.max(16, px(H.cart, u))} color="#FFFFFF" />
           {cartCount > 0 ? (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{cartCount > 99 ? '99+' : cartCount}</Text>
+            <View style={[styles.badge, { minWidth: badge, height: badge, borderRadius: badge / 2, top: -badge * 0.4, right: -badge * 0.45 }]}>
+              <Text style={[styles.badgeText, { fontSize: Math.max(7.5, badge * 0.6) }]}>{cartCount > 99 ? '99+' : cartCount}</Text>
             </View>
           ) : null}
         </TouchableOpacity>
-        <TouchableOpacity onPress={onOrders} style={btn} accessibilityRole="button" accessibilityLabel="My orders">
-          <Ionicons name="receipt-outline" size={17} color={p.text} />
+        <TouchableOpacity
+          onPress={onOrders}
+          hitSlop={10}
+          style={[styles.orders, { width: Math.max(18, px(H.orders, u)), height: Math.max(18, px(H.orders, u)), borderRadius: px(8, u) }]}
+          accessibilityRole="button"
+          accessibilityLabel="My orders"
+        >
+          <Ionicons name="receipt-outline" size={Math.max(12, px(17, u))} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
-      <View style={styles.titleRow}>
-        <BackButton size={18} color={p.text} style={[styles.back, { backgroundColor: p.card, borderColor: p.glowBorder }]} />
-        <LinearGradient colors={[TH.colors.royal, TH.colors.neon]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.bag}>
-          <Ionicons name="bag-handle" size={compact ? 20 : 24} color="#FFF" />
-        </LinearGradient>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.title, compact && { fontSize: 30, lineHeight: 34 }, { color: p.text }]} accessibilityRole="header">Shop</Text>
-          <View style={styles.tagRow}>
-            <MaterialCommunityIcons name="sprout" size={12} color={gold} style={styles.laurelL} />
-            <Text style={[styles.tagline, { color: gold }, compact && { fontSize: 11 }]} numberOfLines={1}>
-              Collect • Customize • Upgrade • Stand Out
-            </Text>
-            <MaterialCommunityIcons name="sprout" size={12} color={gold} />
-          </View>
+
+      <View style={[styles.row, { marginTop: px(T.y - H.y - H.h, u), height: px(T.h, u), gap: px(8, u) }]}>
+        {showBack ? (
+          <BackButton size={Math.max(14, px(18, u))} color="#FFFFFF" style={[styles.back, { width: Math.max(22, px(30, u)), height: Math.max(22, px(30, u)), borderRadius: px(15, u) }]} />
+        ) : null}
+        <View style={[styles.bagGlow, { width: px(T.bag, u), height: px(T.bag, u), borderRadius: px(9, u) }]}>
+          <BagIcon size={px(T.bag * 0.7, u)} outline />
+        </View>
+        <Text style={[styles.title, { fontSize: font(T.size, u, FONT_FLOOR.title + 4) }]} accessibilityRole="header">Shop</Text>
+        <View style={[styles.row, { flex: 1, minWidth: 0, gap: px(4, u) }]}>
+          <Laurel width={lw} height={px(18, u)} />
+          <Text style={[styles.tagline, { fontSize: font(T.tagline, u) }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+            Collect • Customize • Upgrade • Stand Out
+          </Text>
+          <Laurel width={lw} height={px(18, u)} flip />
         </View>
       </View>
     </View>
@@ -99,20 +112,17 @@ export function ShopHeader({
 }
 
 const styles = StyleSheet.create({
-  bar: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 6 },
-  back: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
-  crown: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  wordmark: { fontFamily: TH.fonts.bold, fontSize: 19, letterSpacing: 0.2 },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 32, borderRadius: TH.radii.pill, borderWidth: 1, paddingHorizontal: 9 },
-  pillText: { fontFamily: TH.fonts.bold, fontSize: 13 },
-  iconBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  badge: { position: 'absolute', top: -4, right: -4, minWidth: 17, height: 17, borderRadius: 9, backgroundColor: TH.colors.danger, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  badgeText: { color: '#FFF', fontFamily: TH.fonts.bold, fontSize: 9.5 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
-  bag: { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  title: { fontFamily: TH.fonts.bold, fontSize: 36, lineHeight: 40, letterSpacing: 0.3 },
-  tagRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 1 },
-  laurelL: { transform: [{ scaleX: -1 }] },
-  tagline: { fontFamily: TH.fonts.bold, fontSize: 12, letterSpacing: 0.4, flexShrink: 1 },
+  // No View shadow: on web it is a rectangular box-shadow; the SVG draws its own soft glow.
+  ornament: { position: 'absolute' },
+  row: { flexDirection: 'row', alignItems: 'center' },
+  word: { color: '#FFFFFF', fontFamily: TH.fonts.bold, letterSpacing: 0.2 },
+  pill: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#160A33' },
+  pillText: { color: '#FFFFFF', fontFamily: TH.fonts.bold, flexShrink: 1 },
+  badge: { position: 'absolute', backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  badgeText: { color: '#FFF', fontFamily: TH.fonts.bold },
+  orders: { borderWidth: 1, borderColor: 'rgba(168,85,247,0.55)', backgroundColor: '#160A33', alignItems: 'center', justifyContent: 'center' },
+  back: { borderWidth: 1, borderColor: 'rgba(168,85,247,0.55)', backgroundColor: '#160A33', alignItems: 'center', justifyContent: 'center' },
+  bagGlow: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(245,185,53,0.14)', borderWidth: 1, borderColor: 'rgba(245,185,53,0.45)', shadowColor: '#F5B935', shadowOpacity: 0.55, shadowRadius: 10, shadowOffset: { width: 0, height: 0 } },
+  title: { color: '#FFFFFF', fontFamily: TH.fonts.bold, letterSpacing: 0.3 },
+  tagline: { color: '#F5D58A', fontFamily: TH.fonts.semibold, flexShrink: 1 },
 });

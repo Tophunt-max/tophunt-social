@@ -12,11 +12,21 @@ import type { StoreItemView } from '@/src/services/monetization';
  * stage tinted with the item's colours. Epic and above get a rarity gradient
  * border, a glow and a light shimmer on the shared fx clock (static under
  * reduced motion or while the screen is not focused).
+ *
+ * `bare`: just the item on a transparent stage (no border, tint or shimmer),
+ * so the card it sits on shows through (Shop home cards and hero).
  */
 export function ProductPreview({
-  item, viewer, width, height, radius = TH.radii.xl, shimmer = true,
-}: { item: StoreItemView; viewer: Viewer; width: number; height: number; radius?: number; shimmer?: boolean }) {
+  item, viewer, width, height, radius = TH.radii.xl, shimmer = true, bare = false,
+}: { item: StoreItemView; viewer: Viewer; width: number; height: number; radius?: number; shimmer?: boolean; bare?: boolean }) {
   const t = rarityToken(item.rarity);
+  if (bare) {
+    return (
+      <View style={{ width, height, borderRadius: radius, overflow: 'hidden' }} pointerEvents="none">
+        <ItemStage item={item} w={width} h={height} viewer={viewer} />
+      </View>
+    );
+  }
   const [c0, c1] = assetColors(item.asset, [TH.colors.royal, TH.colors.electric]);
   const border = t.glow ? 2 : 1;
   const innerW = width - border * 2;
