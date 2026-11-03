@@ -222,7 +222,7 @@ function XpItemCard({ item, width, avatar, busy, offline, onPreview, onEquip }: 
         <Text style={[styles.itemName, locked && { color: '#CBD5E1' }]} numberOfLines={1}>{item.name}</Text>
         <View style={styles.itemMeta}><TierPill item={item} compact /><Text style={styles.requiredXp}>{formatXp(item.requiredXp)} XP</Text></View>
         <Text style={[styles.state, { color: equipped ? GREEN : locked ? MUTED : CYAN }]}>
-          {equipped ? 'Currently equipped' : locked ? `${formatXp(item.xpRemaining)} XP remaining` : 'Unlocked permanently'}
+          {equipped ? 'Currently equipped' : locked ? `${formatXp(item.xpRemaining)} XP aur chahiye` : 'Unlocked permanently'}
         </Text>
         <View style={styles.actions}>
           <TouchableOpacity style={styles.previewBtn} onPress={onPreview} accessibilityRole="button"><Text style={styles.previewBtnText}>Preview</Text></TouchableOpacity>
@@ -232,7 +232,7 @@ function XpItemCard({ item, width, avatar, busy, offline, onPreview, onEquip }: 
             onPress={onEquip}
             accessibilityRole="button"
           >
-            <Text style={[styles.equipBtnText, equipped && { color: TEXT }]}>{locked ? 'Locked' : equipped ? 'Remove' : 'Equip'}</Text>
+            <Text style={[styles.equipBtnText, equipped && { color: TEXT }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{locked ? `Level ${item.unlocksAtLevel} par unlock` : equipped ? 'Remove' : 'Equip'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -257,9 +257,9 @@ function PreviewModal({ item, avatar, busy, offline, onClose, onEquip }: { item:
           <View style={styles.modalBody}>
             <View style={styles.modalPills}><TierPill item={item} /><View style={styles.unlockPill}><Ionicons name="lock-open" size={12} color={CYAN} /><Text style={styles.unlockPillText}>Level {item.unlocksAtLevel} · {formatXp(item.requiredXp)} XP</Text></View></View>
             <Text style={styles.modalDescription}>{item.description}</Text>
-            <Text style={[styles.modalState, { color: item.equipped ? GREEN : locked ? AMBER : CYAN }]}>{item.equipped ? 'Equipped now' : locked ? `Locked · ${formatXp(item.xpRemaining)} XP remaining` : 'Unlocked permanently on your account'}</Text>
+            <Text style={[styles.modalState, { color: item.equipped ? GREEN : locked ? AMBER : CYAN }]}>{item.equipped ? 'Equipped now' : locked ? `Level ${item.unlocksAtLevel} par unlock · ${formatXp(item.xpRemaining)} XP aur chahiye` : 'Unlocked permanently on your account'}</Text>
             <TouchableOpacity style={[styles.modalAction, (locked || offline) && styles.disabledBtn, item.equipped && styles.removeBtn]} disabled={locked || offline || busy} onPress={() => onEquip(item)} accessibilityRole="button">
-              {busy ? <ActivityIndicator color="#052E16" /> : <Text style={[styles.modalActionText, item.equipped && { color: TEXT }]}>{locked ? `Reach Level ${item.unlocksAtLevel}` : offline ? 'Reconnect to equip' : item.equipped ? 'Remove item' : 'Equip free item'}</Text>}
+              {busy ? <ActivityIndicator color="#052E16" /> : <Text style={[styles.modalActionText, item.equipped && { color: TEXT }]}>{locked ? `Level ${item.unlocksAtLevel} par unlock` : offline ? 'Reconnect to equip' : item.equipped ? 'Remove item' : 'Equip free item'}</Text>}
             </TouchableOpacity>
           </View>
         </Animated.View>
