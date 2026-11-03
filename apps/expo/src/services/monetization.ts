@@ -191,6 +191,8 @@ export interface StoreItemView {
   createdAt?: number;
   soldCount?: number;
   owned: boolean;
+  /** Admin compare-at ("original") price, only when above priceCoins; display only (buying charges priceCoins). Missing from older servers. */
+  compareAtCoins?: number | null;
 }
 
 export function useStore(enabled: boolean) {

@@ -50,6 +50,17 @@ export interface StoreListingView {
   /** Real units sold through the store (the same counter the stock limit uses). For "Popular". */
   soldCount: number;
   owned: boolean;
+  /**
+   * Compare-at ("original") price set by the admin, only when above the
+   * price; null = no discount. Display only: buying charges priceCoins.
+   */
+  compareAtCoins: number | null;
+}
+
+/** The compare-at price when it is a real discount over `price`, else null. */
+export function compareAtOf(raw: unknown, price: number): number | null {
+  const v = raw == null ? NaN : Number(raw);
+  return Number.isInteger(v) && v > price ? v : null;
 }
 
 /** Live listings, with the caller's ownership. */
@@ -77,6 +88,7 @@ export async function listStore(env: Env, uid: string, ts = Date.now()): Promise
     createdAt: Number(r.created_at) || 0,
     soldCount: Math.max(0, Number(r.sold_count) || 0),
     owned: !!r.owned,
+    compareAtCoins: compareAtOf(r.compare_at_coins, Number(r.price_coins)),
   }));
 }
 
@@ -246,8 +258,15 @@ export function validateListingInput(body: any) {
   if (startsAt !== null && endsAt !== null && endsAt <= startsAt) bad("endsAt must be after startsAt.");
   const sort = Number(body?.sort ?? 0);
   if (!Number.isInteger(sort)) bad("sort must be a whole number.");
+  // Display-only original price: empty = no discount; otherwise a real discount over the price.
+  const compareAt = body?.compareAtCoins == null || body.compareAtCoins === "" ? null : Number(body.compareAtCoins);
+  if (compareAt !== null) {
+    if (!Number.isInteger(compareAt) || compareAt > 10_000_000) bad("Original price: a whole number of coins up to 10000000, or empty for no discount.");
+    if (compareAt <= price) bad(`Original price must be more than the price (${price} coins), or empty for no discount.`);
+  }
   return {
     priceCoins: price,
+    compareAtCoins: compareAt,
     refundable: body?.refundable === false ? 0 : 1,
     stockLimit: stock,
     active: body?.active === true ? 1 : 0,

@@ -3,7 +3,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ShopTab } from '@/src/lib/shopModel';
 import { TH, glowShadow } from '@/src/theme/tophunt';
-import { FONT_FLOOR, MOCK, font, px } from './mock';
+import { FONT_FLOOR, MOCK, MOCK_M, font, mfont, px } from './mock';
 import { TabGlyph } from './ShopArt';
 
 const TABS: { key: ShopTab | 'collection'; label: string; icon: 'bag' | 'layers' | 'cube' | 'grid' }[] = [
@@ -76,9 +76,64 @@ export function ShopNavigationTabs({
   );
 }
 
+/**
+ * Phone tab bar (mobile mock: h 26, radius 13): segments sized to their
+ * content and sharing the spare width, no dividers; the active one is a
+ * lavender gradient pill at least 64 wide.
+ */
+export function ShopNavigationTabsMobile({
+  u, width, tab, onTab, onCollection,
+}: { u: number; width: number; tab: ShopTab; onTab: (t: ShopTab) => void; onCollection: () => void }) {
+  const T = MOCK_M.tabs;
+  const fs = mfont(T.text, u);
+  const h = px(T.h, u);
+  const inset = px(T.inset, u);
+  const icon = px(T.icon, u);
+  return (
+    <View style={[styles.track, { width, height: h, borderRadius: h / 2 }, glowShadow('#A855F7', true)]} accessibilityRole="tablist">
+      {TABS.map((t) => {
+        const on = t.key === tab;
+        const isLink = t.key === 'collection';
+        const content = (
+          <>
+            <TabGlyph name={t.icon} size={icon} color={on ? ON_INK : '#FFFFFF'} />
+            <Text style={[on ? styles.labelOn : styles.label, { fontSize: fs }]} numberOfLines={1}>{t.label}</Text>
+          </>
+        );
+        return (
+          <TouchableOpacity
+            key={t.key}
+            onPress={() => (isLink ? onCollection() : onTab(t.key as ShopTab))}
+            activeOpacity={0.85}
+            hitSlop={{ top: 8, bottom: 8 }}
+            style={[styles.segM, on && { minWidth: px(T.activeW, u) }]}
+            accessibilityRole={isLink ? 'link' : 'tab'}
+            accessibilityState={isLink ? undefined : { selected: on }}
+            accessibilityLabel={isLink ? 'My Collection: aapke items kholo' : t.label}
+          >
+            {on ? (
+              <LinearGradient
+                colors={['#E9D5FF', '#C4B5FD', '#A78BFA']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.inner, { margin: inset, borderRadius: (h - inset * 2) / 2, gap: px(4, u), paddingHorizontal: px(6, u) }]}
+              >
+                {content}
+              </LinearGradient>
+            ) : (
+              <View style={[styles.inner, { margin: inset, gap: px(4, u), paddingHorizontal: px(4, u) }]}>{content}</View>
+            )}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   track: { flexDirection: 'row', backgroundColor: '#140A2E', borderWidth: 1, borderColor: 'rgba(168,85,247,0.55)' },
   seg: { flex: 1, minWidth: 0 },
+  segM: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto' },
   divider: { borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.12)' },
   inner: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   label: { color: '#FFFFFF', fontFamily: TH.fonts.semibold, flexShrink: 1 },

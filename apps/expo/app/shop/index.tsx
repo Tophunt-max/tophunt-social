@@ -23,10 +23,24 @@ import {
   TrendCard,
   type QuickAction,
 } from '@/src/components/shop/premium/ShopHomeSections';
-import { BagIcon, ClockIcon, FlameIcon, GoldBoxIcon, HeartIcon, ShirtIcon, StarIcon } from '@/src/components/shop/premium/ShopArt';
-import { MOCK, MOCK_MARGIN, cellWidth, mockScale, px } from '@/src/components/shop/premium/mock';
-import { ShopHeader } from '@/src/components/shop/premium/ShopHeader';
-import { ShopNavigationTabs } from '@/src/components/shop/premium/ShopNavigationTabs';
+import { BagIcon, BoltIcon, BoxIcon, ClockIcon, CrownIcon, FlameIcon, GoldBoxIcon, HeartIcon, ShirtIcon, StarIcon } from '@/src/components/shop/premium/ShopArt';
+import { MOCK, MOCK_M, MOCK_MARGIN, MOCK_M_MARGIN, cellWidth, isMobileShop, mobileScale, mockScale, px } from '@/src/components/shop/premium/mock';
+import { ShopHeader, ShopHeaderMobile } from '@/src/components/shop/premium/ShopHeader';
+import { ShopNavigationTabs, ShopNavigationTabsMobile } from '@/src/components/shop/premium/ShopNavigationTabs';
+import {
+  CategoryGridM,
+  CollectionRowM,
+  DealCardM,
+  DealTimerPill,
+  FeatureCardM,
+  PhysicalRowM,
+  QuickCardsM,
+  SectionHeaderM,
+  TrendCardM,
+  UpgradeBannerM,
+  type DealCardContent,
+  type QuickCard,
+} from '@/src/components/shop/premium/ShopHomeMobile';
 import { Chip, EmptyState, ErrorState, SectionHeader as BlockHeader, ShopSkeleton } from '@/src/components/shop/premium/ShopBlocks';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useProfile } from '@/src/hooks/useProfileData';
@@ -37,7 +51,9 @@ import {
   cardTag,
   categoryTiles,
   collectionTiles,
+  UPGRADE_RARITIES,
   dealsBlock,
+  dealsSummary,
   deriveCategories,
   featuredCollection,
   featuredView,
@@ -45,8 +61,12 @@ import {
   heroSlides,
   hotDeals,
   isShort,
+  mobileCategoryTiles,
+  mobileCollectionTiles,
   parseShopTab,
+  physicalPicks,
   presentRarities,
+  showUpgradeBanner,
   trendingItems,
   withWishlist,
   type CategoryTile,
@@ -83,8 +103,7 @@ const RAIL_GAP = 12;
 const gapY = (prevBottom: number, nextTop: number, u: number) => px(Math.max(0, nextTop - prevBottom), u);
 
 /** Soft radial purple glows behind the page (static, does not scroll). */
-const PageGlow = React.memo(function PageGlow({ width, height, u }: { width: number; height: number; u: number }) {
-  const heroBottom = px(MOCK.hero.y + MOCK.hero.h, u);
+const PageGlow = React.memo(function PageGlow({ width, height, heroBottom }: { width: number; height: number; heroBottom: number }) {
   return (
     <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
       <Defs>
@@ -110,7 +129,10 @@ const PageGlow = React.memo(function PageGlow({ width, height, u }: { width: num
  * the server when buying; delivery is included for products.
  *
  * Tabs: Shop (the home, a proportional replica of the reference mock: every
- * length is `mock px * u`, u = contentW / 748, see premium/mock.ts), Digital
+ * length is `mock px * u`. Phones (content < 700 px) follow the 340 px mobile
+ * mock, u = width / 340 (MOCK_M, premium/ShopHomeMobile.tsx); wider screens
+ * the 748 px desktop mock, u = contentW / 748 (MOCK, ShopHomeSections.tsx).
+ * See premium/mock.ts), Digital
  * (full catalogue with filters), Physical (products), and My Collection (a
  * link to /rewards/inventory). `/shop?tab=digital` and `/shop?tab=physical`
  * open on that tab.
@@ -153,8 +175,10 @@ export default function ShopScreen() {
   // lays out for the real window, capped at the content width.
   const { width, height } = useWindowDimensions();
   const contentW = Math.min(width, TH.maxContentWidth);
+  const mobile = isMobileShop(contentW);
   const u = mockScale(width);
-  const margin = px(MOCK_MARGIN, u);
+  const uM = mobileScale(contentW);
+  const margin = mobile ? px(MOCK_M_MARGIN, uM) : px(MOCK_MARGIN, u);
   const inner = contentW - margin * 2;
   // Digital / Physical tabs keep their responsive grid, on the same margins.
   const pad = Math.max(12, margin);
@@ -175,6 +199,11 @@ export default function ShopScreen() {
   const tiles = useMemo(() => categoryTiles(digital, { enabled: cfg.gifts.enabled, count: gifts.data?.length }), [digital, cfg.gifts.enabled, gifts.data?.length]);
   const featured = useMemo(() => featuredCollection(digital, feature, MOCK.feat.cols), [digital, feature]);
   const trending = useMemo(() => trendingItems(digital, MOCK.trend.cols), [digital]);
+  const featuredM = useMemo(() => featuredCollection(digital, feature, MOCK_M.feat.cols), [digital, feature]);
+  const trendingM = useMemo(() => trendingItems(digital, MOCK_M.trend.cols), [digital]);
+  const tilesM = useMemo(() => mobileCategoryTiles(tiles), [tiles]);
+  const deals0 = useMemo(() => dealsSummary(digital, now), [digital, now]);
+  const upgrade = showUpgradeBanner(cfg.store.enabled, digital);
   const giftPage = giftsIn.data?.pages?.[0];
   const collection = useMemo(
     () => collectionTiles(inventory.data?.items, { enabled: cfg.gifts.enabled, firstPage: giftPage?.items?.length ?? 0, more: giftPage?.nextCursor != null }),
@@ -191,6 +220,13 @@ export default function ShopScreen() {
   // Hot deals: products the admin marked featured that are in stock.
   const deals = useMemo(() => hotDeals(allProducts), [allProducts]);
   const homeDeals = useMemo(() => dealsBlock(cfg.shop.enabled, allProducts), [cfg.shop.enabled, allProducts]);
+  const physM = useMemo(() => (cfg.shop.enabled && allProducts.length ? physicalPicks(allProducts, MOCK_M.phys.cols) : null), [cfg.shop.enabled, allProducts]);
+  // Phone deal card: a real store discount first, else an admin-featured product, else the honest placeholder.
+  const dealContent: DealCardContent = cfg.store.enabled && deals0.items.length
+    ? { kind: 'discount', summary: deals0 }
+    : homeDeals.deal
+      ? { kind: 'product', product: homeDeals.deal }
+      : { kind: 'soon' };
 
   const setTab = useCallback((t: ShopTab) => {
     setTabState(t);
@@ -207,7 +243,8 @@ export default function ShopScreen() {
   const canAfford = (coins: number) => !live || bal.dpcoin >= coins;
   const short = (i: StoreItemView) => isShort(bal.dpcoin, i.priceCoins, live);
   // Back only when there is somewhere to go: native always (BackButton falls back to /home), web only with history.
-  const showBack = Platform.OS !== 'web' || router.canGoBack();
+  // The phone mock shows it only with real history.
+  const showBack = mobile ? router.canGoBack() : Platform.OS !== 'web' || router.canGoBack();
 
   const refreshing = store.isRefetching || products.isRefetching;
   const onRefresh = () => {
@@ -368,17 +405,161 @@ export default function ShopScreen() {
     </View>
   );
 
+  const mIcon = px(MOCK_M.section.icon, uM);
+  const mGap = px(MOCK_M.gap, uM);
+  const mHead = px(MOCK_M.head, uM);
+  const mQaIcon = px(MOCK_M.quick.icon, uM);
+  const featGapM = px(MOCK_M.feat.gap, uM);
+  const trendGapM = px(MOCK_M.trend.gap, uM);
+  const quickCards: QuickCard[] = [
+    ...(cfg.store.enabled && user
+      ? [{ key: 'wish', icon: <HeartIcon size={mQaIcon} />, title: 'Wishlist', sub: 'Save Items', accent: '#EC4899', onPress: () => openDigital({ wishlist: true }) }]
+      : []),
+    { key: 'orders', icon: <GoldBoxIcon size={mQaIcon} />, title: 'Orders', sub: 'Track & Manage', accent: '#F59E0B', onPress: () => router.push('/shop/orders' as any) },
+    { key: 'history', icon: <ClockIcon size={mQaIcon} />, title: 'History', sub: 'Purchase Records', accent: '#F5B935', onPress: () => router.push('/wallet' as any) },
+  ];
+  const collectionM = mobileCollectionTiles(collection.tiles);
+
+  const homeMobile = (
+    <View style={{ paddingHorizontal: margin }}>
+      {hero && cfg.store.enabled ? (
+        <View style={{ marginTop: px(MOCK_M.hero.y - MOCK_M.tabs.y - MOCK_M.tabs.h, uM) }}>
+          <HeroBanner hero={hero} viewer={viewer} u={uM} variant="mobile" onExplore={() => openDigital({ ids: hero.itemIds })} onOpenItem={openItem} />
+        </View>
+      ) : null}
+      {digitalState ? (
+        <View style={{ marginHorizontal: -margin, marginTop: mGap }}>{digitalState}</View>
+      ) : (
+        <>
+          <SectionHeaderM u={uM} style={{ marginTop: mGap }} icon={<CrownIcon size={mIcon} />} title="Shop Categories" action={{ label: 'View All', onPress: () => openDigital({}) }} />
+          <View style={{ marginTop: mHead }}>
+            <CategoryGridM tiles={tilesM} u={uM} inner={inner} onPick={onTile} />
+          </View>
+
+          {featuredM.length ? (
+            <>
+              <SectionHeaderM u={uM} style={{ marginTop: mGap }} icon={<StarIcon size={mIcon} />} title="Featured Collection" action={{ label: 'View All', onPress: () => openDigital({ ids: featured.map((i) => i.itemId) }) }} />
+              <View style={[styles.row, { gap: featGapM, marginTop: mHead }]}>
+                {featuredM.map((i) => (
+                  <FeatureCardM key={i.itemId} item={i} tag={cardTag(i, now)} u={uM} width={cellWidth(inner, MOCK_M.feat.cols, featGapM)} viewer={viewer} onOpen={() => openItem(i.itemId)} />
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {trendingM.items.length ? (
+            <>
+              <SectionHeaderM u={uM} style={{ marginTop: mGap }} icon={<FlameIcon size={mIcon} />} title={trendingM.title} action={{ label: 'View All', onPress: () => openDigital({}) }} />
+              <View style={[styles.row, { gap: trendGapM, marginTop: mHead }]}>
+                {trendingM.items.map((i) => (
+                  <TrendCardM key={i.itemId} item={i} u={uM} width={cellWidth(inner, MOCK_M.trend.cols, trendGapM)} viewer={viewer} onOpen={() => openItem(i.itemId)} />
+                ))}
+              </View>
+            </>
+          ) : null}
+        </>
+      )}
+
+      <SectionHeaderM
+        u={uM}
+        style={{ marginTop: mGap }}
+        icon={<BoltIcon size={mIcon} />}
+        title="Special Offers & Daily Deals"
+        right={dealContent.kind === 'discount' && dealContent.summary.endsAt ? <DealTimerPill endsAt={dealContent.summary.endsAt} u={uM} /> : null}
+      />
+      <View style={{ marginTop: mHead }}>
+        <DealCardM
+          content={dealContent}
+          u={uM}
+          width={inner}
+          onDeals={() => openDigital({ discounted: true })}
+          onProduct={openProduct}
+          onContest={() => router.push('/explore/battles' as any)}
+        />
+      </View>
+
+      <SectionHeaderM
+        u={uM}
+        style={{ marginTop: mGap }}
+        icon={<BoxIcon size={mIcon} />}
+        title="Physical Products"
+        action={physM ? { label: 'View All', onPress: () => setTab('physical') } : undefined}
+      />
+      <View style={{ marginTop: mHead }}>
+        <PhysicalRowM products={physM} u={uM} inner={inner} onOpen={openProduct} />
+      </View>
+
+      {user ? (
+        <>
+          <SectionHeaderM
+            u={uM}
+            style={{ marginTop: mGap }}
+            icon={<CrownIcon size={mIcon} />}
+            title={inventory.data ? `My Collection (${collection.total}${collection.more ? '+' : ''} Items)` : 'My Collection'}
+            action={{ label: 'Manage', onPress: openCollection }}
+          />
+          <View style={{ marginTop: mHead }}>
+            {inventory.data ? (
+              <CollectionRowM tiles={collectionM} u={uM} inner={inner} onPress={openCollection} />
+            ) : inventory.isError ? (
+              <View style={{ marginHorizontal: -margin, paddingHorizontal: pad }}>
+                <ErrorState p={p} text="Collection load nahi hui." onRetry={() => void inventory.refetch()} />
+              </View>
+            ) : (
+              <View style={[styles.row, { gap: px(MOCK_M.col.gap, uM) }]} accessible accessibilityLabel="Collection load ho rahi hai">
+                {Array.from({ length: MOCK_M.col.cols }, (_, i) => (
+                  <View key={i} style={{ width: cellWidth(inner, MOCK_M.col.cols, px(MOCK_M.col.gap, uM)), height: px(MOCK_M.col.h, uM), borderRadius: px(MOCK_M.col.radius, uM), backgroundColor: p.skeleton }} />
+                ))}
+              </View>
+            )}
+          </View>
+        </>
+      ) : null}
+
+      {upgrade ? (
+        <View style={{ marginTop: mGap }}>
+          <UpgradeBannerM u={uM} width={inner} onPress={() => openDigital({ rarities: [...UPGRADE_RARITIES] })} />
+        </View>
+      ) : null}
+
+      <View style={{ marginTop: mGap }}>
+        <QuickCardsM cards={quickCards} u={uM} width={inner} />
+      </View>
+    </View>
+  );
+
+  const bottomPad = mobile ? px(MOCK_M.bottom, uM) : px(MOCK.bottom, u);
+  const heroBottomY = mobile ? px(MOCK_M.hero.y + MOCK_M.hero.h, uM) : px(MOCK.hero.y + MOCK.hero.h, u);
+
   return (
     <View style={[styles.container, { backgroundColor: PAGE_BG }]}>
       {focused ? <StatusBar style="light" /> : null}
-      <PageGlow width={width} height={height} u={u} />
+      <PageGlow width={width} height={height} heroBottom={heroBottomY} />
       <SafeAreaView style={styles.container} edges={['top']}>
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={{ paddingBottom: px(MOCK.bottom, u) + insets.bottom + (tab === 'shop' ? 0 : 32), width: contentW, alignSelf: 'center' }}
+          contentContainerStyle={{ paddingBottom: bottomPad + insets.bottom + (tab === 'shop' ? 0 : 32), width: contentW, alignSelf: 'center' }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={TH.colors.primary} />}
           keyboardShouldPersistTaps="handled"
         >
+          {mobile ? (
+            <View style={{ paddingHorizontal: margin }}>
+              <ShopHeaderMobile
+                u={uM}
+                inner={inner}
+                live={live}
+                dpcoin={bal.dpcoin}
+                diamonds={bal.diamonds}
+                cartCount={cartCount}
+                showBack={showBack}
+                onOrders={() => router.push('/shop/orders' as any)}
+                onCart={() => router.push('/shop/cart' as any)}
+              />
+              <View style={{ marginTop: px(MOCK_M.tabs.y - MOCK_M.title.y - MOCK_M.title.h, uM) }}>
+                <ShopNavigationTabsMobile u={uM} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
+              </View>
+            </View>
+          ) : (
           <View style={{ paddingHorizontal: margin }}>
             <ShopHeader
               u={u}
@@ -395,8 +576,9 @@ export default function ShopScreen() {
               <ShopNavigationTabs u={u} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
             </View>
           </View>
+          )}
           {tab === 'shop' ? (
-            home
+            mobile ? homeMobile : home
           ) : tab === 'digital' ? (
             digitalState ?? (
               <DigitalCatalogue
@@ -471,7 +653,7 @@ function DigitalCatalogue({
   shown: StoreItemView[];
   render: (i: StoreItemView) => React.ReactNode;
 }) {
-  const filtered = !!(filter.type || filter.rarity || filter.query.trim() || filter.ids || filter.wishlist || filter.rarities?.length);
+  const filtered = !!(filter.type || filter.rarity || filter.query.trim() || filter.ids || filter.wishlist || filter.rarities?.length || filter.discounted);
   return (
     <>
       <View style={[styles.searchWrap, { marginHorizontal: pad, backgroundColor: p.card, borderColor: p.border }]}>
@@ -492,7 +674,7 @@ function DigitalCatalogue({
           </TouchableOpacity>
         ) : null}
       </View>
-      {filter.wishlist || filter.ids || filter.rarities?.length ? (
+      {filter.wishlist || filter.ids || filter.rarities?.length || filter.discounted ? (
         <View style={[styles.chips, { paddingHorizontal: pad, marginTop: 12, flexWrap: 'wrap' }]}>
           {filter.wishlist ? (
             <Chip p={p} icon="heart" label={`Wishlist · ${wishlistCount} · hatao`} on onPress={() => setFilter({ ...filter, wishlist: false, ids: null })} />
@@ -501,6 +683,9 @@ function DigitalCatalogue({
           ) : null}
           {filter.rarities?.length ? (
             <Chip p={p} icon="sparkles" label={`${filter.rarities.map((r) => rarityToken(r).label).join(' + ')} · hatao`} on onPress={() => setFilter({ ...filter, rarities: null })} />
+          ) : null}
+          {filter.discounted ? (
+            <Chip p={p} icon="pricetag-outline" label="Discount wale items · hatao" on onPress={() => setFilter({ ...filter, discounted: false })} />
           ) : null}
         </View>
       ) : null}

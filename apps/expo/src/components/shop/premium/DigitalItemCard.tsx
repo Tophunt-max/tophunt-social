@@ -14,6 +14,7 @@ import { TYPE_SINGULAR } from '@/src/lib/shopModel';
 import { TH, rarityToken, type TophuntPalette } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
+import { DiscountTag } from './DiscountTag';
 import { ProductPreview } from './ProductPreview';
 import { RarityBadge } from './RarityBadge';
 import { WishlistHeart } from './WishlistHeart';
@@ -89,6 +90,7 @@ export const DigitalItemCard = React.memo(function DigitalItemCard({
           <View style={styles.price}>
             <CoinIcon size={15} />
             <Text style={[styles.priceText, { color: p.text }]}>{item.priceCoins.toLocaleString()}</Text>
+            <DiscountTag item={item} size={10.5} color={p.sub} />
           </View>
         )}
         <View style={{ flex: 1 }} />
@@ -131,7 +133,7 @@ const styles = StyleSheet.create({
   name: { fontFamily: TH.fonts.bold, fontSize: 14 },
   type: { fontFamily: TH.fonts.medium, fontSize: 11.5 },
   foot: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingTop: 8, paddingBottom: 4 },
-  price: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  price: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1, minWidth: 0 },
   priceText: { fontFamily: TH.fonts.bold, fontSize: 15 },
   owned: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   ownedText: { color: TH.colors.success, fontFamily: TH.fonts.bold, fontSize: 13 },

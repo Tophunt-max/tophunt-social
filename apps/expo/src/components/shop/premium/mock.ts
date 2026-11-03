@@ -117,6 +117,76 @@ export function cellWidth(inner: number, cols: number, gap: number): number {
   return Math.floor(((inner - gap * (cols - 1)) / Math.max(1, cols)) * 4) / 4;
 }
 
+// ------------------------------------------------------------------ mobile mock (340 px wide)
+
+/** Width of the mobile reference canvas (a phone mock). */
+export const MOCK_M_W = 340;
+/** Below this content width the Shop home uses the mobile mock (MOCK_M), else the 748 desktop mock. */
+export const MOBILE_BREAKPOINT = 700;
+/** Side margin of the mobile mock. */
+export const MOCK_M_MARGIN = 12;
+/** Inner width of the mobile mock (340 - 2 * 12). */
+export const MOCK_M_INNER = MOCK_M_W - MOCK_M_MARGIN * 2;
+
+/** True when the Shop home should use the mobile mock. */
+export function isMobileShop(contentW: number): boolean {
+  return Number.isFinite(contentW) && contentW > 0 && contentW < MOBILE_BREAKPOINT;
+}
+
+/** Scale factor of the mobile mock: width / 340 (a 390 px phone gives u ≈ 1.15). No floor: the mock fonts read at u ≥ 0.9. */
+export function mobileScale(width: number): number {
+  const w = Number.isFinite(width) && width > 0 ? width : MOCK_M_W;
+  return Math.min(w, MOBILE_BREAKPOINT) / MOCK_M_W;
+}
+
+/** A mobile mock font size on screen (ref * u, one decimal). */
+export function mfont(ref: number, u: number): number {
+  return Math.round(ref * u * 10) / 10;
+}
+
+/**
+ * Geometry of the mobile mock (mock px at 340 wide). Box widths of grids come
+ * from cellWidth(inner, cols, gap) so a row always spans the inner width;
+ * heights, radii, art and fonts are the mock values. Sections stack with
+ * `gap` between them and `head` from a section header to its body.
+ */
+export const MOCK_M = {
+  header: { h: 40, rowTop: 16, logo: 22, word: 17, dpW: 76, diaW: 66, pillH: 24, pillText: 12, pillIcon: 15, cart: 22, badge: 14, orders: 22, gap: 6 },
+  crown: { w: 28, h: 18 },
+  title: { y: 44, h: 30, bag: 26, size: 22, tagline: 8.5, laurel: 14, back: 18 },
+  tabs: { y: 80, h: 26, radius: 13, activeW: 64, text: 11, icon: 12, inset: 2 },
+  hero: { y: 114, h: 124, radius: 14 },
+  /** Gap between blocks, and from a section header to its body. */
+  gap: 10,
+  head: 6,
+  section: { h: 20, title: 14, icon: 16, link: 10.5 },
+  cat: { h: 52, gap: 6, radius: 9, artW: 30, artH: 24, label: 9.5, cols: 5, rowGap: 6 },
+  feat: { h: 110, gap: 6, radius: 10, artW: 70, artH: 52, name: 10, price: 11, tag: 8, cols: 3 },
+  trend: { h: 82, gap: 5, radius: 9, artW: 46, artH: 36, name: 8.5, price: 9.5, cols: 5 },
+  deals: { h: 92, radius: 12, chestW: 96, chestH: 80, ribbonW: 44, ribbonH: 48, title: 15, sub: 9.5, ctaW: 110, ctaH: 26, cta: 10.5, timerH: 20, timer: 10 },
+  phys: { h: 92, gap: 6, radius: 10, imgH: 56, title: 9.5, price: 9.5, cols: 4 },
+  col: { h: 60, gap: 6, icon: 30, label: 9.5, count: 9, cols: 5, radius: 9 },
+  upgrade: { h: 86, radius: 12, title: 14, sub: 9.5, ctaW: 112, ctaH: 24, cta: 10.5, artW: 110, artH: 70 },
+  quick: { h: 40, radius: 10, gap: 6, icon: 20, title: 11, sub: 8.5 },
+  bottom: 20,
+} as const;
+
+/** Mobile hero, relative to its own top-left (316 × 124). Text column x 14..170, art on the right. */
+export const HERO_M = {
+  w: MOCK_M_INNER,
+  h: 124,
+  textX: 14,
+  textW: 156,
+  badge: { h: 16, text: 9 },
+  line1: 26,
+  line2: 20,
+  sub: 8.5,
+  cta: { w: 132, h: 24, size: 10.5 },
+  art: 120,
+  timer: { right: 8, top: 8, pillW: 70, pillH: 18, box: 18, boxH: 22, gap: 2, num: 10, unit: 6, label: 7.5 },
+  dots: { y: 116, size: 5 },
+} as const;
+
 // ------------------------------------------------------------------ hero slider math
 
 /** Autoplay period of the hero slider. */

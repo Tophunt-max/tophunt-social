@@ -17,6 +17,7 @@ import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
 import type { ShopProduct } from '@/src/services/shop';
 import { FONT_FLOOR, MOCK, cellWidth, font, px, rowWidths } from './mock';
+import { DiscountTag } from './DiscountTag';
 import { ProductPreview } from './ProductPreview';
 import { BoltIcon, BoxIcon, ChestArt, CoinArt, CubeLine, TileArt } from './ShopArt';
 import { WishlistHeart } from './WishlistHeart';
@@ -134,6 +135,7 @@ function Price({ item, u, size, width }: { item: StoreItemView; u: number; size:
     <View style={[styles.price, { gap: px(3, u) }]}>
       <CoinArt size={Math.max(fs, px(size + 1, u))} />
       <Text style={[styles.priceText, { fontSize: fs }]} numberOfLines={1}>{priceText(item.priceCoins, width)}</Text>
+      <DiscountTag item={item} size={fs * 0.82} showWas={width >= 120} />
     </View>
   );
 }

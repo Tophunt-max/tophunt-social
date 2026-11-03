@@ -557,3 +557,73 @@ export function TabGlyph({ name, size, color }: { name: 'bag' | 'layers' | 'cube
     </Svg>
   );
 }
+
+// ------------------------------------------------------------------ mobile home art
+
+/** Gold crown section icon (24×24). */
+export function CrownIcon({ size }: IconProps) {
+  return <CrownLogo width={size} height={(size * 36) / 48} />;
+}
+
+/**
+ * Red "UP TO / X% / OFF" ribbon of the deal card: a badge with a notched
+ * bottom (viewBox 44×48). The text is drawn by the caller on top.
+ */
+export function DealRibbon({ width, height }: TileArtProps) {
+  return (
+    <Svg width={width} height={height} viewBox="0 0 44 48">
+      <Defs>
+        <LinearGradient id="sa-ribbon" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#EF4444" />
+          <Stop offset="1" stopColor="#B91C1C" />
+        </LinearGradient>
+      </Defs>
+      <Path d="M3 1 H41 Q43 1 43 3 V47 L22 39 L1 47 V3 Q1 1 3 1 Z" fill="url(#sa-ribbon)" stroke="#FCA5A5" strokeWidth={0.8} strokeLinejoin="round" />
+      <Path d="M5 4 H39" stroke="#FFF" strokeWidth={1} strokeLinecap="round" opacity={0.35} />
+    </Svg>
+  );
+}
+
+/**
+ * Big gold winged crown with purple up-chevrons, for the "Upgrade Your
+ * Profile" banner (viewBox 110×70).
+ */
+export function WingedCrownArt({ width, height }: TileArtProps) {
+  const feathers = [0, 1, 2, 3];
+  return (
+    <Svg width={width} height={height} viewBox="0 0 110 70">
+      <Defs>
+        <RadialGradient id="sa-wc-glow" cx="0.5" cy="0.55" r="0.5">
+          <Stop offset="0" stopColor="#FFD24A" stopOpacity={0.5} />
+          <Stop offset="1" stopColor="#FFD24A" stopOpacity={0} />
+        </RadialGradient>
+        <LinearGradient id="sa-wc-gold" x1="0" y1="0" x2="0" y2="1">{goldStops()}</LinearGradient>
+        <LinearGradient id="sa-wc-chev" x1="0" y1="0" x2="0" y2="1">{purpleStops({ light: '#F5D0FE', mid: '#C084FC', dark: '#7C3AED' })}</LinearGradient>
+      </Defs>
+      <Ellipse cx={55} cy={40} rx={54} ry={30} fill="url(#sa-wc-glow)" />
+      {/* up chevrons behind */}
+      {[[14, 30], [14, 42], [96, 30], [96, 42]].map(([x, y]) => (
+        <Path key={`${x}-${y}`} d={`M${x - 7} ${y + 5} L${x} ${y - 2} L${x + 7} ${y + 5}`} fill="none" stroke="url(#sa-wc-chev)" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
+      ))}
+      {/* wings */}
+      {feathers.map((k) => (
+        <G key={`l${k}`}>
+          <Path d={`M38 ${44 - k * 2} C${30 - k * 4} ${40 - k * 6} ${24 - k * 3} ${34 - k * 7} ${20 - k * 2} ${26 - k * 6} C${28 - k * 2} ${30 - k * 4} ${34} ${36 - k * 2} 40 ${40 - k * 2} Z`} fill="url(#sa-wc-gold)" stroke="#92400E" strokeWidth={0.6} />
+          <Path d={`M72 ${44 - k * 2} C${80 + k * 4} ${40 - k * 6} ${86 + k * 3} ${34 - k * 7} ${90 + k * 2} ${26 - k * 6} C${82 + k * 2} ${30 - k * 4} ${76} ${36 - k * 2} 70 ${40 - k * 2} Z`} fill="url(#sa-wc-gold)" stroke="#92400E" strokeWidth={0.6} />
+        </G>
+      ))}
+      {/* crown */}
+      <G transform="translate(31 12)">
+        <Path d={CROWN} fill="url(#sa-wc-gold)" stroke="#92400E" strokeWidth={1} strokeLinejoin="round" />
+        <Rect x={8} y={30} width={32} height={6} rx={2} fill="#D97706" stroke="#92400E" strokeWidth={0.6} />
+        <Path d="M24 18 L28 23 L24 28 L20 23 Z" fill="#A855F7" stroke="#FFF" strokeWidth={0.7} />
+        <Circle cx={5} cy={12} r={2.2} fill="#FFF6C2" />
+        <Circle cx={24} cy={6} r={2.4} fill="#FFF6C2" />
+        <Circle cx={43} cy={12} r={2.2} fill="#FFF6C2" />
+        <Circle cx={13} cy={33} r={1.4} fill="#EC4899" />
+        <Circle cx={35} cy={33} r={1.4} fill="#22D3EE" />
+      </G>
+      <Sparks pts={[[8, 12, 3], [102, 10, 3.4], [55, 6, 2.4], [100, 62, 2.2], [10, 60, 2]]} />
+    </Svg>
+  );
+}

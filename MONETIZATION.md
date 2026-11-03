@@ -162,6 +162,20 @@ and re-checks price and availability inside the transaction.
   (`soldCount > 0`) and "Limited edition" (real stock left or a future sale end) from them and omits a rail
   with nothing in it (`apps/expo/src/lib/shopModel.ts`).
 
+### Compare-at price / real discounts (migration 0081)
+
+- `store_listings.compare_at_coins` (nullable): the "original" price an admin sets in Monetization → Store →
+  Edit listing ("Original price, optional"). `validateListingInput` accepts null/empty or a whole number
+  above `priceCoins` and at most 10,000,000; anything else is refused with a message. Every listing save writes
+  it, so the admin quick Hide / Put on sale toggle passes the stored value through unchanged.
+- `getStore` returns `compareAtCoins` only when it is above the price (else null). It is **display only**:
+  `buyStoreItem` still checks `expectedPrice` against `price_coins` and charges `price_coins`.
+- App: `discountOf` (whole percent, rounded down) drives the strike-through price and "-X%" on the Digital
+  cards, the home cards and the item detail. The phone home's "Mega Shop Deal" (`dealsSummary`) appears only
+  when at least one live, not-owned listing has a compare-at price: "UP TO X% OFF" is the largest real
+  discount, the timer is the soonest real sale end among those items (`HH:MM:SS` within 7 days, else `Xd Yh`;
+  no end, no timer). Without discounts the card shows an admin-featured product, else "Deals jaldi aa rahe hain".
+
 ### Wishlist (migration 0080, `apps/worker/src/lib/wishlist.ts`)
 
 - Table `store_wishlist (uid, item_id, created_at)`, primary key `(uid, item_id)`, index on `uid`.
