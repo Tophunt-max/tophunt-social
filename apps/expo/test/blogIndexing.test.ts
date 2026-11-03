@@ -216,7 +216,7 @@ describe('status codes for urls that do not exist', () => {
     // one, so answering 404 would be a lie in the other direction.
     for (const path of [
       '/wallet/gifts', '/auth/login', '/messages/chat/abc', '/setting',
-      '/shop', '/shop/orders', '/shop/order/abc', '/earn', '/rewards/xp-cosmetics', '/prizes/abc',
+      '/shop', '/shop/orders', '/shop/order/abc', '/earn', '/shop/collection', '/prizes/abc',
     ]) {
       const res = await get(`${ORIGIN}${path}`);
       expect(res.status, path).toBe(200);

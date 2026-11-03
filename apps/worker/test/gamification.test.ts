@@ -445,18 +445,28 @@ describe('cosmetics', () => {
 });
 
 // ===========================================================================
-describe('XP40 free cosmetics', () => {
-  it('contains exactly ten items per category and no paid listing', async () => {
+describe('XP level rewards (one per level 1-100)', () => {
+  it('has exactly one item for every level 1-100 and no paid listing', async () => {
     const env = env0();
     const rows = await env.DB.prepare(
-      `SELECT category, COUNT(*) AS n, COUNT(DISTINCT item_order) AS orders
-         FROM xp_cosmetic_unlocks WHERE collection = 'xp40' GROUP BY category ORDER BY category`,
-    ).all<any>();
-    expect(rows.results).toEqual([
-      { category: 'badge', n: 10, orders: 10 },
-      { category: 'frame', n: 10, orders: 10 },
-      { category: 'theme', n: 10, orders: 10 },
-      { category: 'title', n: 10, orders: 10 },
+      `SELECT COUNT(*) AS n, COUNT(DISTINCT unlock_level) AS levels, MIN(unlock_level) AS lo, MAX(unlock_level) AS hi
+         FROM xp_cosmetic_unlocks WHERE collection = 'xp40'`,
+    ).first<any>();
+    expect(rows).toMatchObject({ n: 100, levels: 100, lo: 1, hi: 100 });
+    const perKind = await env.DB.prepare(`SELECT category, COUNT(*) AS n FROM xp_cosmetic_unlocks GROUP BY category ORDER BY category`).all<any>();
+    expect(perKind.results).toEqual([
+      { category: 'badge', n: 25 }, { category: 'frame', n: 25 }, { category: 'theme', n: 25 }, { category: 'title', n: 25 },
+    ]);
+    // The asset's display level matches the unlock rule.
+    const mismatch = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM xp_cosmetic_unlocks x JOIN reward_catalog r ON r.id = x.item_id
+        WHERE json_extract(r.asset, '$.level') <> x.unlock_level OR json_extract(r.asset, '$.tier') <> 'xp'`,
+    ).first<any>();
+    expect(Number(mismatch.n)).toBe(0);
+    // The 40 original items keep their order, now on levels 1-40.
+    const moved = await env.DB.prepare(`SELECT item_id, unlock_level FROM xp_cosmetic_unlocks WHERE unlock_level IN (1, 2, 3, 4, 5, 40) ORDER BY unlock_level`).all<any>();
+    expect(moved.results?.map((r) => r.item_id)).toEqual([
+      'xp40_frame_default', 'xp40_theme_default', 'xp40_badge_newbie', 'xp40_title_new_member', 'xp40_frame_green_leaf', 'xp40_title_community_hero',
     ]);
     const paid = await env.DB.prepare(
       `SELECT COUNT(*) AS n FROM store_listings WHERE item_id IN (SELECT item_id FROM xp_cosmetic_unlocks)`,
@@ -469,22 +479,15 @@ describe('XP40 free cosmetics', () => {
     expect(JSON.stringify(blocked.body)).toMatch(/Free XP cosmetics/);
   });
 
-  it.each([
-    [0, 4],
-    [5, 8],
-    [10, 12],
-    [25, 24],
-    [50, 40],
-  ])('server sync at display level %i permanently owns %i eligible items', async (displayLevel, expected) => {
+  it.each([1, 5, 10, 25, 50, 100])('server sync at level %i permanently owns that many items', async (lvl) => {
     const env = env0();
-    const computedLevel = Math.max(1, displayLevel);
-    await seedUser(env, `u${displayLevel}`, { xp: xpForLevel(computedLevel, CURVE) });
-    await syncProgression(env, `u${displayLevel}`, { full: true });
+    await seedUser(env, `u${lvl}`, { xp: xpForLevel(lvl, CURVE) });
+    await syncProgression(env, `u${lvl}`, { full: true });
     const count = await env.DB.prepare(
       `SELECT COUNT(*) AS n FROM user_inventory i JOIN xp_cosmetic_unlocks x ON x.item_id = i.item_id
         WHERE i.uid = ? AND i.revoked_at IS NULL`,
-    ).bind(`u${displayLevel}`).first<any>();
-    expect(Number(count.n)).toBe(expected);
+    ).bind(`u${lvl}`).first<any>();
+    expect(Number(count.n)).toBe(lvl);
   });
 
   it('grants a multi-level jump once under concurrent device syncs', async () => {
@@ -502,7 +505,7 @@ describe('XP40 free cosmetics', () => {
       `SELECT i.item_id, COUNT(*) AS n FROM user_inventory i JOIN xp_cosmetic_unlocks x ON x.item_id = i.item_id
         WHERE i.uid = 'alice' GROUP BY i.item_id`,
     ).all<any>();
-    expect(rows.results).toHaveLength(24);
+    expect(rows.results).toHaveLength(25);
     expect(rows.results?.every((r) => Number(r.n) === 1)).toBe(true);
   });
 
@@ -511,34 +514,32 @@ describe('XP40 free cosmetics', () => {
     await seedUser(env, 'alice', { xp: xpForLevel(10, CURVE) });
     const r = await call(env, 'alice', 'getXpCosmetics', { level: 50, owned: true });
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ collection: 'xp40', total: 40, counts: { frame: 10, theme: 10, badge: 10, title: 10, unlocked: 12 } });
+    expect(r.body).toMatchObject({ collection: 'xp40', total: 100, counts: { frame: 25, theme: 25, badge: 25, title: 25, unlocked: 10 } });
     expect(r.body.levelInfo.level).toBe(10);
-    expect(r.body.nextUnlock).toMatchObject({ level: 15, requiredXp: xpForLevel(15, CURVE) });
+    expect(r.body.nextUnlock).toMatchObject({ level: 11, requiredXp: xpForLevel(11, CURVE) });
+    expect(r.body.items.map((i: any) => i.unlocksAtLevel)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
     expect(r.body.items.every((item: any) => item.collection === 'xp40' && item.asset.tier === 'xp')).toBe(true);
-    expect(r.body.items.some((item: any) => item.asset.tier === 'premium')).toBe(false);
     expect(r.body.items.find((item: any) => item.id === 'xp40_frame_blue_wave')).toMatchObject({
-      state: 'unlocked', source: 'xp_level', sourceRef: 'level:10', unlocksAtLevel: 10, requiredXp: xpForLevel(10, CURVE), xpRemaining: 0,
+      state: 'unlocked', source: 'xp_level', sourceRef: 'level:9', unlocksAtLevel: 9, requiredXp: xpForLevel(9, CURVE), xpRemaining: 0,
     });
-    expect(r.body.items.find((item: any) => item.id === 'xp40_frame_pink_heart').state).toBe('locked');
+    expect(r.body.items.find((item: any) => item.id === 'xp40_frame_pink_heart')).toMatchObject({ state: 'locked', unlocksAtLevel: 13 });
   });
 
   it('prevents a locked badge equip, then persists an unlocked badge across sessions', async () => {
     const env = env0();
-    await seedUser(env, 'alice');
-    await call(env, 'alice', 'getXpCosmetics'); // grants the level-0 starter set
+    await seedUser(env, 'alice', { xp: xpForLevel(4, CURVE) });
+    await call(env, 'alice', 'getXpCosmetics'); // grants levels 1-4
     expect((await call(env, 'alice', 'equipCosmetic', { slot: 'badge', itemId: 'xp40_badge_active_user' })).status).toBe(403);
     expect((await call(env, 'alice', 'equipCosmetic', { slot: 'badge', itemId: 'xp40_badge_newbie' })).status).toBe(200);
-    // A later authenticated request (another app session/device) reads D1 state.
     const again = await call(env, 'alice', 'getXpCosmetics');
     expect(again.body.equipped.badge).toBe('xp40_badge_newbie');
     expect(again.body.items.find((item: any) => item.id === 'xp40_badge_newbie').state).toBe('equipped');
-    // Type matching remains server enforced.
     expect((await call(env, 'alice', 'equipCosmetic', { slot: 'frame', itemId: 'xp40_badge_newbie' })).status).toBe(403);
   });
 
   it('keeps all four equipped slots independent and exposes them on the public profile', async () => {
     const env = env0();
-    await seedUser(env, 'alice');
+    await seedUser(env, 'alice', { xp: xpForLevel(4, CURVE) });
     await call(env, 'alice', 'getXpCosmetics');
     for (const [slot, itemId] of [
       ['frame', 'xp40_frame_default'],
@@ -553,6 +554,81 @@ describe('XP40 free cosmetics', () => {
       badge: { id: 'xp40_badge_newbie' },
       title: { id: 'xp40_title_new_member', text: 'New Member' },
     });
+  });
+});
+
+// ===========================================================================
+describe('admin: XP level rewards', () => {
+  const ART = 'https://cdn.test/shop-items/2026/11/0b9f3a8e-1c2d-4e5f-8a9b-0c1d2e3f4a5b.webp';
+  const frame = (over: any = {}) => ({ type: 'frame', name: 'Moon Ring', description: 'A level frame.', rarity: 'rare', asset: { imageUrl: ART }, ...over });
+
+  it('lists all 100 levels in order', async () => {
+    const env = env0();
+    await seedUser(env, 'boss', { role: 'admin' });
+    const r = await admin(env, 'GET', '/gamification/xp-rewards');
+    expect(r.status).toBe(200);
+    expect(r.body.maxLevel).toBe(100);
+    expect(r.body.items.map((i: any) => i.level)).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+  });
+
+  it('edits an item, uploads art, and the app collection reflects it', async () => {
+    const env = env0();
+    await seedUser(env, 'boss', { role: 'admin' });
+    const res = await admin(env, 'PUT', '/gamification/xp-rewards/xp40_frame_default', { level: 1, item: frame({ name: 'Starter Ring' }) });
+    expect(res.status).toBe(200);
+    const row = await env.DB.prepare(`SELECT name, asset FROM reward_catalog WHERE id = 'xp40_frame_default'`).first<any>();
+    expect(row.name).toBe('Starter Ring');
+    // The bundled key stays as the fallback; the xp markers are forced.
+    expect(JSON.parse(row.asset)).toMatchObject({ imageUrl: ART, artKind: 'frame', tier: 'xp', collection: 'xp40', level: 1 });
+    const audit = await env.DB.prepare(`SELECT COUNT(*) AS n FROM admin_audit_log WHERE action = 'gamification.xp_reward.update'`).first<any>();
+    expect(Number(audit.n)).toBe(1);
+  });
+
+  it('one item per level: refuses a taken level, swaps on request, and moves the asset level too', async () => {
+    const env = env0();
+    await seedUser(env, 'boss', { role: 'admin' });
+    const taken = await admin(env, 'PUT', '/gamification/xp-rewards/xp40_frame_default', { level: 2, item: frame() });
+    expect(taken.status).toBe(409);
+    expect(JSON.stringify(taken.body)).toMatch(/Level 2 already has/);
+    const swap = await admin(env, 'PUT', '/gamification/xp-rewards/xp40_frame_default', { level: 2, swap: true, item: frame() });
+    expect(swap.status).toBe(200);
+    const rows = await env.DB.prepare(`SELECT item_id, unlock_level FROM xp_cosmetic_unlocks WHERE unlock_level IN (1, 2) ORDER BY unlock_level`).all<any>();
+    expect(rows.results).toEqual([{ item_id: 'xp40_theme_default', unlock_level: 1 }, { item_id: 'xp40_frame_default', unlock_level: 2 }]);
+    const theme = await env.DB.prepare(`SELECT json_extract(asset, '$.level') AS l FROM reward_catalog WHERE id = 'xp40_theme_default'`).first<any>();
+    expect(theme.l).toBe(1);
+  });
+
+  it('creates a new item on a level freed by moving another; refuses bad input and moderators', async () => {
+    const env = env0();
+    await seedUser(env, 'boss', { role: 'admin' });
+    await seedUser(env, 'mod', { role: 'moderator' });
+    // Retire level 100's item by turning it off and moving nothing: the level stays taken.
+    const create = await admin(env, 'PUT', '/gamification/xp-rewards/xp_new_ring', { create: true, level: 100, item: frame() });
+    expect(create.status).toBe(409);
+    expect((await admin(env, 'PUT', '/gamification/xp-rewards/xp_new_ring', { create: true, level: 0, item: frame() })).status).toBe(400);
+    expect((await admin(env, 'PUT', '/gamification/xp-rewards/xp_new_ring', { create: true, level: 50, item: frame({ type: 'sticker' }) })).status).toBe(400);
+    expect((await admin(env, 'PUT', '/gamification/xp-rewards/xp_new_ring', { create: true, level: 50, item: frame() }, 'mod:moderator')).status).toBe(403);
+    expect((await admin(env, 'PUT', '/gamification/xp-rewards/xp40_frame_default', { create: true, level: 1, item: frame() })).status).toBe(409);
+    // Shop items are not XP rewards.
+    await env.DB.prepare(`INSERT INTO reward_catalog (id, type, name, rarity, asset, active, sort, created_at, updated_at) VALUES ('shop_x', 'frame', 'X', 'rare', '{}', 1, 0, 0, 0)`).run();
+    await env.DB.prepare(`INSERT INTO store_listings (item_id, price_coins, active, created_at, updated_at) VALUES ('shop_x', 10, 1, 0, 0)`).run();
+    expect((await admin(env, 'PUT', '/gamification/xp-rewards/shop_x', { level: 1, swap: true, item: frame() })).status).toBe(412);
+  });
+
+  it('a turned-off item is not granted; lowering a level grants it on the next sync', async () => {
+    const env = env0();
+    await seedUser(env, 'boss', { role: 'admin' });
+    await seedUser(env, 'alice', { xp: xpForLevel(3, CURVE) });
+    const lv3 = await env.DB.prepare(`SELECT item_id FROM xp_cosmetic_unlocks WHERE unlock_level = 3`).first<any>();
+    const row = await env.DB.prepare(`SELECT type, name, rarity, asset FROM reward_catalog WHERE id = ?`).bind(lv3.item_id).first<any>();
+    expect((await admin(env, 'PUT', `/gamification/xp-rewards/${lv3.item_id}`, { level: 3, item: { ...row, asset: JSON.parse(row.asset), active: false } })).status).toBe(200);
+    await syncProgression(env, 'alice', { full: true });
+    expect(await env.DB.prepare(`SELECT 1 FROM user_inventory WHERE uid = 'alice' AND item_id = ?`).bind(lv3.item_id).first()).toBeNull();
+    // Swap level 100's item down to level 3: alice (level 3) gets it.
+    const top = await env.DB.prepare(`SELECT x.item_id, r.type, r.name, r.rarity, r.asset FROM xp_cosmetic_unlocks x JOIN reward_catalog r ON r.id = x.item_id WHERE x.unlock_level = 100`).first<any>();
+    expect((await admin(env, 'PUT', `/gamification/xp-rewards/${top.item_id}`, { level: 3, swap: true, item: { ...top, asset: JSON.parse(top.asset) } })).status).toBe(200);
+    await syncProgression(env, 'alice', { full: true });
+    expect(await env.DB.prepare(`SELECT 1 FROM user_inventory WHERE uid = 'alice' AND item_id = ?`).bind(top.item_id).first()).toBeTruthy();
   });
 });
 

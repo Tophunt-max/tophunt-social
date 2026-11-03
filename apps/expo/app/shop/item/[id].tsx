@@ -71,7 +71,7 @@ export default function ShopItemScreen() {
         dpcoin={bal.dpcoin}
         busy={buying === item.itemId}
         onBuy={() => void onBuy(item)}
-        onEquip={() => router.push('/rewards/inventory' as any)}
+        onEquip={() => router.push('/shop/collection' as any)}
         onEarn={() => router.push('/explore/battles' as any)}
       />
     );

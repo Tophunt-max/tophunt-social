@@ -102,7 +102,7 @@ export function useDigitalPurchase({ onBought, onStale }: { onBought?: () => voi
       dpcoin={bal.dpcoin}
       onConfirm={confirm}
       onClose={close}
-      onEquip={() => go('/rewards/inventory')}
+      onEquip={() => go('/shop/collection')}
       onEarn={() => go('/explore/battles')}
     />
   );

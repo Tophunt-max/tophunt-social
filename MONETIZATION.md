@@ -205,6 +205,22 @@ and re-checks price and availability inside the transaction.
 - Stickers, collectibles and effects are sold, owned and shown in the Shop and Inventory. The app has no
   sticker picker in chat or comments yet, and an equipped effect has no on-profile renderer yet.
 
+### XP level rewards and My Collection (migration 0084)
+
+- **Free XP collection:** one frame / theme / badge / title for EVERY level 1-100 (`xp_cosmetic_unlocks`,
+  100 items). Users get each item free by reaching its level (`grantXpCosmeticItems`); XP is never spent
+  and these items are never sold. 0084 moved the original 40 items to levels 1-40 (each now unlocks at or
+  below its old level; existing grants untouched) and added 60 items for levels 41-100 with colour/icon
+  fallbacks until artwork is uploaded. Turned-off items are not granted.
+- **Admin:** Gamification → XP level rewards. `GET /admin/gamification/xp-rewards`,
+  `PUT /admin/gamification/xp-rewards/:id { create?, level, swap?, item }`: one item per level (a taken level
+  is refused unless `swap: true`), same artwork upload and validation as Shop items, xp markers forced,
+  full admin, recent sign-in, audited `gamification.xp_reward.create|update`.
+- **App:** Shop → **My Collection** (`/shop/collection`) with two tabs: **My Premium Collection** (owned DP coin
+  items, equip here) and **XP Collection** (`?tab=xp`, the 100 level rewards with progress, preview and
+  equip). `/rewards/inventory`, `/rewards/xp-cosmetics` and `/rewards/store` were removed; buying is in the
+  Shop's Digital tab. My Collection stays reachable when the Shopping kill switch is off.
+
 ### Compare-at price / real discounts (migration 0081)
 
 - `store_listings.compare_at_coins` (nullable): the "original" price an admin sets in Monetization → Store →

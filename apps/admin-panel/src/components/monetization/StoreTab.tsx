@@ -450,7 +450,7 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
           {l?.updatedAt ? <Detail k="Last changed" v={fmtDateTime(l.updatedAt)} wide /> : null}
         </dl>
         {freeXp ? (
-          <Notice>Earned permanently from the server-authoritative XP level. This item cannot be listed for DP coin.</Notice>
+          <Notice>Free XP level reward, earned by reaching its level. Edit it under Gamification → XP level rewards; it cannot be sold for DP coin.</Notice>
         ) : (
           <div className="flex gap-2 mt-auto pt-1">
             <Button onClick={onEdit}>{l ? "Edit item" : "Edit & list for sale"}</Button>

@@ -45,8 +45,10 @@ export function featureForRoute(segments: readonly string[]): FeatureKey | null 
   if (a === 'messages') return 'chat';
   if (a === 'story') return 'stories';
   if (a === 'earn') return 'earning';
+  // My Collection only equips what the user already owns (and holds the free XP
+  // collection), so switching Shopping off must not lock people out of it.
+  if (a === 'shop' && b === 'collection') return null;
   if (a === 'shop') return 'shopping';
-  if (a === 'rewards' && b === 'store') return 'shopping';
   return null;
 }
 

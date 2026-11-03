@@ -172,9 +172,22 @@ function problemsOf(d: Draft, isNew: boolean, takenIds: string[], soldCount: num
   return p;
 }
 
-export function StoreItemDialog({ item, takenIds, onClose, onDone }: { item: any | null; takenIds: string[]; onClose: () => void; onDone: () => void }) {
+/** XP level reward mode (Gamification → XP Level Rewards): no selling, one item per level. */
+export interface XpLevelMode {
+  /** Level → the item on it now. */
+  levels: Map<number, { itemId: string; name: string }>;
+  maxLevel: number;
+  /** Suggested level for a new item (first free one). */
+  defaultLevel?: number | null;
+}
+
+export const XP_KINDS = ["frame", "theme", "badge", "title"] as const;
+
+export function StoreItemDialog({ item, takenIds, onClose, onDone, xp }: { item: any | null; takenIds: string[]; onClose: () => void; onDone: () => void; xp?: XpLevelMode }) {
   const isNew = !item;
-  const [d, setD] = useState<Draft>(() => draftOf(item));
+  const [d, setD] = useState<Draft>(() => (xp ? { ...draftOf(item), sell: false, tier: "xp" } : draftOf(item)));
+  const [level, setLevel] = useState<string>(() => String(item?.level ?? xp?.defaultLevel ?? ""));
+  const [swap, setSwap] = useState(false);
   const [idTouched, setIdTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = (patch: Partial<Draft>) => setD((prev) => {
@@ -182,7 +195,7 @@ export function StoreItemDialog({ item, takenIds, onClose, onDone }: { item: any
     // Suggest an id from the kind + name until the admin types one.
     if (isNew && !idTouched && (patch.name !== undefined || patch.type !== undefined)) {
       const s = slug(next.name);
-      next.itemId = s ? `shop_${next.type}_${s}`.slice(0, 40) : "";
+      next.itemId = s ? `${xp ? "xplv" : "shop"}_${next.type}_${s}`.slice(0, 40) : "";
     }
     return next;
   });
@@ -191,12 +204,29 @@ export function StoreItemDialog({ item, takenIds, onClose, onDone }: { item: any
   const stored = item?.asset ?? {};
   const asset = useMemo(() => assetOf(d, stored), [d, stored]);
   const preview = { itemId: d.itemId, type: d.type, name: d.name || "New item", rarity: d.rarity, asset: { ...asset, artKind: d.imageUrl ? d.type : undefined } };
-  const problems = problemsOf(d, isNew, takenIds, soldCount);
+  const levelNum = Number(level);
+  const levelOk = !xp || (Number.isInteger(levelNum) && levelNum >= 1 && levelNum <= xp.maxLevel);
+  const occupant = xp && levelOk ? xp.levels.get(levelNum) : undefined;
+  const levelTaken = !!occupant && occupant.itemId !== d.itemId;
+  const problems = [
+    ...problemsOf(d, isNew, takenIds, soldCount),
+    ...(xp && !levelOk ? [`Level: a whole number from 1 to ${xp.maxLevel}.`] : []),
+    ...(xp && levelTaken && (isNew || !swap) ? [`Level ${levelNum} already has "${occupant!.name}".${isNew ? " Pick a free level." : " Tick \"Swap levels\" or pick a free level."}`] : []),
+  ];
   const bundledKey = typeof stored.key === "string" ? stored.key : null;
 
+  const xpItem = () => ({
+    type: d.type,
+    name: d.name.trim(),
+    description: d.description.trim(),
+    rarity: d.rarity,
+    active: d.itemActive,
+    asset,
+  });
   const save = useMutation({
-    mutationFn: () =>
-      api.monetization.saveStoreItem(d.itemId, {
+    mutationFn: () => xp
+      ? api.gamification.saveXpReward(d.itemId, { create: isNew, level: levelNum, swap: levelTaken && swap, item: xpItem() })
+      : api.monetization.saveStoreItem(d.itemId, {
         create: isNew,
         item: {
           type: d.type,
@@ -234,7 +264,7 @@ export function StoreItemDialog({ item, takenIds, onClose, onDone }: { item: any
   });
 
   return (
-    <Modal open onClose={onClose} title={isNew ? "New digital item" : `Edit ${item.name}`} width="max-w-3xl">
+    <Modal open onClose={onClose} title={isNew ? (xp ? "New XP level reward" : "New digital item") : `Edit ${item.name}`} width="max-w-3xl">
       <div className="space-y-5">
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1.2fr] gap-4">
           <div className="space-y-2">
@@ -248,7 +278,7 @@ export function StoreItemDialog({ item, takenIds, onClose, onDone }: { item: any
               <label className="block">
                 <span className="text-xs text-muted-foreground mb-1 block">Kind</span>
                 <select className={field} value={d.type} onChange={(e) => set({ type: e.target.value })} disabled={!isNew && owners > 0}>
-                  {[...new Set([...ITEM_KINDS, d.type])].map((t) => <option key={t} value={t}>{TYPE_LABEL[t] ?? t}</option>)}
+                  {[...new Set([...(xp ? XP_KINDS : ITEM_KINDS), d.type])].map((t) => <option key={t} value={t}>{TYPE_LABEL[t] ?? t}</option>)}
                 </select>
                 {!isNew && owners > 0 ? <span className="text-[11px] text-muted-foreground mt-1 block">Owned by {fmtNumber(owners)}, so the kind is locked.</span> : null}
               </label>
@@ -316,12 +346,24 @@ export function StoreItemDialog({ item, takenIds, onClose, onDone }: { item: any
             </div>
           )}
           <div className="flex flex-wrap gap-x-6 gap-y-2">
-            <Toggle label="Premium (Shop) item" checked={d.tier === "premium"} onChange={(v) => set({ tier: v ? "premium" : "xp" })} hint="Premium items get the Premium tag and richer effects." />
+            {!xp && <Toggle label="Premium (Shop) item" checked={d.tier === "premium"} onChange={(v) => set({ tier: v ? "premium" : "xp" })} hint="Premium items get the Premium tag and richer effects." />}
             <Toggle label="Animated" checked={d.animated} onChange={(v) => set({ animated: v })} hint="Marks the item as animated (profile frame glow, Shop label)." />
           </div>
           {bundledKey && d.imageUrl && <Notice>Uploaded artwork replaces the bundled art ({bundledKey}) in the app. Remove the upload to go back to it.</Notice>}
         </section>
 
+        {xp ? (
+          <section className="space-y-3 rounded-xl border border-border p-4">
+            <h4 className="font-semibold text-sm">Unlock level</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Text label={`Level (1-${xp.maxLevel})`} value={level} onChange={setLevel} hint="Users get this item free when they reach this level. Never sold." />
+              {levelTaken && !isNew ? (
+                <Toggle label={`Swap levels with "${occupant!.name}"`} checked={swap} onChange={setSwap} hint={`"${occupant!.name}" moves to level ${item?.level}.`} />
+              ) : null}
+            </div>
+            <Notice>Moving an item to a higher level never takes it back from people who already have it. A lower level grants it on their next sync.</Notice>
+          </section>
+        ) : (
         <section className="space-y-3 rounded-xl border border-border p-4">
           <div className="flex items-center justify-between gap-3">
             <h4 className="font-semibold text-sm">Selling in the Shop</h4>
@@ -348,6 +390,7 @@ export function StoreItemDialog({ item, takenIds, onClose, onDone }: { item: any
             <p className="text-sm text-muted-foreground">Not sold. The item can still be granted (achievements, seasons, rewards).</p>
           )}
         </section>
+        )}
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <Toggle label="Item enabled" checked={d.itemActive} onChange={(v) => set({ itemActive: v })} hint="Off retires the item everywhere: not sold and not drawn, even for owners." />

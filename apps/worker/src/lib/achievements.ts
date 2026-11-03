@@ -236,18 +236,20 @@ async function grantMilestoneItems(env: Env, p: Progression, uid: string, level:
 }
 
 /**
- * Exact XP40 collection items earned at or below `level`.
+ * Free XP level rewards (one per level 1-100, migration 0084) earned at or
+ * below `level`. Items an admin turned off are not granted.
  *
  * Unlock authority is the normalized xp_cosmetic_unlocks table, never the
  * client and never mutable asset JSON. INSERT OR IGNORE on (uid,item_id) makes
  * first sync, multi-level jumps, multiple devices and concurrent syncs safe.
- * Level 0 means "starter" for display; all accounts compute to at least level 1.
+ * Grants are permanent: moving an item to a higher level never takes it back.
  */
 async function grantXpCosmeticItems(env: Env, uid: string, level: number, ts: number): Promise<string[]> {
   const rules = await env.DB.prepare(
-    `SELECT item_id, unlock_level FROM xp_cosmetic_unlocks
-      WHERE collection = 'xp40' AND unlock_level <= ?
-      ORDER BY unlock_level, category, item_order`,
+    `SELECT x.item_id, x.unlock_level FROM xp_cosmetic_unlocks x
+       JOIN reward_catalog r ON r.id = x.item_id AND r.active = 1
+      WHERE x.collection = 'xp40' AND x.unlock_level <= ?
+      ORDER BY x.unlock_level`,
   ).bind(level).all<{ item_id: string; unlock_level: number }>();
   if (!rules.results?.length) return [];
   const held = await env.DB.prepare(`SELECT item_id FROM user_inventory WHERE uid = ?`).bind(uid).all<{ item_id: string }>();
