@@ -115,7 +115,22 @@
       #root {
         display: flex;
         min-height: 100%;
+        /*
+          Installed app (PWA, display: standalone) on Android: the document's
+          100% can be computed shorter than the window (it is sized from the
+          initial containing block, which Chrome may measure before the
+          standalone window settles), leaving a white band under the bottom
+          nav. 100dvh is the real visible viewport, so the app always reaches
+          the bottom. Browsers without dvh keep the 100% line above.
+        */
+        min-height: 100dvh;
         flex: 1;
+      }
+      @supports (height: 100dvh) {
+        html,
+        body {
+          min-height: 100dvh;
+        }
       }
     </style>
   </head>
