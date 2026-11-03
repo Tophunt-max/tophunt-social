@@ -15,6 +15,7 @@ import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamif
 import { useAuth } from '@/src/hooks/useAuth';
 import { loginHref } from '@/src/lib/authGate';
 import { commentService, Comment } from '@/src/services/comments/commentService';
+import { StickerArt } from '@/src/components/stickers/StickerBits';
 import { COMMENT_REPORT_REASONS, useReportReason } from '@/src/components/modals/ReportReasonDialog';
 import {
   mergeComments,
@@ -362,7 +363,8 @@ export default function BlogComments({ postId, isDark }: Props) {
                   {/* Plain text on purpose. Links in reader comments on an indexed
                       page are an SEO/spam liability, so nothing here is turned
                       into an anchor. */}
-                  <Text style={[styles.itemText, { color: textColor, fontFamily: FONT_SANS }]}>{cm.text}</Text>
+                  {cm.text ? <Text style={[styles.itemText, { color: textColor, fontFamily: FONT_SANS }]}>{cm.text}</Text> : null}
+                  {cm.sticker ? <View style={{ marginTop: 4 }}><StickerArt sticker={cm.sticker} size={88} /></View> : null}
                   <View style={styles.itemActions}>
                     <TouchableOpacity
                       onPress={() => onToggleLike(cm)}

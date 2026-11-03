@@ -41,6 +41,10 @@ import { Avatar } from '@/src/components/ui/Avatar';
 import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
 import { FramedAvatar, NameCosmetics, cosmeticsOf } from '@/src/components/gamification/CosmeticBits';
 import { COMMENT_REPORT_REASONS, useReportReason } from '@/src/components/modals/ReportReasonDialog';
+import { StickerArt, StickerPicker } from '@/src/components/stickers/StickerBits';
+import type { StickerView } from '@/src/lib/chatThread';
+import { Ionicons } from '@/src/lib/icons';
+import { CloseIcon } from '@/src/components/ui/CloseIcon';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.75;
@@ -65,6 +69,9 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
   const [shouldRender, setShouldRender] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [commentText, setCommentText] = useState('');
+  // An owned sticker staged for the next comment (worker lib/stickers.ts).
+  const [sticker, setSticker] = useState<StickerView | null>(null);
+  const [stickersOpen, setStickersOpen] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -161,7 +168,7 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
 
   // --- actions -------------------------------------------------------------
   // The client id of a post that failed, with its text (see handlePostComment).
-  const retryClientRef = useRef<{ text: string; clientId: string } | null>(null);
+  const retryClientRef = useRef<{ text: string; stickerId: string | null; clientId: string } | null>(null);
   const likesInFlight = useRef(new Set<string>());
   const openProfile = useCallback((userId?: string) => {
     if (!userId) return;
@@ -171,7 +178,8 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
 
   const handlePostComment = async () => {
     const text = commentText.trim();
-    if (!text || !user || !postId || isPosting) return;
+    const staged = sticker;
+    if ((!text && !staged) || !user || !postId || isPosting) return;
     if (text.length > MAX_COMMENT_LEN) {
       Alert.alert('Too long', `Comment ${MAX_COMMENT_LEN} characters se chhota rakhein.`);
       return;
@@ -180,7 +188,8 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
     // Re-posting the draft a failed attempt put back reuses that attempt's client
     // id. If the failure was a lost RESPONSE (the server did store it), the server
     // answers "duplicate" instead of creating a second copy.
-    const clientId = retryClientRef.current?.text === text ? retryClientRef.current.clientId : commentService.clientToken();
+    const retry = retryClientRef.current;
+    const clientId = retry && retry.text === text && retry.stickerId === (staged?.id ?? null) ? retry.clientId : commentService.clientToken();
     // Optimistic insert at the top; reconciled when the server echo arrives.
     const optimistic: Comment = {
       id: clientId,
@@ -190,6 +199,8 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
       // No remote placeholder: null means "render initials locally".
       userAvatar: user.photoURL || null,
       text,
+      stickerId: staged?.id ?? null,
+      sticker: staged,
       createdAt: Date.now(),
       likes: 0,
       likedByMe: false,
@@ -197,9 +208,10 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
     };
     setComments((prev) => [optimistic, ...prev]);
     setCommentText('');
+    setSticker(null);
     setIsPosting(true);
     try {
-      await commentService.addComment(postId, text, collectionName, clientId);
+      await commentService.addComment(postId, text, collectionName, clientId, staged?.id ?? null);
       retryClientRef.current = null;
       // The realtime bump (refreshFirstPage) reconciles the confirmed row.
       refreshFirstPage();
@@ -207,7 +219,8 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
       // Roll back the optimistic comment and restore the draft.
       setComments((prev) => prev.filter((c) => c.id !== clientId));
       setCommentText(text);
-      retryClientRef.current = { text, clientId };
+      setSticker(staged);
+      retryClientRef.current = { text, stickerId: staged?.id ?? null, clientId };
       Alert.alert('Could not post', e?.message || 'Please try again.');
     } finally {
       setIsPosting(false);
@@ -369,7 +382,12 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
             <NameCosmetics cosmetics={cosmeticsOf(item)} badgeSize={14} showTitle />
             <Text style={[styles.commentTime, { color: subTextColor, marginLeft: 6 }]}>{formatTime(item.createdAt)}</Text>
           </View>
-          <Text style={[styles.commentText, { color: textColor }]}>{item.text}</Text>
+          {item.text ? <Text style={[styles.commentText, { color: textColor }]}>{item.text}</Text> : null}
+          {item.sticker ? (
+            <View style={styles.commentSticker}>
+              <StickerArt sticker={item.sticker} size={96} dim={!!item.pending} />
+            </View>
+          ) : null}
           <View style={styles.commentFooter}>
             <TouchableOpacity onPress={() => handleReply(item)}>
               <Text style={[styles.replyText, { color: subTextColor }]}>Reply</Text>
@@ -444,6 +462,15 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
             >
+              {sticker ? (
+                <View style={[styles.stagedSticker, { backgroundColor }]}>
+                  <StickerArt sticker={sticker} size={56} />
+                  <Text style={[styles.stagedName, { color: subTextColor }]} numberOfLines={1}>{sticker.name}</Text>
+                  <TouchableOpacity onPress={() => setSticker(null)} accessibilityLabel="Remove sticker" hitSlop={10}>
+                    <CloseIcon size={18} color={subTextColor} variant="circle" />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
               <View style={[styles.inputArea, { backgroundColor, borderTopColor: isDark ? '#35383F' : '#EEEEEE' }]}>
                 <Avatar
                   uri={user?.photoURL}
@@ -485,8 +512,16 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.sendButton, { opacity: (commentText.trim().length > 0 && !isPosting) ? 1 : 0.5 }]}
-                  disabled={commentText.trim().length === 0 || isPosting}
+                  style={styles.stickerButton}
+                  onPress={() => (user ? setStickersOpen(true) : requireAuth('comment', { beforeNavigate: () => closeSheetRef.current?.() }))}
+                  accessibilityLabel="Add a sticker"
+                >
+                  <Ionicons name="happy-outline" size={24} color="#FF4D67" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.sendButton, { opacity: ((commentText.trim().length > 0 || !!sticker) && !isPosting) ? 1 : 0.5 }]}
+                  disabled={(commentText.trim().length === 0 && !sticker) || isPosting}
                   onPress={handlePostComment}
                 >
                   {isPosting ? <ActivityIndicator size="small" color="#FF4D67" /> : <Icons.Send_Icon width={28} height={28} color="#FF4D67" />}
@@ -497,6 +532,7 @@ export const CommentSheet = ({ postId, visible, onDismiss, isDark, isContestMatc
         </GestureDetector>
       </GestureHandlerRootView>
       {reportDialog}
+      {user ? <StickerPicker visible={stickersOpen} onClose={() => setStickersOpen(false)} onPick={(s) => { setSticker(s); setStickersOpen(false); }} /> : null}
     </Portal>
   );
 };
@@ -632,6 +668,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     paddingVertical: 8,
   },
+  commentSticker: { marginTop: 4 },
+  stagedSticker: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingTop: 8 },
+  stagedName: { flex: 1, fontSize: 13 },
+  stickerButton: { paddingHorizontal: 6, justifyContent: 'center', alignItems: 'center' },
   sendButton: {
     marginLeft: 12,
     width: 44,

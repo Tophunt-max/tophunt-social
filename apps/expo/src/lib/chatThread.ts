@@ -19,6 +19,8 @@ export interface ThreadMessage {
   createdAt: Date | number;
   user: { _id: string };
   image?: string;
+  /** An owned sticker sent on its own (worker lib/stickers.ts); drawn without a bubble. */
+  sticker?: StickerView;
   /** Optimistic: not yet acknowledged by the server. */
   pending?: boolean;
   sent?: boolean;
@@ -32,7 +34,18 @@ export interface ServerMessage {
   text: string | null;
   type?: string;
   mediaUrl?: string | null;
+  /** type 'sticker': the catalog item and its resolved view (null if the item is gone). */
+  stickerId?: string | null;
+  sticker?: StickerView | null;
   createdAt: number;
+}
+
+/** A sticker as the Worker returns it with a message or comment. */
+export interface StickerView {
+  id: string;
+  name: string;
+  rarity?: string | null;
+  asset: Record<string, any>;
 }
 
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -54,6 +67,8 @@ export function fromServer(m: ServerMessage): ThreadMessage {
     // renders `image` above `text`, so both flow through the same bubble.
     text: m.text || '',
     image: m.type === 'image' && m.mediaUrl ? m.mediaUrl : undefined,
+    // A sticker whose item was deleted shows as a small "Sticker" note instead.
+    ...(m.type === 'sticker' ? (m.sticker ? { sticker: m.sticker } : { text: m.text || 'Sticker' }) : {}),
     createdAt: new Date(m.createdAt),
     user: { _id: m.senderId },
     sent: true,

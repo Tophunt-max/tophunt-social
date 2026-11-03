@@ -554,6 +554,7 @@ export const postComments = sqliteTable(
     userId: text("user_id").notNull(),
     text: text("text"),
     parentId: text("parent_id"), // for replies
+    stickerId: text("sticker_id"), // migration 0083
     likeCount: integer("like_count").default(0),
     createdAt: integer("created_at").notNull(),
   },
@@ -661,6 +662,7 @@ export const matchComments = sqliteTable(
     userId: text("user_id").notNull(),
     text: text("text"),
     parentId: text("parent_id"),
+    stickerId: text("sticker_id"), // migration 0083
     likeCount: integer("like_count").default(0),
     createdAt: integer("created_at").notNull(),
   },
@@ -1105,6 +1107,7 @@ export const blogComments = sqliteTable(
     postId: text("post_id").notNull(), // blog_posts.id
     userId: text("user_id").notNull(),
     text: text("text"),
+    stickerId: text("sticker_id"), // migration 0083
     likeCount: integer("like_count").default(0),
     createdAt: integer("created_at").notNull(),
   },

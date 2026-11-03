@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { GiftedChat, IMessage, BubbleProps, TimeProps, InputToolbarProps, Bubble, InputToolbar } from 'react-native-gifted-chat';
 import * as ImagePicker from 'expo-image-picker';
 import { readApi, readApiWithCursor, callApi } from '@/src/services/api';
-import { appendOlder, hasNewIncoming, mergeThread, newClientId, outgoingMessageId, type ServerMessage } from '@/src/lib/chatThread';
+import { appendOlder, hasNewIncoming, mergeThread, newClientId, outgoingMessageId, type ServerMessage, type StickerView } from '@/src/lib/chatThread';
 import { uploadToR2 } from '@/src/lib/uploadToR2';
 import { optimizeImageForUpload } from '@/src/lib/imageOptimize';
 import { live, subscribeChannel } from '@/src/services/realtime';
@@ -29,6 +29,7 @@ import { useAuth } from '@/src/hooks/useAuth';
 import ChatHeader from '@/components/chat/ChatHeader';
 import { Ionicons } from '@/src/lib/icons';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
+import { StickerArt, StickerPicker } from '@/src/components/stickers/StickerBits';
 
 const PINK = '#FF4D67';
 
@@ -313,6 +314,37 @@ export default function ChatScreen() {
     }
   }, [chatId, currentUser, uploadingImage]);
 
+  // An owned sticker, sent on its own (worker lib/stickers.ts). Same optimistic
+  // + same-client-id retry path as a text message.
+  const [stickersOpen, setStickersOpen] = useState(false);
+  const onSendSticker = useCallback(
+    async (sticker: StickerView) => {
+      setStickersOpen(false);
+      if (!currentUser || !chatId) return;
+      const clientId = newClientId();
+      const id = outgoingMessageId(currentUser.uid, clientId);
+      const attempt = async (): Promise<void> => {
+        setMessages((prev) =>
+          GiftedChat.append(prev.filter((m) => m._id !== id), [
+            { _id: id, text: '', sticker, createdAt: new Date(), user: { _id: currentUser.uid }, pending: true } as IMessage,
+          ]),
+        );
+        try {
+          const res: any = await callApi('sendMessage', { chatId, stickerId: sticker.id, clientId });
+          if (res?.message) setMessages((prev) => merge(prev, [res.message]));
+        } catch (error: any) {
+          setMessages((prev) => prev.filter((m) => m._id !== id));
+          Alert.alert('Sticker not sent', error?.message || 'Check your connection and try again.', [
+            { text: 'Discard', style: 'cancel' },
+            { text: 'Retry', onPress: () => void attempt() },
+          ]);
+        }
+      };
+      await attempt();
+    },
+    [chatId, currentUser],
+  );
+
   /** "Load earlier messages": the next older page, below what is shown. */
   const onLoadEarlier = useCallback(async () => {
     if (!chatId || !olderCursor || loadingEarlier) return;
@@ -356,7 +388,20 @@ export default function ChatScreen() {
     Keyboard.dismiss();
   }, []);
 
-  const renderBubble = (props: BubbleProps<IMessage>) => (
+  const renderBubble = (props: BubbleProps<IMessage>) => {
+    const sticker = (props.currentMessage as any)?.sticker as StickerView | undefined;
+    if (sticker) {
+      // Stickers are drawn on the thread itself, like other messengers: no pill.
+      return (
+        <View style={styles.stickerMessage}>
+          <StickerArt sticker={sticker} size={120} dim={!!(props.currentMessage as any)?.pending} />
+        </View>
+      );
+    }
+    return renderTextBubble(props);
+  };
+
+  const renderTextBubble = (props: BubbleProps<IMessage>) => (
     <Bubble
       {...props}
       // Instagram-style fully rounded pill bubbles (no tail): gray incoming,
@@ -409,18 +454,23 @@ export default function ChatScreen() {
         {...props}
         containerStyle={styles.inputToolbar}
         renderActions={() => (
-          <TouchableOpacity
-            onPress={onPickImage}
-            disabled={uploadingImage}
-            style={styles.attachButton}
-            accessibilityLabel="Send a photo"
-          >
-            {uploadingImage ? (
-              <ActivityIndicator size="small" color={PINK} />
-            ) : (
-              <Ionicons name="image-outline" size={24} color={PINK} />
-            )}
-          </TouchableOpacity>
+          <View style={styles.actionsRow}>
+            <TouchableOpacity
+              onPress={onPickImage}
+              disabled={uploadingImage}
+              style={styles.attachButton}
+              accessibilityLabel="Send a photo"
+            >
+              {uploadingImage ? (
+                <ActivityIndicator size="small" color={PINK} />
+              ) : (
+                <Ionicons name="image-outline" size={24} color={PINK} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setStickersOpen(true)} style={styles.attachButton} accessibilityLabel="Send a sticker">
+              <Ionicons name="happy-outline" size={24} color={PINK} />
+            </TouchableOpacity>
+          </View>
         )}
         renderSend={(sendProps: any) => {
           const canSend = !!sendProps.text?.trim();
@@ -631,6 +681,7 @@ export default function ChatScreen() {
         onSearchPress={() => setSearchOpen((v) => !v)}
       />
       {searchOpen ? searchPanel() : body()}
+      {currentUser ? <StickerPicker visible={stickersOpen} onClose={() => setStickersOpen(false)} onPick={onSendSticker} /> : null}
     </View>
   );
 }
@@ -738,6 +789,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   sendButtonDisabled: { backgroundColor: '#F3A6B2' },
+  actionsRow: { flexDirection: 'row', alignItems: 'center' },
+  stickerMessage: { paddingVertical: 4, paddingHorizontal: 2 },
   attachButton: {
     width: 40,
     height: 40,

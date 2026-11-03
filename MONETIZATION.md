@@ -202,8 +202,22 @@ and re-checks price and availability inside the transaction.
   Older builds ignore the new fields and draw their fallback (bundled art, or colours by rarity).
 - **Caches:** a save clears the isolate catalog memo and purges `cache:gamification:catalog` in the colo;
   other colos/isolates pick it up within 60 s (memo) / 300 s (edge TTL).
-- Stickers, collectibles and effects are sold, owned and shown in the Shop and Inventory. The app has no
-  sticker picker in chat or comments yet, and an equipped effect has no on-profile renderer yet.
+- **Stickers in DMs and comments** (`lib/stickers.ts`, migration 0083). `sendMessage { chatId, stickerId }`
+  (a sticker is its own message: no text or image with it) and `addComment { ..., stickerId, text? }`
+  (text optional with a sticker). Sending needs a live copy in `user_inventory` of an active
+  `type='sticker'` item (412 otherwise); the usual chat/comment rate limits, block and privacy checks apply,
+  and the banned-word filter still runs on any comment text. DM: a ChatArchive row of type `sticker` keeps the
+  item id in `media_url`; readers get `stickerId` + `sticker {id,name,rarity,asset}` and `mediaUrl: null`.
+  Inbox preview: "🎨 Sticker". Comments: `sticker_id` column on post/match/blog comments; `/read/comments`
+  rows carry `sticker`. The view is resolved from the catalog at read time, so replacing a sticker's artwork
+  updates old messages, and a sent sticker stays drawn after the item is turned off or refunded.
+  App: sticker button (smiley) in the chat composer and the comment sheet opens the owned-sticker picker
+  (`src/components/stickers/StickerBits.tsx`), with a link to the Shop when the user owns none. Blog
+  comments draw stickers but have no picker.
+- **Equipped effect on the profile** (`src/components/gamification/ProfileEffect.tsx`): drawn around the
+  profile avatar (1.5× box). Art + overlay animate with `asset.fx`; colour-only effects get a pulsing halo.
+  Static under reduced motion. Only the profile header draws it (list rows carry frame/badge/title only).
+- Collectibles are sold and kept in Inventory; there is no profile showcase for them yet.
 
 ### Compare-at price / real discounts (migration 0081)
 
