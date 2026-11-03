@@ -24,7 +24,7 @@ import { fitArt, useDesignWindow } from '@/src/lib/layout';
  * Width / height of a remote image, or null until known (or when it fails).
  * Clamped to 1:1 .. 6:1 so a broken or extreme upload cannot squash the bar.
  */
-function useImageAspect(uri: string | null): number | null {
+export function useImageAspect(uri: string | null): number | null {
   const [aspect, setAspect] = useState<{ uri: string; value: number } | null>(null);
   useEffect(() => {
     if (!uri) return;

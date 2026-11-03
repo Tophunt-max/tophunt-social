@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, RefreshControl, ScrollView, StyleSheet, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
@@ -244,7 +244,6 @@ export default function ShopScreen() {
   const short = (i: StoreItemView) => isShort(bal.dpcoin, i.priceCoins, live);
   // Back only when there is somewhere to go: native always (BackButton falls back to /home), web only with history.
   // The phone mock shows it only with real history.
-  const showBack = mobile ? router.canGoBack() : Platform.OS !== 'web' || router.canGoBack();
 
   const refreshing = store.isRefetching || products.isRefetching;
   const onRefresh = () => {
@@ -551,7 +550,7 @@ export default function ShopScreen() {
                 dpcoin={bal.dpcoin}
                 diamonds={bal.diamonds}
                 cartCount={cartCount}
-                showBack={showBack}
+                onWallet={() => router.push('/wallet' as any)}
                 onOrders={() => router.push('/shop/orders' as any)}
                 onCart={() => router.push('/shop/cart' as any)}
               />
@@ -568,7 +567,7 @@ export default function ShopScreen() {
               dpcoin={bal.dpcoin}
               diamonds={bal.diamonds}
               cartCount={cartCount}
-              showBack={showBack}
+              onWallet={() => router.push('/wallet' as any)}
               onOrders={() => router.push('/shop/orders' as any)}
               onCart={() => router.push('/shop/cart' as any)}
             />
