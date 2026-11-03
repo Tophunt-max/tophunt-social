@@ -9,7 +9,7 @@ import { rateLimit } from "./rateLimit";
 import { computeMetrics, syncProgression } from "./achievements";
 import { equipCosmetic, loadAchievementDefs, loadCatalog, loadInventory, parseEquipped, pinAchievements, resolveCosmetics } from "./cosmetics";
 import { creatorInsights } from "./creatorInsights";
-import { experienceOn, featureLevel, getProgression, levelFor, xpForLevel, type Progression } from "./progression";
+import { experienceOn, featureLevel, fillMilestones, getProgression, isFillerMilestone, levelFor, xpForLevel, type Progression } from "./progression";
 import { claimQuest, listQuests } from "./quests";
 import { claimRewardGrant, listGrants, rewardBudgetFor } from "./rewardGrants";
 import { currentSeason, LEADERBOARD_PERIODS, myRank, rangeFor, type LeaderboardPeriod } from "./seasons";
@@ -82,22 +82,39 @@ async function roadmap(env: Env, p: Progression, level: number, owned: Set<strin
     const g = grants.get(String(m.level));
     return g === "claimed" ? "claimed" : g === "claimable" ? "claimable" : "ineligible";
   };
-  return [...p.cfg.milestones]
+  // The free XP level reward of each level (one per level, migration 0084).
+  const xpRows = await env.DB.prepare(
+    `SELECT x.item_id, x.unlock_level FROM xp_cosmetic_unlocks x JOIN reward_catalog r ON r.id = x.item_id AND r.active = 1 WHERE x.collection = 'xp40'`,
+  ).all<{ item_id: string; unlock_level: number }>();
+  const xpByLevel = new Map<number, string[]>();
+  for (const r of xpRows.results ?? []) {
+    const l = Number(r.unlock_level);
+    xpByLevel.set(l, [...(xpByLevel.get(l) ?? []), r.item_id]);
+  }
+  // Every level 1..maxLevel, in order (sanitizeProgression fills the gaps).
+  return fillMilestones(p.cfg.milestones, p.curve.maxLevel)
     .filter((m) => m.level <= p.curve.maxLevel)
-    .sort((a, b) => a.level - b.level)
-    .map((m) => ({
-      level: m.level,
-      title: m.title,
-      description: m.description,
-      feature: m.feature,
-      coins: on ? m.coins : 0,
-      unlocked: level >= m.level,
-      rewardState: rewardState(m),
-      items: m.items
+    .map((m) => {
+      const ids = [...new Set([...(xpByLevel.get(m.level) ?? []), ...m.items])];
+      const items = ids
         .map((id) => catalog.get(id))
         .filter((i) => !!i)
-        .map((i) => ({ id: i!.id, type: i!.type, name: i!.name, rarity: i!.rarity, asset: i!.asset, owned: owned.has(i!.id) })),
-    }));
+        .map((i) => ({ id: i!.id, type: i!.type, name: i!.name, rarity: i!.rarity, asset: i!.asset, owned: owned.has(i!.id) }));
+      // A level with nothing configured is named after its free XP item.
+      const filler = isFillerMilestone(m);
+      const lead = filler ? items[0] : undefined;
+      return {
+        level: m.level,
+        title: lead ? lead.name : m.title,
+        description: lead ? (catalog.get(lead.id)?.description || `Free ${lead.type} at level ${m.level}.`) : m.description,
+        feature: m.feature,
+        coins: on ? m.coins : 0,
+        xp: xpForLevel(m.level, p.curve),
+        unlocked: level >= m.level,
+        rewardState: rewardState(m),
+        items,
+      };
+    });
 }
 
 export async function handleGamificationAction(action: string, ctx: Ctx): Promise<unknown> {

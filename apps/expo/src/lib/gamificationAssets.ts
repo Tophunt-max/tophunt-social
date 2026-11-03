@@ -321,3 +321,31 @@ export function levelFontSize(px: number, level: number, shape?: TierStyle['shap
   const narrow = shape === 'star' || shape === 'gem' || shape === 'crown' ? 0.78 : 1;
   return Math.max(8, Math.round(px * ratio * narrow));
 }
+
+/**
+ * Which roadmap rows to draw. The roadmap has every level 1..max (100), so it
+ * is folded around the user's position:
+ *   - reached levels collapse to one summary row, except the current level and
+ *     any level with a reward waiting to be claimed;
+ *   - the NEXT level is the focused, expanded node (it moves on by itself when
+ *     the user levels up: reach 2 and level 3 opens);
+ *   - only a few upcoming levels show, the rest behind "show all".
+ */
+export function roadmapWindow<T extends { level: number; unlocked: boolean; rewardState?: string | null }>(
+  roadmap: T[],
+  opts: { showPast?: boolean; showFuture?: boolean; ahead?: number } = {},
+): { rows: T[]; nextLevel: number | null; currentLevel: number; pastHidden: number; futureHidden: number } {
+  const sorted = [...roadmap].sort((a, b) => a.level - b.level);
+  const past = sorted.filter((m) => m.unlocked);
+  const future = sorted.filter((m) => !m.unlocked);
+  const currentLevel = past.length ? past[past.length - 1].level : 0;
+  const keepPast = opts.showPast ? past : past.filter((m) => m.level === currentLevel || milestoneState(m) === 'available');
+  const keepFuture = opts.showFuture ? future : future.slice(0, 1 + (opts.ahead ?? 4));
+  return {
+    rows: [...keepPast, ...keepFuture],
+    nextLevel: future[0]?.level ?? null,
+    currentLevel,
+    pastHidden: past.length - keepPast.length,
+    futureHidden: future.length - keepFuture.length,
+  };
+}

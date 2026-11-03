@@ -24,7 +24,7 @@
  */
 import type { Env } from "../types";
 import { createNotification } from "./notify";
-import { experienceOn, getProgression, levelInfo, milestonesUpTo, type LevelInfo, type Progression } from "./progression";
+import { experienceOn, getProgression, isFillerMilestone, levelInfo, milestonesUpTo, type LevelInfo, type Progression } from "./progression";
 import { rewardDayNumber } from "./gamification";
 import { grantItemStatements, loadAchievementDefs, loadCatalog, type AchievementDef } from "./cosmetics";
 import { xpAwardStatements } from "./xpService";
@@ -337,7 +337,7 @@ export async function syncProgression(env: Env, uid: string, opts: { p?: Progres
       newItems = [...legacy, ...xp40];
       if (on) {
         leveledUp = { from, to: info.level };
-        const milestoneNames = p.cfg.milestones.filter((ms) => ms.level > from && ms.level <= info.level).map((ms) => ms.title);
+        const milestoneNames = p.cfg.milestones.filter((ms) => ms.level > from && ms.level <= info.level && !isFillerMilestone(ms)).map((ms) => ms.title);
         const catalog = new Map((await loadCatalog(env)).map((item) => [item.id, item.name]));
         const cosmeticNames = newItems.map((id) => catalog.get(id)).filter((name): name is string => !!name);
         const unlockedNames = [...new Set([...cosmeticNames, ...milestoneNames])];

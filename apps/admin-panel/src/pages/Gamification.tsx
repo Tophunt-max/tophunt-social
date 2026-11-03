@@ -9,7 +9,7 @@ import { toast } from "@/lib/toast";
 import { isFullAdminRole, useAuth } from "@/lib/auth";
 import { RARITIES } from "@/lib/shopArt";
 import {
-  MilestonesEditor, QuestsEditor, RanksEditor,
+  MilestonesEditor, QuestsEditor, RanksEditor, fillMilestoneRows,
   type MilestoneRow, type QuestRow, type RankRow,
 } from "@/components/gamification/ProgressionEditors";
 
@@ -153,6 +153,7 @@ function Rules() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["gam", "config"], queryFn: api.gamification.config });
   const catalog = useQuery({ queryKey: ["gam", "catalog"], queryFn: api.gamification.catalog });
+  const xpRewards = useQuery({ queryKey: ["xp-rewards"], queryFn: api.gamification.xpRewards });
   const [draft, setDraft] = useState<any>(null);
   const [betaUids, setBetaUids] = useState("");
   useEffect(() => {
@@ -178,9 +179,9 @@ function Rules() {
           ranks: [...(rest.ranks as RankRow[])]
             .map((r) => ({ ...r, id: r.id.trim(), name: r.name.trim(), minLevel: Number(r.minLevel) }))
             .sort((a, b) => a.minLevel - b.minLevel),
-          milestones: [...(rest.milestones as MilestoneRow[])]
-            .map((m) => ({ ...m, level: Number(m.level), coins: Number(m.coins || 0), feature: m.feature || null }))
-            .sort((a, b) => a.level - b.level),
+          milestones: fillMilestoneRows(rest.milestones as MilestoneRow[], Number(rest.maxLevel) || 100)
+            .filter((m) => m.level <= (Number(rest.maxLevel) || 100))
+            .map((m) => ({ ...m, title: m.title.trim() || `Level ${m.level}`, coins: Number(m.coins || 0), feature: m.feature || null })),
           quests: (rest.quests as QuestRow[]).map((x) => ({
             ...x, id: x.id.trim(), target: Number(x.target), xp: Number(x.xp), minLevel: Number(x.minLevel || 1), enabled: x.enabled !== false,
           })),
@@ -217,6 +218,9 @@ function Rules() {
           <label className="text-sm">Increment<input type="number" className={field} value={draft.xpIncrement} onChange={(e) => setDraft({ ...draft, xpIncrement: e.target.value })} /></label>
           <label className="text-sm">Max level<input type="number" className={field} value={draft.maxLevel} onChange={(e) => setDraft({ ...draft, maxLevel: e.target.value })} /></label>
         </div>
+        {Number(draft.maxLevel) !== (xpRewards.data?.maxLevel ?? 100) && (
+          <p className="text-xs text-amber-700 mt-2">XP level rewards cover levels 1-{xpRewards.data?.maxLevel ?? 100}. With max level {draft.maxLevel}, {Number(draft.maxLevel) < (xpRewards.data?.maxLevel ?? 100) ? "the rewards above it can never be reached" : "the levels above 100 have no free item"}.</p>
+        )}
         <p className="text-xs text-muted-foreground mt-3">
           Saved curve: {q.data.curvePreview.map((c: any) => `L${c.level}=${fmtNumber(c.xp)}`).join(" · ")}
         </p>
@@ -253,8 +257,14 @@ function Rules() {
       </div>
       <div className={card}>
         <p className="font-semibold mb-1">Level milestones</p>
-        <p className="text-xs text-muted-foreground mb-3">One per level. Items are catalog ids granted on reaching the level. Diamond is paid through the reward budget and needs the approval password. Existing unlocks are never taken away.</p>
-        <MilestonesEditor rows={draft.milestones} onChange={(milestones) => setDraft({ ...draft, milestones })} itemIds={(catalog.data ?? []).map((i: any) => i.id)} />
+        <p className="text-xs text-muted-foreground mb-3">Every level 1 to the max level has a row. The free XP item of each level comes from the XP level rewards tab and is always granted; title, extra items, feature and Diamond here are on top of it. Diamond is paid through the reward budget and needs the approval password. Existing unlocks are never taken away.</p>
+        <MilestonesEditor
+          rows={draft.milestones}
+          onChange={(milestones) => setDraft({ ...draft, milestones })}
+          itemIds={(catalog.data ?? []).map((i: any) => i.id)}
+          maxLevel={Number(draft.maxLevel) || 100}
+          xpRewardByLevel={new Map((xpRewards.data?.items ?? []).map((r: any) => [r.level, `${r.name} (${r.type})`]))}
+        />
       </div>
       <div className={card}>
         <p className="font-semibold mb-1">Quests</p>

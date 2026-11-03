@@ -45,6 +45,8 @@ export interface RoadmapEntry {
   description: string;
   feature: string | null;
   coins: number;
+  /** Lifetime XP needed for this level (newer Workers). */
+  xp?: number;
   unlocked: boolean;
   /** Coin reward state, from the user's reward grants (worker gamificationApi.ts). */
   rewardState?: 'none' | 'pending' | 'claimable' | 'claimed' | 'ineligible';
