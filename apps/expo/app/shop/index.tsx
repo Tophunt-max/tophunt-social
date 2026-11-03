@@ -3,7 +3,7 @@ import { RefreshControl, ScrollView, StyleSheet, TextInput, TouchableOpacity, Vi
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@/src/lib/icons';
 import { emitToast } from '@/src/lib/toastBridge';
@@ -251,6 +251,30 @@ export default function ShopScreen() {
     router.setParams({ tab: t === 'shop' ? undefined : t });
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [router]);
+  // Digital / Physical are tabs INSIDE this one screen (setParams replaces the
+  // url, it adds no history). So a category tile opened the Digital tab, and
+  // Back (Android back button, iOS swipe, in-app back) left the whole Shop for
+  // the screen before it. Back now first returns to the Shop home tab; from
+  // there it leaves the Shop as before. Other navigations are not touched.
+  const navigation = useNavigation();
+  useEffect(() => {
+    if (tab === 'shop') return;
+    // A native-stack swipe cannot be cancelled once it starts, so it is off
+    // while a sub-tab is open; the back button / gesture works again on Shop home.
+    navigation.setOptions({ gestureEnabled: false });
+    const sub = navigation.addListener('beforeRemove', (e: any) => {
+      const type = e?.data?.action?.type;
+      if (type !== 'GO_BACK' && type !== 'POP') return;
+      e.preventDefault();
+      setFilter(NO_FILTER);
+      setCategory(null);
+      setTab('shop');
+    });
+    return () => {
+      sub();
+      navigation.setOptions({ gestureEnabled: true });
+    };
+  }, [navigation, tab, setTab]);
   const openDigital = useCallback((f: Partial<DigitalFilter>) => {
     setFilter({ ...NO_FILTER, ...f });
     setTab('digital');

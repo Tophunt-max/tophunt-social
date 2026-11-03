@@ -52,7 +52,7 @@ const HISTORY_LIMIT = 200;
  * Kept as a widenable string union so a future `video`/`audio` needs no schema
  * change here (the column is free-text).
  */
-export type MessageType = "text" | "image";
+export type MessageType = "text" | "image" | "sticker";
 
 /** One message as stored/returned. `chatId` is added by the client from the address. */
 export interface ArchivedMessage {
