@@ -8,6 +8,20 @@ import { Badge } from "@/components/ui/Badge";
 import { fmtNumber } from "@/lib/format";
 import { Button, Card, Notice, Num, Text, Toggle, field, inr } from "@/components/monetization/shared";
 
+/**
+ * An image URL safe to put in <img src>: parsed, https only, re-serialised by
+ * the URL parser (so no raw admin text reaches the DOM). null otherwise.
+ */
+function safeImageSrc(raw: string): string | null {
+  try {
+    const u = new URL(raw.trim());
+    return u.protocol === "https:" && !u.username && !u.password ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+
 export function ProductsTab() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["shop-products"], queryFn: api.monetization.shopProducts });
@@ -231,7 +245,11 @@ function ProductDialog({ product, rate, onClose, onDone }: { product: any | null
               {images.map((u, i) => (
                 <li key={`${u}-${i}`} className={`rounded-xl border overflow-hidden ${i === 0 ? "border-primary" : "border-border"}`}>
                   <div className="relative aspect-square bg-secondary">
-                    <img src={u} alt={`Image ${i + 1}`} className="absolute inset-0 w-full h-full object-cover" />
+                    {safeImageSrc(u) ? (
+                      <img src={safeImageSrc(u)!} alt={`Image ${i + 1}`} className="absolute inset-0 w-full h-full object-cover" />
+                    ) : (
+                      <span className="absolute inset-0 flex items-center justify-center text-[11px] text-red-600 p-1 text-center">Invalid URL (https only)</span>
+                    )}
                     {i === 0 ? <span className="absolute top-1 left-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">Cover</span> : null}
                   </div>
                   <div className="flex items-center justify-between px-2 py-1 text-xs">
