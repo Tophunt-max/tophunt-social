@@ -6,6 +6,7 @@
  * conditional UPDATEs (e.g. `WHERE dpcoin >= fee`) and check the affected row
  * count to prevent double-spend / races.
  */
+import { assertOwnsSticker, STICKER_PREVIEW, stickerIdOf, withMessageStickers } from "../lib/stickers";
 import { Hono } from "hono";
 import { eq, and, or, desc, sql, count, like, lte, inArray, getTableColumns } from "drizzle-orm";
 import type { Env, Variables } from "../types";
@@ -2749,8 +2750,14 @@ apiRoute.post("/", async (c) => {
       if (clientId != null && !CHAT_CLIENT_ID_RE.test(clientId)) {
         throw httpsError("invalid-argument", "clientId must be 8-64 letters, digits, '-' or '_'.");
       }
-      if (!trimmedText && !mediaUrl) {
-        throw httpsError("invalid-argument", "A message needs text or an image.");
+      // A sticker the sender owns (lib/stickers.ts). It is its own message:
+      // no caption and no image alongside it.
+      const stickerId = stickerIdOf(body.stickerId);
+      if (stickerId && (trimmedText || mediaUrl)) {
+        throw httpsError("invalid-argument", "A sticker is sent on its own, without text or an image.");
+      }
+      if (!trimmedText && !mediaUrl && !stickerId) {
+        throw httpsError("invalid-argument", "A message needs text, an image or a sticker.");
       }
       // Guard against an arbitrary URL being stored/rendered as our own media: a
       // media message must point at THIS deployment's chat media, not an external
@@ -2759,9 +2766,10 @@ apiRoute.post("/", async (c) => {
       if (mediaUrl && !isOwnChatMediaUrl(env, mediaUrl)) {
         throw httpsError("invalid-argument", "Invalid media URL.");
       }
-      const type: "text" | "image" = mediaUrl ? "image" : "text";
+      const type: "text" | "image" | "sticker" = stickerId ? "sticker" : mediaUrl ? "image" : "text";
       // Only participants may post into a chat.
       await assertChatMember(env, chatId, uid);
+      if (stickerId) await assertOwnsSticker(env, uid, stickerId);
       // Messages were the one social write with no velocity cap (likes are
       // 120/60s, comments 30/60s), which made this a free spam/abuse channel.
       await rateLimit(env, `msg:${uid}`, 60, 60);
@@ -2785,7 +2793,8 @@ apiRoute.post("/", async (c) => {
         senderId: uid,
         text: trimmedText,
         type,
-        mediaUrl: mediaUrl || null,
+        // For a sticker the column holds the item id (see lib/stickers.ts).
+        mediaUrl: stickerId || mediaUrl || null,
         createdAt: ts,
       });
       if (stored.senderId !== uid) throw httpsError("invalid-argument", "clientId already used.");
@@ -2794,7 +2803,7 @@ apiRoute.post("/", async (c) => {
       // Guarded on time so a retry of an older message cannot replace a newer
       // preview; re-applied on a retry in case the first attempt failed after the
       // append and before this write.
-      const previewText = stored.text || (stored.type === "image" ? "📷 Photo" : "");
+      const previewText = stored.text || (stored.type === "image" ? "📷 Photo" : stored.type === "sticker" ? STICKER_PREVIEW : "");
       await db
         .update(schema.chats)
         .set({ lastMessage: { text: previewText, createdAt: stored.createdAt, senderId: uid } as any, updatedAt: stored.createdAt })
@@ -2811,7 +2820,7 @@ apiRoute.post("/", async (c) => {
       // Instant push: to the chat room + each participant's user channel (chat-list
       // bump). Re-published on a retry; clients key messages by id, so a repeat
       // event is a no-op for anyone who already has it.
-      const msg = { ...stored, chatId };
+      const [msg] = await withMessageStickers(env, [{ ...stored, chatId }]);
       await publish(env, `chat:${chatId}`, { type: "message", message: msg });
       await publishMany(env, members.map((u) => `user:${u}`), { type: "chat_update", chatId, message: msg });
       return c.json({ success: true, message: msg, duplicate: !inserted });
@@ -3059,12 +3068,15 @@ apiRoute.post("/", async (c) => {
     case "addComment": {
       const { targetType, targetId } = body;
       const raw = typeof body.text === "string" ? body.text.trim() : "";
+      // Optional owned sticker (lib/stickers.ts); with it the text may be empty.
+      const commentStickerId = stickerIdOf(body.stickerId);
       if (!targetId) throw httpsError("invalid-argument", "targetId is required.");
-      if (!raw) throw httpsError("invalid-argument", "Comment cannot be empty.");
+      if (!raw && !commentStickerId) throw httpsError("invalid-argument", "Comment cannot be empty.");
       if (raw.length > MAX_COMMENT_LEN) throw httpsError("invalid-argument", `Comment is too long (max ${MAX_COMMENT_LEN} characters).`);
       // Spam guard (parity with commentContest) + banned-word moderation.
       await rateLimit(env, `comment:${uid}`, 30, 60);
-      await assertClean(env, raw);
+      if (raw) await assertClean(env, raw);
+      if (commentStickerId) await assertOwnsSticker(env, uid, commentStickerId);
       const isMatch = targetType === "matches" || targetType === "contestMatches";
       const isBlog = targetType === "blog";
       // Commenting reaches the owner's notification inbox, so it needs the same
@@ -3126,9 +3138,9 @@ apiRoute.post("/", async (c) => {
         // per-article comment count, and `blog_posts.author` is a display string,
         // not a uid, so there is no inbox this could reach. The cache bust below
         // is what makes the new comment visible.
-        await db.insert(schema.blogComments).values({ id: commentId, postId: targetId, userId: uid, text: raw, createdAt: ts }).onConflictDoNothing();
+        await db.insert(schema.blogComments).values({ id: commentId, postId: targetId, userId: uid, text: raw, stickerId: commentStickerId, createdAt: ts }).onConflictDoNothing();
       } else if (isMatch) {
-        const ins = await db.insert(schema.matchComments).values({ id: commentId, matchId: targetId, userId: uid, text: raw, createdAt: ts }).onConflictDoNothing().run();
+        const ins = await db.insert(schema.matchComments).values({ id: commentId, matchId: targetId, userId: uid, text: raw, stickerId: commentStickerId, createdAt: ts }).onConflictDoNothing().run();
         // Two in-flight requests with the same clientId both passed the duplicate
         // check above; only the one whose insert landed counts and notifies.
         if (!ins.meta.changes) return c.json({ success: true, commentId, duplicate: true });
@@ -3147,7 +3159,7 @@ apiRoute.post("/", async (c) => {
           })(),
         );
       } else {
-        const ins = await db.insert(schema.postComments).values({ id: commentId, postId: targetId, userId: uid, text: raw, createdAt: ts }).onConflictDoNothing().run();
+        const ins = await db.insert(schema.postComments).values({ id: commentId, postId: targetId, userId: uid, text: raw, stickerId: commentStickerId, createdAt: ts }).onConflictDoNothing().run();
         if (!ins.meta.changes) return c.json({ success: true, commentId, duplicate: true });
         await db.update(schema.posts).set({ commentCount: sql`${schema.posts.commentCount} + 1` }).where(eq(schema.posts.id, targetId));
         c.executionCtx.waitUntil(

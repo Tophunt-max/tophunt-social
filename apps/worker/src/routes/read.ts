@@ -4,6 +4,7 @@
  * (see the client `subscribe*` helpers). Responses use the camelCase shapes
  * the existing screens already consume, so UI code stays unchanged.
  */
+import { withCommentStickers, withMessageStickers } from "../lib/stickers";
 import { Hono } from "hono";
 import { getVerificationStatus } from "../lib/verificationReward";
 import { and, or, eq, desc, asc, gt, gte, lt, lte, sql, inArray, notInArray, isNull, isNotNull, like, exists } from "drizzle-orm";
@@ -3891,7 +3892,7 @@ readRoute.get("/chats/:id/messages", requireAuth, async (c) => {
   if (!since && rows.length === limit) {
     c.header("X-Next-Cursor", `${rows[0].createdAt}_${rows[0].id}`);
   }
-  return c.json(rows);
+  return c.json(await withMessageStickers(c.env, rows));
 });
 
 /** Messages per page when opening a thread or loading earlier ones. */
@@ -4107,7 +4108,7 @@ readRoute.get("/comments", optionalAuth, guestReadLimit, async (c) => {
     const rows = isMatch
       ? await db
           .select({
-            id: schema.matchComments.id, userId: schema.matchComments.userId, text: schema.matchComments.text,
+            id: schema.matchComments.id, userId: schema.matchComments.userId, text: schema.matchComments.text, stickerId: schema.matchComments.stickerId,
             likes: schema.matchComments.likeCount, createdAt: schema.matchComments.createdAt,
             username: schema.users.username, userAvatar: schema.users.profileImageUrl, verified: schema.users.verified,
             cosmetics: schema.users.cosmetics,
@@ -4121,7 +4122,7 @@ readRoute.get("/comments", optionalAuth, guestReadLimit, async (c) => {
       : isBlog
         ? await db
             .select({
-              id: schema.blogComments.id, userId: schema.blogComments.userId, text: schema.blogComments.text,
+              id: schema.blogComments.id, userId: schema.blogComments.userId, text: schema.blogComments.text, stickerId: schema.blogComments.stickerId,
               likes: schema.blogComments.likeCount, createdAt: schema.blogComments.createdAt,
               username: schema.users.username, userAvatar: schema.users.profileImageUrl, verified: schema.users.verified,
             cosmetics: schema.users.cosmetics,
@@ -4134,7 +4135,7 @@ readRoute.get("/comments", optionalAuth, guestReadLimit, async (c) => {
             .all()
         : await db
             .select({
-              id: schema.postComments.id, userId: schema.postComments.userId, text: schema.postComments.text,
+              id: schema.postComments.id, userId: schema.postComments.userId, text: schema.postComments.text, stickerId: schema.postComments.stickerId,
               likes: schema.postComments.likeCount, createdAt: schema.postComments.createdAt,
               username: schema.users.username, userAvatar: schema.users.profileImageUrl, verified: schema.users.verified,
             cosmetics: schema.users.cosmetics,
@@ -4150,7 +4151,7 @@ readRoute.get("/comments", optionalAuth, guestReadLimit, async (c) => {
     const pageRows = hasMore ? rows.slice(0, limit) : rows;
     const last: any = pageRows[pageRows.length - 1];
     const nextCursor = hasMore && last ? `${last.createdAt}_${last.id}` : null;
-    const items = (await withCardCosmetics(c.env, pageRows as any[])).map((r: any) => ({ ...r, postId: targetId, likes: r.likes ?? 0, likedByMe: false }));
+    const items = (await withCommentStickers(c.env, (await withCardCosmetics(c.env, pageRows as any[])) as any[])).map((r: any) => ({ ...r, postId: targetId, likes: r.likes ?? 0, likedByMe: false }));
     const payload: CommentsPayload = { items, nextCursor };
     // One extra COUNT, blog only, and only on a cache miss. It is a thread total
     // rather than `items.length` because the heading has to be right on page one
