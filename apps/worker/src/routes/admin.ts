@@ -74,7 +74,7 @@ import {
   validateContestInput,
 } from "../lib/contestAdmin";
 import { normalizePrizeType, publicPrize, resolveMatchPrize } from "../lib/prizes";
-import { EXPLORE_BANNER_PREFIX, ONBOARDING_IMAGE_PREFIX, PRODUCT_IMAGE_PREFIX, SHOP_BANNER_PREFIX } from "../lib/mediaCategories";
+import { EXPLORE_BANNER_PREFIX, ONBOARDING_IMAGE_PREFIX, PRODUCT_IMAGE_PREFIX, SHOP_BANNER_PREFIX, SHOP_ITEM_ART_PREFIX } from "../lib/mediaCategories";
 import { sanitizeOnboardingSlides } from "../lib/onboardingConfig";
 import { formatDeliveryAddress, summariseDeliveryAddress } from "../lib/deliveryAddress";
 import {
@@ -273,6 +273,8 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop)(\/.*)?$/],
   // Shop home artwork goes straight onto the Shop's first screen.
   ["POST", /^\/media\/shop-banner$/],
+  // Digital item artwork is drawn on every profile and list row that equips it.
+  ["POST", /^\/media\/shop-item-art$/],
 ];
 export function isSensitiveAdminRoute(method: string, path: string): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
@@ -1075,6 +1077,25 @@ adminRoute.post("/media/shop-banner", async (c) => {
   const body = await readAdminImageBody(c);
   const uploaded = await uploadToR2(c.env, fileType, SHOP_BANNER_PREFIX, body, [fileType]);
   await logAudit(c, "shop.banner.upload", "shop-banner", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
+  return c.json(uploaded);
+});
+
+/**
+ * Artwork for a digital shop item (frame, theme, badge, title, sticker,
+ * collectible, effect): the base image or the effect overlay, saved into
+ * reward_catalog.asset.imageUrl / fxUrl (lib/catalogItem.ts). WebP only, static
+ * or animated, so every surface draws it with transparency and one decoder.
+ * Same intake as the other admin images: declared type and length checked
+ * before the body is read, exact-type byte check in uploadToR2, 5 MB cap,
+ * full admin, recent sign-in, audited.
+ */
+adminRoute.post("/media/shop-item-art", async (c) => {
+  requireFullAdmin(c);
+  const fileType = assertAdminImageUpload(c);
+  if (fileType !== "image/webp") throw httpsError("invalid-argument", "Item artwork must be a WebP image (static or animated).");
+  const body = await readAdminImageBody(c);
+  const uploaded = await uploadToR2(c.env, fileType, SHOP_ITEM_ART_PREFIX, body, [fileType]);
+  await logAudit(c, "shop.item_art.upload", "shop-item-art", uploaded.fileKey, { publicUrl: uploaded.publicUrl, bytes: body.byteLength });
   return c.json(uploaded);
 });
 

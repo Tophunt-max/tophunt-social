@@ -138,6 +138,8 @@ export const ONBOARDING_IMAGE_PREFIX = "onboarding";
 export const EXPLORE_BANNER_PREFIX = "explore-banners";
 /** Shop home slider slides and deal cards (appConfig.monetization.store.slider / .deals), set from the admin panel. */
 export const SHOP_BANNER_PREFIX = "shop-banners";
+/** Artwork for digital shop items (frames, themes, badges, titles, stickers, ...), uploaded by admins. */
+export const SHOP_ITEM_ART_PREFIX = "shop-items";
 export const BLOG_IMPORT_PREFIX = "blog/imported";
 /** Encoded video (HLS + poster), one folder per video. See lib/qencode.ts. */
 export const VIDEO_PREFIX = "videos";
@@ -355,6 +357,19 @@ export const MEDIA_CATEGORIES: readonly MediaCategory[] = [
     legacyVideo: false,
     proxyOnly: false,
     description: "Shop home hero slider and deal card images, set from the admin panel.",
+  },
+  {
+    prefix: SHOP_ITEM_ART_PREFIX,
+    writer: "admin",
+    kinds: ["image"],
+    // New key per upload; reward_catalog.asset.imageUrl / fxUrl names the exact
+    // object, so replacing artwork never changes bytes under a cached url.
+    cache: "immutable",
+    retentionDays: null,
+    dateSharded: true,
+    legacyVideo: false,
+    proxyOnly: false,
+    description: "Artwork (WebP, optionally animated) for digital shop items, set from the admin panel.",
   },
 
   // --- Server-written -----------------------------------------------------

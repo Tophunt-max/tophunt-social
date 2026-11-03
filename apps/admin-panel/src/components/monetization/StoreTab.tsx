@@ -8,13 +8,11 @@ import { Table } from "@/components/ui/Table";
 import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
 import { fmtDateTime, fmtNumber } from "@/lib/format";
-import { RARITY_COLOR, assetColors, shopArtFor, tierOf } from "@/lib/shopArt";
-import { Button, Card, Notice, Num, Text, Toggle, field, fromLocalInput, toLocalInput } from "./shared";
+import { RARITY_COLOR, artSource, tierOf } from "@/lib/shopArt";
+import { Button, Card, Notice, Text, Toggle, field, fromLocalInput, toLocalInput } from "./shared";
+import { ItemPreview } from "./ItemPreview";
+import { ITEM_KINDS, StoreItemDialog, TYPE_LABEL } from "./StoreItemDialog";
 
-const TYPE_LABEL: Record<string, string> = {
-  frame: "Profile frame", theme: "Profile theme", badge: "Name badge", title: "Title",
-  effect: "Effect", accessory: "Accessory", sticker: "Sticker", collectible: "Collectible",
-};
 type StatusFilter = "" | "on_sale" | "hidden" | "unlisted";
 
 const listingStatus = (r: any): Exclude<StatusFilter, ""> =>
@@ -28,6 +26,9 @@ export function StoreTab() {
   const cfgQ = useQuery({ queryKey: ["monetization-config"], queryFn: api.monetization.config });
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [editing, setEditing] = useState<any>(null);
+  const [creating, setCreating] = useState(false);
+  const { user } = useAuth();
+  const full = !user?.role || isFullAdminRole(user.role);
   const [refunding, setRefunding] = useState<any>(null);
   const [type, setType] = useState("");
   const [listFilter, setListFilter] = useState<StatusFilter>("");
@@ -69,7 +70,7 @@ export function StoreTab() {
   });
 
   const all: any[] = items.data ?? [];
-  const types = useMemo(() => [...new Set(all.map((r) => r.type))], [all]);
+  const types = useMemo(() => [...new Set<string>([...ITEM_KINDS, ...all.map((r) => r.type)])], [all]);
   const shown = useMemo(() => {
     const term = q.trim().toLowerCase();
     return all.filter(
@@ -90,8 +91,13 @@ export function StoreTab() {
     <div className="space-y-5">
       <Card
         title="Digital store"
-        subtitle="Sell cosmetic catalogue items (frames, themes, badges, titles) for DP coin. Items are created under Gamification → Catalog."
-        action={enabled !== null && <Toggle label="Store open" checked={enabled} onChange={(v) => saveEnabled.mutate(v)} />}
+        subtitle="Create, edit and sell frames, themes, badges, titles, stickers, collectibles and effects for DP coin, with your own WebP artwork."
+        action={
+          <div className="flex flex-col items-end gap-2">
+            <Button onClick={() => setCreating(true)} disabled={!full}>+ New item</Button>
+            {enabled !== null && <Toggle label="Store open" checked={enabled} onChange={(v) => saveEnabled.mutate(v)} />}
+          </div>
+        }
       >
         {enabled === false && (
           <Notice tone="warning">The store is closed: users see "Digital items jaldi aa rahe hain" in the Shop. Turn on "Store open" to sell the listed items.</Notice>
@@ -175,7 +181,14 @@ export function StoreTab() {
         />
       </Card>
 
-      {editing && <ListingDialog item={editing} onClose={() => setEditing(null)} onDone={() => qc.invalidateQueries({ queryKey: ["mon-store"] })} />}
+      {(editing || creating) && (
+        <StoreItemDialog
+          item={editing}
+          takenIds={all.map((r) => r.itemId)}
+          onClose={() => { setEditing(null); setCreating(false); }}
+          onDone={() => { qc.invalidateQueries({ queryKey: ["mon-store"] }); qc.invalidateQueries({ queryKey: ["gamification-catalog"] }); }}
+        />
+      )}
       {refunding && <RefundDialog purchase={refunding} onClose={() => setRefunding(null)} onDone={() => { qc.invalidateQueries({ queryKey: ["mon-purchases"] }); qc.invalidateQueries({ queryKey: ["mon-store"] }); }} />}
     </div>
   );
@@ -370,59 +383,7 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "gr
   );
 }
 
-/** The item as users see it: a frame on a placeholder avatar, a theme as a banner. */
-export function ItemPreview({ r, height = 144 }: { r: any; height?: number }) {
-  const art = shopArtFor(r.asset);
-  const [c0, c1] = assetColors(r.asset);
-  const bg = { background: `linear-gradient(135deg, ${c0}33, ${c1}55)` };
-  if (art?.kind === "theme") {
-    return (
-      <div className="relative w-full overflow-hidden" style={{ height }}>
-        <img src={art.url} alt={r.name} className="absolute inset-0 w-full h-full object-cover" />
-        {art.fxUrl ? <img src={art.fxUrl} alt="" className="absolute inset-0 w-full h-full object-cover th-fx-drift" /> : null}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="rounded-full bg-white p-1 shadow"><div className="w-14 h-14 rounded-full bg-gradient-to-br from-slate-300 to-slate-500" /></div>
-        </div>
-      </div>
-    );
-  }
-  if (art?.kind === "frame") {
-    return (
-      <div className="w-full flex items-center justify-center" style={{ height, ...bg }}>
-        <div className="relative" style={{ width: height * 0.8, height: height * 0.8 }}>
-          <div className="absolute rounded-full bg-gradient-to-br from-slate-300 to-slate-500" style={{ inset: "8.33%" }} />
-          <img src={art.url} alt={r.name} className="absolute inset-0 w-full h-full" />
-          {art.fxUrl ? <img src={art.fxUrl} alt="" className="absolute inset-0 w-full h-full th-fx-pulse" /> : null}
-        </div>
-      </div>
-    );
-  }
-  if (art) {
-    return (
-      <div className="w-full flex flex-col items-center justify-center gap-2" style={{ height, ...bg }}>
-        <span className="relative" style={{ width: height * 0.42, height: height * 0.42 }}>
-          <img src={art.url} alt={r.name} className="absolute inset-0 w-full h-full" />
-          {art.fxUrl ? <img src={art.fxUrl} alt="" className="absolute inset-0 w-full h-full th-fx-pulse" /> : null}
-        </span>
-        {r.type === "title" ? (
-          <span className="text-xs font-bold px-2.5 py-0.5 rounded-full border" style={{ color: c1, borderColor: c1 }}>{String(r.asset?.text ?? r.name)}</span>
-        ) : (
-          <span className="text-xs font-semibold bg-black/50 text-white px-2 py-0.5 rounded-full inline-flex items-center gap-1">Asha <img src={art.url} alt="" className="w-3.5 h-3.5" /></span>
-        )}
-      </div>
-    );
-  }
-  // Level-reward items without Shop artwork: their colours, and the title text if any.
-  return (
-    <div className="w-full flex items-center justify-center" style={{ height, ...bg }}>
-      {r.type === "title" ? (
-        <span className="text-sm font-bold px-3 py-1 rounded-full border" style={{ color: c1, borderColor: c1 }}>{String(r.asset?.text ?? r.name)}</span>
-      ) : (
-        <div className="w-16 h-16 rounded-full" style={{ background: `linear-gradient(135deg, ${c0}, ${c1})` }} />
-      )}
-    </div>
-  );
-}
+export { ItemPreview };
 
 function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () => void; onToggle: () => void; toggling: boolean }) {
   const l = r.listing;
@@ -462,7 +423,7 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
           <p className="text-xs text-muted-foreground">{TYPE_LABEL[r.type] ?? r.type} · <span className="font-mono">{r.itemId}</span></p>
           {r.description ? <p className="text-sm text-muted-foreground mt-1">{r.description}</p> : null}
         </div>
-        {!r.itemActive && <Notice tone="warning">This item is turned off in Gamification → Catalog, so it is not sold even if listed.</Notice>}
+        {!r.itemActive && <Notice tone="warning">This item is disabled ("Item enabled" is off), so it is not sold or drawn even if listed.</Notice>}
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
           <Detail k="Stock" v={l ? (l.stockLimit ? `${fmtNumber(l.soldCount)} / ${fmtNumber(l.stockLimit)} sold` : `${fmtNumber(l.soldCount)} sold · unlimited`) : "–"} />
           <Detail k="Owners" v={fmtNumber(r.owners)} />
@@ -471,8 +432,20 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
           <Detail k="Refundable" v={l ? (l.refundable ? "Yes" : "No") : "–"} />
           <Detail k="Ownership" v={l ? "Permanent" : "–"} />
           <Detail k="Sale window" v={l ? window : "–"} wide />
-          <Detail k="Artwork" v={r.asset?.key ? <span className="font-mono text-xs">{String(r.asset.key)}</span> : "Built-in (by rarity)"} wide />
-          <Detail k="Family" v={freeXp ? "Free XP · lightweight motion" : "Premium · animated"} />
+          <Detail
+            k="Artwork"
+            v={
+              artSource(r.asset) === "uploaded" ? (
+                <span>Uploaded WebP{r.asset?.fxUrl ? " + effect overlay" : ""}</span>
+              ) : r.asset?.key ? (
+                <span className="font-mono text-xs">{String(r.asset.key)}</span>
+              ) : (
+                "None (colours by rarity)"
+              )
+            }
+            wide
+          />
+          <Detail k="Family" v={freeXp ? "Free XP · lightweight motion" : `${tierOf(r.asset) === "premium" ? "Premium" : "XP"}${r.asset?.animated || r.asset?.fxUrl || artSource(r.asset) === "bundled" ? " · animated" : ""}`} />
           {l ? <Detail k="Sort" v={String(l.sort)} /> : null}
           {l?.updatedAt ? <Detail k="Last changed" v={fmtDateTime(l.updatedAt)} wide /> : null}
         </dl>
@@ -480,7 +453,7 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
           <Notice>Earned permanently from the server-authoritative XP level. This item cannot be listed for DP coin.</Notice>
         ) : (
           <div className="flex gap-2 mt-auto pt-1">
-            <Button onClick={onEdit}>{l ? "Edit listing" : "List for sale"}</Button>
+            <Button onClick={onEdit}>{l ? "Edit item" : "Edit & list for sale"}</Button>
             {l && (
               <Button variant="secondary" onClick={onToggle} disabled={toggling}>
                 {l.active ? "Hide" : "Put on sale"}
@@ -516,79 +489,6 @@ function Detail({ k, v, wide }: { k: string; v: React.ReactNode; wide?: boolean 
 /** Whole percent off (rounded down, as the app shows it). */
 function discountPercent(price: number, compareAt: number): number {
   return compareAt > price && price > 0 ? Math.floor(((compareAt - price) / compareAt) * 100) : 0;
-}
-
-/** Live preview under the original-price field. */
-function compareHint(price: number, raw: unknown): string {
-  const s = String(raw ?? "").trim();
-  if (!s) return "Empty = no discount. Must be a price you really charged before; users pay the price above.";
-  const v = Number(s);
-  if (!Number.isInteger(v)) return "A whole number of DP coin.";
-  if (!(v > price)) return `Must be more than the price (${fmtNumber(price)}) to show a discount.`;
-  return `Shows ${fmtNumber(v)} struck through, -${discountPercent(price, v)}% off. Users pay ${fmtNumber(price)}.`;
-}
-
-function ListingDialog({ item, onClose, onDone }: { item: any; onClose: () => void; onDone: () => void }) {
-  const l = item.listing;
-  const [f, setF] = useState({
-    priceCoins: l?.priceCoins ?? 50,
-    compareAtCoins: l?.compareAtCoins ?? "",
-    stockLimit: l?.stockLimit ?? "",
-    refundable: l?.refundable ?? true,
-    active: l?.active ?? false,
-    startsAt: toLocalInput(l?.startsAt),
-    endsAt: toLocalInput(l?.endsAt),
-    sort: l?.sort ?? 0,
-  });
-  const mut = useMutation({
-    mutationFn: () =>
-      api.monetization.saveListing(item.itemId, {
-        priceCoins: Number(f.priceCoins),
-        compareAtCoins: String(f.compareAtCoins).trim() === "" ? null : Number(f.compareAtCoins),
-        stockLimit: f.stockLimit === "" ? null : Number(f.stockLimit),
-        refundable: f.refundable,
-        active: f.active,
-        startsAt: fromLocalInput(f.startsAt),
-        endsAt: fromLocalInput(f.endsAt),
-        sort: Number(f.sort),
-        ownership: "permanent",
-      }),
-    onSuccess: () => {
-      toast.success("Listing saved");
-      onDone();
-      onClose();
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
-  return (
-    <Modal open onClose={onClose} title={`${l ? "Edit" : "List"} ${item.name}`}>
-      <div className="space-y-3">
-        <div className="rounded-xl overflow-hidden border border-border"><ItemPreview r={item} height={120} /></div>
-        <p className="text-xs text-muted-foreground">{item.itemId} · {item.type} · {item.rarity}{item.description ? ` · ${item.description}` : ""}</p>
-        <div className="grid grid-cols-2 gap-3">
-          <Num label="Price (DP coin)" value={f.priceCoins} onChange={(v) => setF({ ...f, priceCoins: v })} />
-          <Text label="Stock limit (empty = unlimited)" value={String(f.stockLimit)} onChange={(v) => setF({ ...f, stockLimit: v })} hint="A real limit. Never show fake scarcity." />
-        </div>
-        <Text
-          label="Original price (DP coin, optional — shows a real discount)"
-          value={String(f.compareAtCoins)}
-          onChange={(v) => setF({ ...f, compareAtCoins: v })}
-          hint={compareHint(Number(f.priceCoins), f.compareAtCoins)}
-        />
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block"><span className="text-xs text-muted-foreground mb-1 block">On sale from</span><input type="datetime-local" className={field} value={f.startsAt} onChange={(e) => setF({ ...f, startsAt: e.target.value })} /></label>
-          <label className="block"><span className="text-xs text-muted-foreground mb-1 block">On sale until</span><input type="datetime-local" className={field} value={f.endsAt} onChange={(e) => setF({ ...f, endsAt: e.target.value })} /></label>
-        </div>
-        <Num label="Sort" value={f.sort} onChange={(v) => setF({ ...f, sort: v })} />
-        <Toggle label="Refundable on request" checked={f.refundable} onChange={(v) => setF({ ...f, refundable: v })} hint="Shown to the user before they buy. Admins can always refund." />
-        <Toggle label="On sale" checked={f.active} onChange={(v) => setF({ ...f, active: v })} />
-        <div className="flex gap-2 justify-end pt-2">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => mut.mutate()} disabled={mut.isPending}>Save</Button>
-        </div>
-      </div>
-    </Modal>
-  );
 }
 
 function RefundDialog({ purchase, onClose, onDone }: { purchase: any; onClose: () => void; onDone: () => void }) {
