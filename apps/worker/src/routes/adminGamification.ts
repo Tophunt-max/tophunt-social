@@ -46,6 +46,8 @@ import {
 import { awardXp, reconcileXp, reverseXp } from "../lib/xpService";
 import { finalizeSeason, parseSeasonRewards, validateSeasonInput } from "../lib/seasons";
 import { rewardDayNumber } from "../lib/gamification";
+import { assertTypeChangeAllowed, CATALOG_CACHE_KEY, catalogUpsertStatement, itemOwnerCount, validateCatalogItemInput } from "../lib/catalogItem";
+import { purgeShared } from "../lib/edgeCache";
 
 type Audit = (c: any, action: string, targetType: string, targetId: string | null, detail?: Record<string, unknown>) => Promise<void>;
 
@@ -223,41 +225,15 @@ export function registerGamificationRoutes(
     const id = c.req.param("id");
     if (!ID_RE.test(id)) throw httpsError("invalid-argument", "id must be 2-40 lowercase letters, digits, _ or -.");
     const b = await c.req.json<any>().catch(() => ({}));
-    if (!(ITEM_TYPES as readonly string[]).includes(b.type)) throw httpsError("invalid-argument", `type must be ${ITEM_TYPES.join(", ")}.`);
-    if (typeof b.name !== "string" || !b.name.trim() || b.name.length > 60) throw httpsError("invalid-argument", "name is required (max 60).");
-    const rarity = String(b.rarity ?? "common");
-    if (!(RARITIES as readonly string[]).includes(rarity)) throw httpsError("invalid-argument", `rarity must be ${RARITIES.join(", ")}.`);
-    const asset = b.asset ?? {};
-    if (typeof asset !== "object" || Array.isArray(asset) || JSON.stringify(asset).length > 2000) {
-      throw httpsError("invalid-argument", "asset must be a small JSON object (colors, icon, text, animated).");
-    }
-    const colors = (asset as any).colors;
-    if (colors !== undefined && (!Array.isArray(colors) || colors.length > 4 || !colors.every((x: unknown) => typeof x === "string" && /^#[0-9a-f]{6}$/i.test(x)))) {
-      throw httpsError("invalid-argument", "asset.colors must be up to 4 #RRGGBB colors.");
-    }
-    const key = (asset as any).key;
-    if (key !== undefined && (typeof key !== "string" || !/^[a-z][a-z0-9]*\.[a-z0-9_]{1,40}$/.test(key))) {
-      throw httpsError("invalid-argument", "asset.key must be an app asset key like frame.gold or xp40.frame_green_leaf.");
-    }
+    // Same validation as the Shop's Digital items editor (lib/catalogItem.ts).
+    const v = validateCatalogItemInput(c.env, b);
     const before = (await loadCatalog(c.env)).find((i) => i.id === id) ?? null;
-    // An item someone already owns keeps its type: changing a frame into a title
-    // would silently break every equipped slot that points at it.
-    if (before && before.type !== b.type) {
-      const owners = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM user_inventory WHERE item_id = ?`).bind(id).first<{ n: number }>();
-      if (Number(owners?.n || 0) > 0) throw httpsError("failed-precondition", "This item is already owned; its type cannot change. Create a new item instead.");
-    }
-    const ts = now();
-    await c.env.DB.prepare(
-      `INSERT INTO reward_catalog (id, type, name, description, rarity, asset, active, sort, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET type = excluded.type, name = excluded.name, description = excluded.description,
-         rarity = excluded.rarity, asset = excluded.asset, active = excluded.active, sort = excluded.sort, updated_at = excluded.updated_at`,
-    ).bind(id, b.type, b.name.trim(), String(b.description ?? "").slice(0, 200), rarity, JSON.stringify(asset), b.active === false ? 0 : 1,
-      Number.isInteger(b.sort) ? b.sort : 0, ts, ts).run();
+    await assertTypeChangeAllowed(c.env, id, before?.type, v.type);
+    await catalogUpsertStatement(c.env, id, v, now()).run();
     invalidateGamificationCatalog();
-    const owners = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM user_inventory WHERE item_id = ?`).bind(id).first<{ n: number }>();
+    await purgeShared(c, CATALOG_CACHE_KEY).catch(() => {});
     await logAudit(c, before ? "gamification.item.update" : "gamification.item.create", "reward_item", id, {
-      before, after: { ...b, rarity, asset }, ownersAffected: Number(owners?.n || 0),
+      before, after: v, ownersAffected: await itemOwnerCount(c.env, id),
     });
     return c.json({ success: true });
   });

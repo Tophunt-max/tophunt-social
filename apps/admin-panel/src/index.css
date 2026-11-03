@@ -84,4 +84,6 @@
 @keyframes th-fx-drift { 0%, 100% { transform: translateX(-6px) scale(1.05); } 50% { transform: translateX(6px) scale(1.05); } }
 .th-fx-pulse { animation: th-fx-pulse 2s ease-in-out infinite; }
 .th-fx-drift { animation: th-fx-drift 6s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .th-fx-pulse, .th-fx-drift { animation: none; } }
+@keyframes th-fx-spin { to { transform: rotate(360deg); } }
+.th-fx-spin { animation: th-fx-spin 8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .th-fx-pulse, .th-fx-drift, .th-fx-spin { animation: none; } }

@@ -43,7 +43,36 @@ interface CosmeticArtBase {
 export type CosmeticArt = CosmeticArtBase &
   ({ Art: FC<SvgProps>; source?: ImageSourcePropType } | { Art?: undefined; source: ImageSourcePropType });
 
-type WithAsset = { asset?: Record<string, any> | null } | null | undefined;
+type WithAsset = { asset?: Record<string, any> | null; type?: string | null } | null | undefined;
+
+const ART_KINDS: readonly ArtKind[] = ['frame', 'theme', 'badge', 'title', 'sticker', 'collectible', 'effect'];
+const FX_MOTIONS: readonly FxMotion[] = ['spin', 'pulse', 'twinkle', 'flicker', 'drift'];
+
+/** https only, no credentials; the Worker additionally pins it to our media host. */
+export function isSafeArtUrl(v: unknown): v is string {
+  return typeof v === 'string' && v.length <= 500 && /^https:\/\/[^\s/@]+\/\S+$/i.test(v);
+}
+
+/**
+ * Artwork an admin uploaded (asset.imageUrl, optional asset.fxUrl overlay),
+ * drawn as the item's own kind (asset.artKind, stamped by the Worker, or the
+ * item type). Older builds ignore these fields and keep their fallback.
+ */
+function uploadedArt(item: WithAsset): CosmeticArt | null {
+  const a = item?.asset;
+  if (!a || !isSafeArtUrl(a.imageUrl)) return null;
+  const kind = (ART_KINDS as readonly string[]).includes(a.artKind) ? (a.artKind as ArtKind) : (ART_KINDS as readonly string[]).includes(item?.type ?? '') ? (item!.type as ArtKind) : null;
+  if (!kind) return null;
+  const ratio = Number(a.avatarRatio);
+  return {
+    kind,
+    tier: a.tier === 'xp' ? 'xp' : 'premium',
+    source: { uri: a.imageUrl },
+    Fx: isSafeArtUrl(a.fxUrl) ? { uri: a.fxUrl } : undefined,
+    fx: (FX_MOTIONS as readonly string[]).includes(a.fx) ? (a.fx as FxMotion) : undefined,
+    avatarRatio: kind === 'frame' && ratio >= 0.5 && ratio <= 0.95 ? ratio : undefined,
+  };
+}
 
 const xpMotion = (name?: string): FxMotion => {
   if (name === 'frame-rotating-ornaments') return 'spin';
@@ -73,6 +102,9 @@ function xpArt(key: string, entry: LegacyXpArtEntry | Xp40Entry): CosmeticArt {
 }
 
 export function cosmeticArt(item: WithAsset, kind?: ArtKind): CosmeticArt | null {
+  // Uploaded artwork wins: it is how an admin replaces or adds art without a release.
+  const uploaded = uploadedArt(item);
+  if (uploaded) return kind && uploaded.kind !== kind ? null : uploaded;
   const key = item?.asset?.key;
   if (typeof key !== 'string') return null;
   const premium = SHOP_DIGITAL_ART[key];
@@ -85,6 +117,7 @@ export function cosmeticArt(item: WithAsset, kind?: ArtKind): CosmeticArt | null
 export function cosmeticTier(item: WithAsset): CosmeticTier {
   const t = item?.asset?.tier;
   if (t === 'premium' || t === 'xp') return t;
+  if (isSafeArtUrl(item?.asset?.imageUrl)) return 'premium';
   const key = item?.asset?.key;
   return typeof key === 'string' && key.startsWith('shop.') ? 'premium' : 'xp';
 }

@@ -7,6 +7,7 @@
  */
 import React, { type FC } from 'react';
 import { Image, type ImageSourcePropType } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import type { SvgProps } from 'react-native-svg';
 
 export type CosmeticGraphicSource = ImageSourcePropType | FC<SvgProps>;
@@ -28,6 +29,11 @@ export function isSvgComponent(g: unknown): g is FC<SvgProps> {
   return !!g && typeof g === 'object' && !Array.isArray(g) && ('render' in g || '$$typeof' in g);
 }
 
+/** A single `{ uri }` image source (uploaded artwork), as opposed to a bundled asset id. */
+export function isRemoteSource(g: unknown): g is { uri: string } {
+  return !!g && typeof g === 'object' && !Array.isArray(g) && typeof (g as any).uri === 'string';
+}
+
 export function CosmeticGraphic({
   graphic,
   width,
@@ -43,6 +49,22 @@ export function CosmeticGraphic({
     const Svg = graphic;
     const aspect = SVG_ASPECT[fit];
     return <Svg width={width as any} height={height as any} {...(aspect ? { preserveAspectRatio: aspect } : {})} />;
+  }
+  // Admin-uploaded artwork (`{ uri }` on our media host): expo-image plays
+  // animated WebP on every platform and keeps it in the disk cache, so a frame
+  // seen in a feed is not downloaded again for every row.
+  if (isRemoteSource(graphic)) {
+    return (
+      <ExpoImage
+        source={graphic}
+        style={{ width: width as any, height: height as any }}
+        contentFit={fit === 'stretch' ? 'fill' : fit}
+        cachePolicy="memory-disk"
+        recyclingKey={graphic.uri}
+        transition={0}
+        accessible={false}
+      />
+    );
   }
   return <Image source={graphic} style={{ width: width as any, height: height as any }} resizeMode={fit} />;
 }

@@ -22,6 +22,8 @@ import { adRevenueImportJob, importConfigured } from "../lib/adRevenueImport";
 import { adPerformance, adsSuppressedUntil, clearAdsSuppression } from "../lib/adStats";
 import { GIFT_ID_RE, toGift, validateGiftInput } from "../lib/gifts";
 import { refundStorePurchase, validateListingInput } from "../lib/store";
+import { assertTypeChangeAllowed, CATALOG_CACHE_KEY, catalogUpsertStatement, itemOwnerCount, validateCatalogItemInput } from "../lib/catalogItem";
+import { invalidateGamificationCatalog } from "../lib/cosmetics";
 import {
   CAMPAIGN_STATUSES,
   CAMPAIGN_TRANSITIONS,
@@ -238,7 +240,7 @@ export function registerMonetizationRoutes(
 
   adminRoute.get("/monetization/store", async (c) => {
     const rows = await c.env.DB.prepare(
-      `SELECT r.id, r.type, r.name, r.description, r.rarity, r.asset, r.active AS item_active, l.price_coins, l.compare_at_coins, l.ownership, l.refundable, l.stock_limit,
+      `SELECT r.id, r.type, r.name, r.description, r.rarity, r.asset, r.active AS item_active, r.sort AS item_sort, l.price_coins, l.compare_at_coins, l.ownership, l.refundable, l.stock_limit,
               l.sold_count, l.active, l.starts_at, l.ends_at, l.sort, l.updated_at,
               (SELECT COUNT(*) FROM user_inventory i WHERE i.item_id = r.id AND i.revoked_at IS NULL) AS owners,
               (SELECT COUNT(*) FROM store_purchases p WHERE p.item_id = r.id AND p.status = 'completed') AS purchases,
@@ -249,7 +251,7 @@ export function registerMonetizationRoutes(
     ).all<any>();
     return c.json((rows.results ?? []).map((r) => ({
       itemId: r.id, type: r.type, name: r.name, description: r.description ?? "", rarity: r.rarity, asset: parseAsset(r.asset),
-      itemActive: !!r.item_active, owners: Number(r.owners), purchases: Number(r.purchases), revenueCoins: Number(r.revenue),
+      itemActive: !!r.item_active, itemSort: Number(r.item_sort ?? 0), owners: Number(r.owners), purchases: Number(r.purchases), revenueCoins: Number(r.revenue),
       listing: r.price_coins == null ? null : {
         priceCoins: Number(r.price_coins), compareAtCoins: r.compare_at_coins == null ? null : Number(r.compare_at_coins), ownership: r.ownership, refundable: !!r.refundable, stockLimit: r.stock_limit,
         soldCount: Number(r.sold_count), active: !!r.active, startsAt: r.starts_at, endsAt: r.ends_at, sort: Number(r.sort),
@@ -282,6 +284,62 @@ export function registerMonetizationRoutes(
     ).bind(itemId, v.priceCoins, v.compareAtCoins, v.refundable, v.stockLimit, v.active, v.startsAt, v.endsAt, v.sort, ts, ts).run();
     await logAudit(c, before ? "store.listing.update" : "store.listing.create", "store_listing", itemId, { before, after: v });
     return c.json({ success: true });
+  });
+
+  /**
+   * Create or edit a digital item from the Shop: the catalog row (name, kind,
+   * rarity, artwork, ...) and, optionally, its listing (price, stock, sale
+   * window) in ONE D1 batch, so the app never sees a half-saved item.
+   *
+   * Body: { item: {type, name, description, rarity, asset, active, sort},
+   *         listing?: <same body as PUT /monetization/store/:itemId> | null }
+   * `listing: null` or absent leaves an existing listing untouched.
+   * Free XP (xp40) items stay managed under Gamification.
+   */
+  adminRoute.put("/monetization/store/items/:itemId", async (c) => {
+    const itemId = c.req.param("itemId");
+    if (!ITEM_ID_RE.test(itemId)) throw httpsError("invalid-argument", "Item id: 2-40 lowercase letters, digits, _ or -.");
+    const body = await c.req.json<any>().catch(() => ({}));
+    const item = validateCatalogItemInput(c.env, body?.item ?? {});
+    if ((item.asset as any).collection === "xp40") throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification.");
+    const before = await c.env.DB.prepare(
+      `SELECT r.*, EXISTS (SELECT 1 FROM xp_cosmetic_unlocks x WHERE x.item_id = r.id AND x.collection = 'xp40') AS xp40
+         FROM reward_catalog r WHERE r.id = ?`,
+    ).bind(itemId).first<any>();
+    if (before?.xp40) throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification.");
+    if (body?.create === true && before) throw httpsError("already-exists", `An item with id "${itemId}" already exists. Pick another id.`);
+    await assertTypeChangeAllowed(c.env, itemId, before?.type, item.type);
+
+    const listing = body?.listing == null ? null : validateListingInput(body.listing);
+    const beforeListing = await c.env.DB.prepare(`SELECT * FROM store_listings WHERE item_id = ?`).bind(itemId).first<any>();
+    if (listing && beforeListing && listing.stockLimit !== null && listing.stockLimit < Number(beforeListing.sold_count)) {
+      throw httpsError("invalid-argument", `Stock limit cannot be below the ${beforeListing.sold_count} already sold.`);
+    }
+
+    const ts = Date.now();
+    const stmts = [catalogUpsertStatement(c.env, itemId, item, ts)];
+    if (listing) {
+      stmts.push(
+        c.env.DB.prepare(
+          `INSERT INTO store_listings (item_id, price_coins, compare_at_coins, ownership, refundable, stock_limit, active, starts_at, ends_at, sort, created_at, updated_at)
+           VALUES (?, ?, ?, 'permanent', ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (item_id) DO UPDATE SET price_coins = excluded.price_coins, compare_at_coins = excluded.compare_at_coins, refundable = excluded.refundable,
+             stock_limit = excluded.stock_limit, active = excluded.active, starts_at = excluded.starts_at, ends_at = excluded.ends_at,
+             sort = excluded.sort, updated_at = excluded.updated_at`,
+        ).bind(itemId, listing.priceCoins, listing.compareAtCoins, listing.refundable, listing.stockLimit, listing.active, listing.startsAt, listing.endsAt, listing.sort, ts, ts),
+      );
+    }
+    await c.env.DB.batch(stmts);
+    invalidateGamificationCatalog();
+    await purgeShared(c, CATALOG_CACHE_KEY).catch(() => {});
+    await logAudit(c, before ? "store.item.update" : "store.item.create", "reward_item", itemId, {
+      before: before ? { ...before, xp40: undefined, asset: parseAsset(before.asset) } : null,
+      after: item,
+      listingBefore: beforeListing ?? null,
+      listingAfter: listing,
+      ownersAffected: await itemOwnerCount(c.env, itemId),
+    });
+    return c.json({ success: true, itemId });
   });
 
   adminRoute.get("/monetization/store/purchases", async (c) => {

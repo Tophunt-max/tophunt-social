@@ -43,14 +43,41 @@ for (const [path, url] of Object.entries(xp40Files)) {
   SHOP_ART[`xp40.${kind}_${match[2].replace(/-/g, "_")}`] = { kind, url, fxUrl: null, tier: "xp" };
 }
 
-export function shopArtFor(asset: Record<string, unknown> | null | undefined): Art | null {
+/** https only, no credentials, no whitespace: the only urls that reach an <img src>. */
+export function safeArtUrl(v: unknown): string | null {
+  if (typeof v !== "string" || v.length > 500 || !/^https:\/\/[^\s/@]+\/\S+$/i.test(v)) return null;
+  try {
+    const u = new URL(v);
+    return u.protocol === "https:" && !u.username && !u.password ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The artwork users see: an uploaded WebP (asset.imageUrl / fxUrl) first, as
+ * in the app (apps/expo/src/lib/cosmeticArt.ts), else the bundled file for asset.key.
+ */
+export function shopArtFor(asset: Record<string, unknown> | null | undefined, type?: string): Art | null {
+  const url = safeArtUrl(asset?.imageUrl);
+  if (url) {
+    const kind = typeof asset?.artKind === "string" ? asset.artKind : type ?? "sticker";
+    return { kind, url, fxUrl: safeArtUrl(asset?.fxUrl), tier: asset?.tier === "xp" ? "xp" : "premium" };
+  }
   const key = asset?.key;
   return typeof key === "string" ? SHOP_ART[key] ?? null : null;
+}
+
+/** "uploaded" / "bundled" / "none": where an item's artwork comes from. */
+export function artSource(asset: Record<string, unknown> | null | undefined): "uploaded" | "bundled" | "none" {
+  if (safeArtUrl(asset?.imageUrl)) return "uploaded";
+  return typeof asset?.key === "string" && SHOP_ART[asset.key] ? "bundled" : "none";
 }
 
 /** XP (earned) or Premium (bought): `asset.tier`, then the key prefix; earned by default. */
 export function tierOf(asset: Record<string, unknown> | null | undefined): Tier {
   if (asset?.tier === "premium" || asset?.tier === "xp") return asset.tier;
+  if (safeArtUrl(asset?.imageUrl)) return "premium";
   return typeof asset?.key === "string" && asset.key.startsWith("shop.") ? "premium" : "xp";
 }
 

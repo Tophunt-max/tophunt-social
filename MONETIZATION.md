@@ -180,6 +180,31 @@ and re-checks price and availability inside the transaction.
   (`soldCount > 0`) and "Limited edition" (real stock left or a future sale end) from them and omits a rail
   with nothing in it (`apps/expo/src/lib/shopModel.ts`).
 
+### Admin-managed digital items and uploaded WebP artwork
+
+- **Where:** admin Shopping → Digital items → **+ New item** / **Edit item**. Every kind can be created and
+  edited there: frame, theme, badge, title, sticker, collectible, effect. Name, description, rarity, kind
+  (locked once anyone owns it), Premium/XP tier, animated flag, fallback colours, badge icon, title text,
+  artwork, and the listing (price, original price, stock, sale window, order, on sale, refundable).
+- **One write:** `PUT /admin/monetization/store/items/:id` with `{ create?, item, listing? }` upserts
+  `reward_catalog` and `store_listings` in one D1 batch (no half-saved item). `create: true` refuses an
+  existing id (409). `listing` absent/null leaves an existing listing as it is. Free XP (xp40) items are
+  refused (managed under Gamification). Full admin, recent sign-in, audited as `store.item.create|update`.
+  Validation is shared with `PUT /admin/gamification/catalog/:id` (`lib/catalogItem.ts`).
+- **Artwork upload:** `POST /admin/media/shop-item-art`, WebP only (static or animated), 5 MB cap, bytes
+  sniffed, stored at `shop-items/<yyyy>/<mm>/<uuid>.webp` (media category `shop-items`, immutable), full
+  admin, recent sign-in, audited as `shop.item_art.upload`.
+- **Asset fields:** `asset.imageUrl` (base), `asset.fxUrl` (optional overlay), `asset.fx`
+  (`pulse|twinkle|flicker|drift|spin`), `asset.avatarRatio` (frames, 0.5-0.95, default 100/120). The Worker
+  accepts only URLs on `R2_PUBLIC_BASE_URL/shop-items/` and stamps `asset.artKind = type`.
+- **App:** `cosmeticArt()` prefers the uploaded image over a bundled `asset.key`, so admins can add or replace
+  artwork without an app release. Remote art is drawn with `expo-image` (animated WebP, memory+disk cache).
+  Older builds ignore the new fields and draw their fallback (bundled art, or colours by rarity).
+- **Caches:** a save clears the isolate catalog memo and purges `cache:gamification:catalog` in the colo;
+  other colos/isolates pick it up within 60 s (memo) / 300 s (edge TTL).
+- Stickers, collectibles and effects are sold, owned and shown in the Shop and Inventory. The app has no
+  sticker picker in chat or comments yet, and an equipped effect has no on-profile renderer yet.
+
 ### Compare-at price / real discounts (migration 0081)
 
 - `store_listings.compare_at_coins` (nullable): the "original" price an admin sets in Monetization → Store →

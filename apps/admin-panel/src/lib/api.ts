@@ -384,6 +384,10 @@ const uploadExploreBanner = (file: File, onProgress?: UploadProgressHandler) =>
 const uploadShopBanner = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/shop-banner", file, onProgress, "Shop image upload failed. Check your connection and try again.");
 
+/** Digital item artwork, WebP only (Worker POST /admin/media/shop-item-art). */
+const uploadShopItemArt = (file: File, onProgress?: UploadProgressHandler) =>
+  uploadBinary("/admin/media/shop-item-art", file, onProgress, "Artwork upload failed. Check your connection and try again.");
+
 const uploadProductImage = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/product-image", file, onProgress, "Product image upload failed. Check your connection and try again.");
 
@@ -956,6 +960,9 @@ export const api = {
     giftStats: (from: number, to: number) => get<any>(`/admin/monetization/gifts/stats?from=${from}&to=${to}`),
     store: () => get<any[]>("/admin/monetization/store"),
     saveListing: (itemId: string, payload: any) => put(`/admin/monetization/store/${encodeURIComponent(itemId)}`, payload),
+    /** Create / edit the catalog item and (optionally) its listing in one write. */
+    saveStoreItem: (itemId: string, payload: { create?: boolean; item: any; listing?: any | null }) =>
+      put<{ success: boolean; itemId: string }>(`/admin/monetization/store/items/${encodeURIComponent(itemId)}`, payload),
     purchases: (status?: string) => get<any[]>(`/admin/monetization/store/purchases${status ? `?status=${status}` : ""}`),
     refundPurchase: (id: string, reason: string) => post(`/admin/monetization/store/purchases/${encodeURIComponent(id)}/refund`, { reason }),
     advertisers: () => get<any[]>("/admin/monetization/advertisers"),
@@ -991,6 +998,7 @@ export const api = {
   uploadOnboardingImage,
   uploadExploreBanner,
   uploadShopBanner,
+  uploadShopItemArt,
   onboardingStats: (days = 30) => get<OnboardingStats>(`/admin/onboarding/stats?days=${days}`),
   verificationReward: () => get<any>("/admin/verification-reward"),
   signupBonusReviews: (status: "pending" | "approved" | "rejected" = "pending") =>
