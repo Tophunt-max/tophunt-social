@@ -940,7 +940,8 @@ export const api = {
     restoreItem: (uid: string, itemId: string, reason: string) =>
       post(`/admin/gamification/users/${encodeURIComponent(uid)}/inventory/${encodeURIComponent(itemId)}/restore`, { reason }),
     flags: (status = "open") => get<any[]>(`/admin/gamification/flags?status=${encodeURIComponent(status)}`),
-    reviewFlag: (id: string, status: string, note?: string) => patch(`/admin/gamification/flags/${encodeURIComponent(id)}`, { status, note }),
+    reviewFlag: (id: string, status: string, note?: string) => patch<{ success: boolean; settled?: any }>(`/admin/gamification/flags/${encodeURIComponent(id)}`, { status, note }),
+    settleRewards: (uid: string, reason: string) => post<{ success: boolean; settled: any }>(`/admin/gamification/users/${encodeURIComponent(uid)}/settle-rewards`, { reason }),
     analytics: (days = 30) => get<any>(`/admin/gamification/analytics?days=${days}`),
     reconcile: (uids?: string[]) => post<{ checked: number; mismatches: any[] }>("/admin/gamification/reconcile", uids ? { uids } : {}),
     grants: (status = "claimable") => get<any[]>(`/admin/gamification/grants?status=${encodeURIComponent(status)}`),

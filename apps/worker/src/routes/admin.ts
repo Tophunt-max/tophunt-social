@@ -268,6 +268,9 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["PATCH", /^\/gamification\/seasons\/[^/]+$/],
   ["POST", /^\/gamification\/users\/[^/]+\/achievements\/[^/]+$/],
   ["POST", /^\/gamification\/users\/[^/]+\/inventory\/[^/]+\/(revoke|restore)$/],
+  ["POST", /^\/gamification\/users\/[^/]+\/settle-rewards$/],
+  // Closing an abuse flag releases held level rewards.
+  ["PATCH", /^\/gamification\/flags\/[^/]+$/],
   ["PUT", /^\/gamification\/(achievements|catalog|xp-rewards)\/[^/]+$/],
   // Monetization writes: prices, refunds, revenue imports, campaign approval.
   ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop)(\/.*)?$/],

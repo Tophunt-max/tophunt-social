@@ -22,6 +22,7 @@
  * Achievements are only ever decided here, from server-side data. No client
  * input reaches this module.
  */
+import { rewardsHeld, settleLevelRewards } from "./rewardIntegrity";
 import type { Env } from "../types";
 import { createNotification } from "./notify";
 import { experienceOn, getProgression, isFillerMilestone, levelInfo, milestonesUpTo, type LevelInfo, type Progression } from "./progression";
@@ -144,6 +145,8 @@ export interface SyncResult {
   leveledUp: { from: number; to: number } | null;
   unlocked: UnlockedAchievement[];
   newItems: string[];
+  /** Level rewards are on hold for review (bonus-chasing guard). */
+  rewardsHeld: boolean;
 }
 
 async function loadUser(env: Env, uid: string): Promise<UserRow | null> {
@@ -222,7 +225,7 @@ async function evaluateAchievements(env: Env, p: Progression, user: UserRow, sil
 }
 
 /** Items for every milestone at or below `level` that the user does not hold yet. */
-async function grantMilestoneItems(env: Env, p: Progression, uid: string, level: number, ts: number): Promise<string[]> {
+export async function grantMilestoneItems(env: Env, p: Progression, uid: string, level: number, ts: number): Promise<string[]> {
   const wanted = new Map<string, number>();
   for (const ms of milestonesUpTo(p.cfg, level)) for (const it of ms.items) if (!wanted.has(it)) wanted.set(it, ms.level);
   if (!wanted.size) return [];
@@ -244,7 +247,7 @@ async function grantMilestoneItems(env: Env, p: Progression, uid: string, level:
  * first sync, multi-level jumps, multiple devices and concurrent syncs safe.
  * Grants are permanent: moving an item to a higher level never takes it back.
  */
-async function grantXpCosmeticItems(env: Env, uid: string, level: number, ts: number): Promise<string[]> {
+export async function grantXpCosmeticItems(env: Env, uid: string, level: number, ts: number): Promise<string[]> {
   const rules = await env.DB.prepare(
     `SELECT x.item_id, x.unlock_level FROM xp_cosmetic_unlocks x
        JOIN reward_catalog r ON r.id = x.item_id AND r.active = 1
@@ -264,15 +267,15 @@ async function grantXpCosmeticItems(env: Env, uid: string, level: number, ts: nu
 }
 
 /** Coin rewards for milestones crossed in (from, to]: claimable grants, paid later through the reward budget. */
-function milestoneGrantStatements(env: Env, p: Progression, uid: string, from: number, to: number, ts: number): D1PreparedStatement[] {
+function milestoneGrantStatements(env: Env, p: Progression, uid: string, from: number, to: number, ts: number, status: "claimable" | "held" = "claimable"): D1PreparedStatement[] {
   return p.cfg.milestones
     .filter((ms) => ms.level > from && ms.level <= to && Number(ms.coins) > 0)
     .map((ms) =>
       env.DB.prepare(
         `INSERT OR IGNORE INTO reward_grants (id, uid, source_type, source_id, coins, status, note, created_at, updated_at)
-         SELECT ?, ?, 'level', ?, ?, 'claimable', ?, ?, ?
+         SELECT ?, ?, 'level', ?, ?, ?, ?, ?, ?
           WHERE (SELECT level_seen FROM users WHERE uid = ?) >= ?`,
-      ).bind(`level:${ms.level}:${uid}`, uid, String(ms.level), Math.floor(ms.coins), `Level ${ms.level}: ${ms.title}`, ts, ts, uid, ms.level),
+      ).bind(`level:${ms.level}:${uid}`, uid, String(ms.level), Math.floor(ms.coins), status, `Level ${ms.level}: ${ms.title}`, ts, ts, uid, ms.level),
     );
 }
 
@@ -313,28 +316,27 @@ export async function syncProgression(env: Env, uid: string, opts: { p?: Progres
   const info = levelInfo(user.xp ?? 0, p.curve, p.cfg);
   let leveledUp: SyncResult["leveledUp"] = null;
   let newItems: string[] = [];
+  // Bonus-chasing guard: an account with an open abuse flag levels up as usual
+  // but its level rewards wait for the admin review (lib/rewardIntegrity.ts).
+  const held = await rewardsHeld(env, p, uid);
+  // Grants go through settleLevelRewards, which also brings back rewards that
+  // were clawed back when XP dropped and the level has now been regained (and
+  // keeps them held while the account is under review).
+  const grantLevelItems = async () => (await settleLevelRewards(env, p, uid, ts))?.itemsGranted ?? [];
 
   if (first) {
     await env.DB.prepare(`UPDATE users SET level_seen = ? WHERE uid = ? AND level_seen IS NULL`).bind(info.level, uid).run();
-    const [legacy, xp40] = await Promise.all([
-      grantMilestoneItems(env, p, uid, info.level, ts),
-      grantXpCosmeticItems(env, uid, info.level, ts),
-    ]);
-    newItems = [...legacy, ...xp40];
+    newItems = await grantLevelItems();
   } else if (info.level > Number(user.level_seen)) {
     const from = Number(user.level_seen);
     // The compare-and-set and the milestone Diamond grants are ONE batch: if
     // the grants failed after the level was marked seen, nothing would ever
     // re-create them. Grants are gated on this batch having moved level_seen.
     const casStmt = env.DB.prepare(`UPDATE users SET level_seen = ? WHERE uid = ? AND level_seen = ?`).bind(info.level, uid, from);
-    const grantStmts = on ? milestoneGrantStatements(env, p, uid, from, info.level, ts) : [];
+    const grantStmts = on ? milestoneGrantStatements(env, p, uid, from, info.level, ts, held ? "held" : "claimable") : [];
     const batch = await env.DB.batch([casStmt, ...grantStmts]);
     if (Number(batch[0]?.meta?.changes || 0) > 0) {
-      const [legacy, xp40] = await Promise.all([
-        grantMilestoneItems(env, p, uid, info.level, ts),
-        grantXpCosmeticItems(env, uid, info.level, ts),
-      ]);
-      newItems = [...legacy, ...xp40];
+      newItems = await grantLevelItems();
       if (on) {
         leveledUp = { from, to: info.level };
         const milestoneNames = p.cfg.milestones.filter((ms) => ms.level > from && ms.level <= info.level && !isFillerMilestone(ms)).map((ms) => ms.title);
@@ -345,21 +347,23 @@ export async function syncProgression(env: Env, uid: string, opts: { p?: Progres
           title: `Level up! You're now level ${info.level} 🎉`,
           body: unlockedNames.length
             ? `Unlocked: ${unlockedNames.slice(0, 3).join(", ")}${unlockedNames.length > 3 ? " and more" : ""}.`
-            : `Rank: ${info.rank.name}. Keep going!`,
+            : held
+              ? "Your level rewards are on hold while we review recent activity."
+              : `Rank: ${info.rank.name}. Keep going!`,
           type: "level_up",
           targetId: "rewards",
           data: { level: String(info.level) },
         }).catch((e) => console.error("[progression] level-up notification failed", uid, e));
       }
     }
+  } else if (user.level_seen != null && info.level < Number(user.level_seen)) {
+    // XP went down (admin reversal / negative adjustment): take back the
+    // rewards of levels no longer reached. Restored if the level is regained.
+    await settleLevelRewards(env, p, uid, ts);
   } else if (opts.full) {
     // Catch up legacy milestone items and XP40 items introduced after the user
     // passed their level. Both grants are idempotent under concurrent reads.
-    const [legacy, xp40] = await Promise.all([
-      grantMilestoneItems(env, p, uid, info.level, ts),
-      grantXpCosmeticItems(env, uid, info.level, ts),
-    ]);
-    newItems = [...legacy, ...xp40];
+    newItems = await grantLevelItems();
   }
 
   if (on && !silent) {
@@ -376,7 +380,7 @@ export async function syncProgression(env: Env, uid: string, opts: { p?: Progres
     await velocityFlags(env, p, uid, ts).catch((e) => console.error("[progression] velocity flag failed", uid, e));
   }
 
-  return { levelInfo: info, leveledUp, unlocked: silent ? [] : unlocked, newItems };
+  return { levelInfo: info, leveledUp, unlocked: silent ? [] : unlocked, newItems, rewardsHeld: held };
 }
 
 /** Fire-and-forget wrapper for waitUntil: a sync failure never fails the action. */

@@ -107,14 +107,14 @@ import { claimWebAdReward, startWebAd, webAdsDeployAllowed, webAdsWatchedToday }
 import { appControlGate } from "../lib/appControl";
 import { PROFILE_INCOMPLETE_CODE } from "../lib/accountStatus";
 import { applyReferralCode, ensureReferralCode, qualifyReferral } from "../lib/referralProgram";
-import { assertLevelEligible, getProgression } from "../lib/progression";
+import { assertLevelEligible, getProgression, levelFor } from "../lib/progression";
 import { xpAwardStatements, xpEventOutcome, xpReversalStatements } from "../lib/xpService";
 import { syncProgressionSafe } from "../lib/achievements";
 import { handleGamificationAction } from "../lib/gamificationApi";
 import { handleMonetizationAction } from "../lib/monetizationApi";
 import { assertCashActionAllowed } from "../lib/cashRetirement";
 import { assertUnderFreeDiamondCap, contestPrizeCoins, dailyFreeLimitError, economyConfig, freeDiamondCapGate, overFreeDiamondCap } from "../lib/economyLimits";
-import { activeDailyTasks, dailyRewardFor, dailyRewardState, getDailyTaskDefs, getSettings, levelForXp, rewardDayNumber, rewardDayStart, type DailyTaskDef } from "../lib/gamification";
+import { activeDailyTasks, dailyRewardFor, dailyRewardState, getDailyTaskDefs, getSettings, rewardDayNumber, rewardDayStart, type DailyTaskDef } from "../lib/gamification";
 import { sendEmail, sendUserEmail } from "../lib/email";
 import { passwordChangedEmail, dataExportEmail } from "../lib/emailTemplates";
 import { newId, now, generateJoinId } from "../lib/ids";
@@ -2660,9 +2660,13 @@ apiRoute.post("/", async (c) => {
         // The level the caller has actually reached, derived from XP. This read
         // the frozen `users.level` column, so every badge above the seeded
         // level 1 was refused.
+        await rateLimit(env, `equipbadge:${uid}`, 60, 3600);
         const me = await db.select({ xp: schema.users.xp }).from(schema.users).where(eq(schema.users.uid, uid)).get();
         if (!me) throw httpsError("not-found", "User not found.");
-        const reached = levelForXp(me.xp ?? 0, await getSettings(env));
+        // The same level engine as everything else (admin-tunable curve), not
+        // the legacy settings curve, so the badge never claims a level the
+        // profile does not show.
+        const reached = levelFor(me.xp ?? 0, (await getProgression(env)).curve);
         if (!Number.isInteger(level) || level < 1 || level > reached) {
           throw httpsError("permission-denied", "You have not unlocked this badge yet.");
         }
