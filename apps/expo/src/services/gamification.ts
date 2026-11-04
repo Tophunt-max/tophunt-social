@@ -154,7 +154,7 @@ export interface QuestView {
   resetsAt: number;
 }
 
-export type XpPeriod = 'lifetime' | 'week' | 'month' | 'season';
+export type XpPeriod = 'lifetime' | 'day' | 'week' | 'month' | 'season';
 
 export interface XpRankRow {
   rank: number;
@@ -288,9 +288,10 @@ export function useGamificationCatalog() {
   });
 }
 
-export function useXpLeaderboard(period: XpPeriod) {
+export function useXpLeaderboard(period: XpPeriod, enabled = true) {
   return useInfiniteQuery({
     queryKey: GAMIFICATION_KEYS.leaderboard(period),
+    enabled,
     initialPageParam: '0',
     queryFn: ({ pageParam }) =>
       readApi('/read/leaderboard/xp', { period, limit: 25, cursor: pageParam }) as Promise<{

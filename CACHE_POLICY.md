@@ -41,6 +41,7 @@ converge when the TTL lapses, because the Cache API has no global purge.
 | `/read/contests`, `/read/contests/:id` | `cache:contest:list:<type>`, `cache:contest:detail:<id>`. A not-found result is **not** cached | 60 / 30 | `invalidateContestCaches` (admin CRUD, create, cron end) | none (public) |
 | `/read/comments` page 1 | `cache:comments:<kind>:<targetId>`. Only `limit=20` is cached, which is what both app clients request | 30 | Writer purge on add/delete, using the **deleted row's** thread | Blocks, `likedByMe` |
 | `/read/leaderboard` | `cache:leaderboard:<wins\|votes\|xp>:<limit>`, with `by` normalised | 60 | TTL | Blocked accounts dropped |
+| `/read/leaderboard/xp`, `/read/leaderboard/diamonds` | `cache:xplb:<period>:<offset>:<limit>`, `cache:dmlb:<day\|week\|month>:<offset>:<limit>`, period normalised | 60 / 120 | TTL | Blocked accounts dropped |
 | `/read/users/:id` | `cache:user:<uid>` | 30 | Writer purge (profile, follow, block, badge) | Relations, privacy lock (`Vary: Authorization`) |
 | `/read/stories/feed` | `cache:stories:feed:v2` | 60 | Writer purge on privacy change and admin block | Audience, blocks, VS privacy |
 | `/read/users/suggested` | `cache:users:suggested` | 120 | TTL | Hidden users |

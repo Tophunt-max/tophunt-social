@@ -4014,6 +4014,7 @@ apiRoute.post("/", async (c) => {
     case "getEvents":
     case "joinEvent":
     case "claimEventTask":
+    case "getRewardHistory":
       return c.json(
         await handleGamificationAction(action, {
           env,

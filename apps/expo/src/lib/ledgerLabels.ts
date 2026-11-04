@@ -14,6 +14,16 @@ const LABELS: Record<string, string> = {
   xp_conversion: 'XP → Diamond',
   monthly_hall_of_fame_reward: 'Hall of Fame',
   promo_bonus: 'Promo bonus',
+  quest_reward: 'Mission reward',
+  achievement_reward: 'Achievement reward',
+  contest_reward: 'Contest reward',
+  event_reward: 'Special event reward',
+  // Reversals
+  referral_clawback: 'Referral reversed',
+  refund_clawback: 'Refund reversed',
+  chargeback_clawback: 'Payment reversed',
+  account_deletion_forfeit: 'Account deletion',
+  balance_rounding: 'Balance rounding',
   // Contests
   contest_entry_fee: 'Contest entry',
   contest_win_reward: 'Contest win',

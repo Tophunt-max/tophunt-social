@@ -30,6 +30,7 @@ import { getSettings as getGamificationSettings, levelForXp } from "../lib/gamif
 import { getProgression, levelInfo, xpForLevel } from "../lib/progression";
 import { loadAchievementDefs, loadCatalog, resolveCardCosmeticsList, resolveCosmetics, withCardCosmetics, type CardCosmetics } from "../lib/cosmetics";
 import { hallOfFame, LEADERBOARD_PERIODS, leaderboardPage, myRank, rangeFor, type LeaderboardPeriod } from "../lib/seasons";
+import { DIAMOND_PERIODS, diamondBoardPage, myDiamondRank, rangeMs, type DiamondPeriod } from "../lib/rewardHistory";
 import { resolveLegalContent } from "../content/legal";
 import {
   enrichMatchMedia,
@@ -528,6 +529,12 @@ export const READ_CACHE_TTLS = {
    * `leaderboard`: a rank is a global fact, nothing invalidates it, edge-only.
    */
   xpLeaderboard: { edge: 60, kv: null, invalidated: false, ceiling: 60 },
+  /**
+   * 💎 Diamond "Top Earners" board (day / week / month), lib/rewardHistory.ts. A
+   * GROUP BY over the period's reward rows on idx_txn_type_created, so it is held
+   * a little longer than the XP boards. Global fact, nothing invalidates it.
+   */
+  diamondLeaderboard: { edge: 120, kv: null, invalidated: false, ceiling: 120 },
   /** Ranks, milestones, cosmetic catalog and achievement list. Admin edits are rare and cosmetic. */
   gamificationCatalog: { edge: 300, kv: null, invalidated: false, ceiling: 300 },
   /** Hall of Fame: changes monthly and at season end. */
@@ -1914,6 +1921,67 @@ readRoute.get("/leaderboard/xp/me", requireAuth, async (c) => {
   c.header("Cache-Control", "private, no-store");
   if (period === "season" && !range) return c.json({ period, rank: null, score: 0, active: false });
   return c.json({ period, active: true, ...(await myRank(c.env, uid, range)) });
+});
+
+function diamondPeriodOf(raw: string | undefined): DiamondPeriod {
+  return (DIAMOND_PERIODS as string[]).includes(raw ?? "") ? (raw as DiamondPeriod) : "week";
+}
+
+async function diamondWindow(env: Env, period: DiamondPeriod) {
+  const p = await getProgression(env);
+  const range = (await rangeFor(env, p, period))!;
+  return { p, range, win: rangeMs(range, p.settings.dayResetOffsetMinutes) };
+}
+
+/**
+ * 💎 Diamond leaderboard ("Top Earners"): ?period=day|week|month&limit=&cursor=<offset>.
+ * Diamonds earned from rewards in the period (lib/rewardHistory.ts
+ * DIAMOND_BOARD_TYPES, reversed referrals netted out). Same public fields,
+ * tie-break, depth limit and per-viewer block filter as `/leaderboard/xp`.
+ */
+readRoute.get("/leaderboard/diamonds", optionalAuth, guestReadLimit, async (c) => {
+  const period = diamondPeriodOf(c.req.query("period"));
+  const limit = pageLimit(c, 20, 50);
+  const offset = Math.min(500, Math.max(0, parseInt(c.req.query("cursor") || "0", 10) || 0));
+  const data = await cachedJson<any>(c, {
+    key: `cache:dmlb:${period}:${offset}:${limit}`,
+    edgeTtlSec: READ_CACHE_TTLS.diamondLeaderboard.edge,
+    kvTtlSec: READ_CACHE_TTLS.diamondLeaderboard.kv,
+    load: async () => {
+      const { p, range, win } = await diamondWindow(c.env, period);
+      const rows = await withCardCosmetics(c.env, await diamondBoardPage(c.env, win, offset, limit));
+      return {
+        period,
+        active: true,
+        label: range.label,
+        endsAt: range.endsAt ?? null,
+        rows: rows.map((r) => {
+          const info = levelInfo(r.lifetimeXp, p.curve, p.cfg);
+          return { ...r, level: info.level, rankId: info.rank.id, rankTitle: info.rank.name, profileImageUrlThumb: avatarUrl(c.env, r.profileImageUrl) };
+        }),
+        nextCursor: rows.length === limit && offset + limit < 500 ? String(offset + limit) : null,
+      };
+    },
+  });
+  const viewerUid = c.get("user")?.uid;
+  c.header("Cache-Control", "public, max-age=30");
+  if (viewerUid && data.rows?.length) {
+    const blocked = await blockedUidsFor(c.env, viewerUid);
+    if (blocked.size) {
+      c.header("Cache-Control", "private, no-store");
+      return c.json({ ...data, rows: excludeHiddenBy(data.rows, blocked, (r: any) => r.uid) });
+    }
+  }
+  return c.json(data);
+});
+
+readRoute.get("/leaderboard/diamonds/me", requireAuth, async (c) => {
+  const uid = c.get("user").uid;
+  const period = diamondPeriodOf(c.req.query("period"));
+  await rateLimit(c.env, `dmlbme:${uid}`, 120, 3600);
+  const { win } = await diamondWindow(c.env, period);
+  c.header("Cache-Control", "private, no-store");
+  return c.json({ period, active: true, ...(await myDiamondRank(c.env, uid, win)) });
 });
 
 /** Hall of Fame: monthly winners, season champions and Legends. */

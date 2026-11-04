@@ -29,8 +29,8 @@ export const DISCOVERABLE = `(u.status IS NULL OR u.status NOT IN ('blocked', 'p
 /** Actions that never count towards a period ranking. */
 const PERIOD_EXCLUDED = `'admin_adjustment'`;
 
-export type LeaderboardPeriod = "lifetime" | "week" | "month" | "season";
-export const LEADERBOARD_PERIODS: LeaderboardPeriod[] = ["lifetime", "week", "month", "season"];
+export type LeaderboardPeriod = "lifetime" | "day" | "week" | "month" | "season";
+export const LEADERBOARD_PERIODS: LeaderboardPeriod[] = ["lifetime", "day", "week", "month", "season"];
 
 export interface SeasonRow {
   id: string;
@@ -116,6 +116,10 @@ export interface DayRange {
 
 export async function rangeFor(env: Env, p: Progression, period: LeaderboardPeriod, ts = Date.now()): Promise<DayRange | null> {
   const off = p.settings.dayResetOffsetMinutes;
+  if (period === "day") {
+    const day = rewardDayNumber(ts, off);
+    return { startDay: day, endDay: day, label: "Today", endsAt: (day + 1) * DAY_MS - off * 60_000 };
+  }
   if (period === "week") {
     const w = weekPeriod(ts, off);
     return { startDay: w.startDay, endDay: w.endDay, label: "This week", endsAt: w.endMs };

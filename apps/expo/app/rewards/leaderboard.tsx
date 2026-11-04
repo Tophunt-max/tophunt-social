@@ -15,48 +15,94 @@ import { LevelBadge } from '@/src/components/gamification/LevelBadge';
 import type { AssetKey } from '@/src/lib/gamificationAssets';
 import { RankDelta } from '@/src/components/gamification/MotionBits';
 import { useMyXpRank, useXpLeaderboard, type XpPeriod, type XpRankRow } from '@/src/services/gamification';
+import { useDiamondLeaderboard, useMyDiamondRank, type DiamondPeriod } from '@/src/services/rewardHistory';
+
+type Board = 'xp' | 'diamonds';
 
 const TABS: { key: XpPeriod; label: string; asset: AssetKey }[] = [
+  { key: 'day', label: 'Today', asset: 'activity.daily_quest' },
   { key: 'week', label: 'Week', asset: 'xp.weekly' },
   { key: 'month', label: 'Month', asset: 'activity.checkin' },
   { key: 'season', label: 'Season', asset: 'xp.seasonal' },
   { key: 'lifetime', label: 'All time', asset: 'xp.lifetime' },
 ];
 
+/** 💎 Top Earners: Diamonds earned from rewards (server lib/rewardHistory.ts). */
+const DIAMOND_TABS: { key: DiamondPeriod; label: string; asset: AssetKey }[] = [
+  { key: 'day', label: 'Today', asset: 'activity.daily_quest' },
+  { key: 'week', label: 'Week', asset: 'xp.weekly' },
+  { key: 'month', label: 'Month', asset: 'activity.checkin' },
+];
+
+const BOARDS: { key: Board; label: string }[] = [
+  { key: 'xp', label: '⚡ XP' },
+  { key: 'diamonds', label: '💎 Top Earners' },
+];
+
 /**
- * XP leaderboards. Ranking: period XP, then lifetime XP, then account age —
- * the same deterministic order the server ranks by, so a rank never jumps
- * between refreshes for a tie. Cursor-paginated; public profile fields only.
+ * Leaderboards: XP (today / week / month / season / all time) and 💎 Top
+ * Earners (Diamonds earned from rewards today / this week / this month, with
+ * reversed rewards netted out on the server). Ranking: period score, then
+ * lifetime XP, then account age — the same deterministic order the server
+ * ranks by, so a rank never jumps between refreshes for a tie.
+ * Cursor-paginated; public profile fields only. `?board=diamonds&period=day`.
  */
 export default function XpLeaderboardScreen() {
   const p = useExplorePalette();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ period?: string }>();
-  const initial = TABS.some((t) => t.key === params.period) ? (params.period as XpPeriod) : 'week';
-  const [period, setPeriod] = useState<XpPeriod>(initial);
+  const params = useLocalSearchParams<{ period?: string; board?: string }>();
+  const [board, setBoard] = useState<Board>(params.board === 'diamonds' ? 'diamonds' : 'xp');
+  const tabs: { key: string; label: string; asset: AssetKey }[] = board === 'xp' ? TABS : DIAMOND_TABS;
+  const [period, setPeriod] = useState<string>(tabs.some((t) => t.key === params.period) ? String(params.period) : 'week');
   const { user } = useAuth();
-  const q = useXpLeaderboard(period);
-  const me = useMyXpRank(period, !!user);
+  const isXp = board === 'xp';
+  const xq = useXpLeaderboard(period as XpPeriod, isXp);
+  const dq = useDiamondLeaderboard(period as DiamondPeriod, !isXp);
+  const xme = useMyXpRank(period as XpPeriod, isXp && !!user);
+  const dme = useMyDiamondRank(period as DiamondPeriod, !isXp && !!user);
+  // Both boards return the same page and row shape.
+  const q = (isXp ? xq : dq) as unknown as typeof xq;
+  const me = isXp ? xme : dme;
   const rows = useMemo(() => (q.data?.pages ?? []).flatMap((pg) => pg.rows), [q.data]);
   const first = q.data?.pages?.[0];
   const meInList = !!user && rows.some((r) => r.uid === user.uid);
+  const unit = isXp ? 'XP' : '💎';
+  const fmt = (n: number) => (isXp ? formatXp(n) : n.toLocaleString());
+  const boardKey = `${board}:${period}`;
   // Ranks from the previous fetch of THIS board, so a refresh can show who moved.
-  // Per period and per session only; a first load shows nothing.
-  const seenRanks = useRef(new Map<XpPeriod, Map<string, number>>());
-  const prevRanks = seenRanks.current.get(period) ?? null;
+  // Per board, period and session only; a first load shows nothing.
+  const seenRanks = useRef(new Map<string, Map<string, number>>());
+  const prevRanks = seenRanks.current.get(boardKey) ?? null;
   useEffect(() => {
-    if (rows.length) seenRanks.current.set(period, new Map(rows.map((r) => [r.uid, r.rank])));
-  }, [rows, period]);
+    if (rows.length) seenRanks.current.set(boardKey, new Map(rows.map((r) => [r.uid, r.rank])));
+  }, [rows, boardKey]);
+  const switchBoard = (b: Board) => {
+    setBoard(b);
+    if (b === 'diamonds' && !DIAMOND_TABS.some((t) => t.key === period)) setPeriod('week');
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: p.bg }]} edges={['top']}>
       <View style={styles.header}>
         <BackButton size={24} color={p.text} style={{ marginRight: 12 }} />
-        <Text style={[styles.headerTitle, { color: p.text }]} accessibilityRole="header">XP Leaderboard</Text>
+        <Text style={[styles.headerTitle, { color: p.text }]} accessibilityRole="header">Leaderboard</Text>
       </View>
       <View style={[styles.tabs, { backgroundColor: p.chip }]} accessibilityRole="tablist">
-        {TABS.map((t) => (
+        {BOARDS.map((b) => (
+          <TouchableOpacity
+            key={b.key}
+            style={[styles.tab, b.key === board && { backgroundColor: BRAND }]}
+            onPress={() => switchBoard(b.key)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: b.key === board }}
+          >
+            <Text style={[styles.tabText, { color: b.key === board ? '#FFF' : p.sub }]}>{b.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={[styles.tabs, { backgroundColor: p.chip }]} accessibilityRole="tablist">
+        {tabs.map((t) => (
           <TouchableOpacity
             key={t.key}
             style={[styles.tab, t.key === period && { backgroundColor: p.card }]}
@@ -84,20 +130,20 @@ export default function XpLeaderboardScreen() {
           refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => { q.refetch(); me.refetch(); }} tintColor={BRAND} />}
           onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()}
           onEndReachedThreshold={0.4}
-          ListEmptyComponent={<SectionEmpty palette={p} icon="flash-outline" text="No XP earned yet in this period. Be the first!" />}
+          ListEmptyComponent={<SectionEmpty palette={p} icon={isXp ? 'flash-outline' : 'diamond-outline'} text={isXp ? 'No XP earned yet in this period. Be the first!' : 'Is period me abhi tak kisi ne Diamond reward nahi kamaya. Pehle bano!'} />}
           ListFooterComponent={q.isFetchingNextPage ? <ActivityIndicator color={BRAND} style={{ marginVertical: 16 }} /> : null}
           renderItem={({ item }) => (
-            <Row r={item} p={p} prevRank={prevRanks?.get(item.uid)} isMe={item.uid === user?.uid} onOpen={() => router.push(`/profile?userId=${encodeURIComponent(item.uid)}` as any)} />
+            <Row r={item} p={p} unit={unit} fmt={fmt} prevRank={prevRanks?.get(item.uid)} isMe={item.uid === user?.uid} onOpen={() => router.push(`/profile?userId=${encodeURIComponent(item.uid)}` as any)} />
           )}
         />
       )}
       {user && me.data?.rank && !meInList ? (
-        <View style={[styles.meBar, { bottom: insets.bottom + 12 }]} accessibilityLabel={`Your rank ${me.data.rank}, ${me.data.score} XP`}>
+        <View style={[styles.meBar, { bottom: insets.bottom + 12 }]} accessibilityLabel={`Your rank ${me.data.rank}, ${me.data.score} ${unit}`}>
           <LinearGradient colors={BRAND_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.meInner}>
             <Text style={styles.meRank}>#{me.data.rank}</Text>
             <Text style={styles.meLabel}>Your rank</Text>
             <View style={{ flex: 1 }} />
-            <Text style={styles.meScore}>{formatXp(me.data.score)} XP</Text>
+            <Text style={styles.meScore}>{fmt(me.data.score)} {unit}</Text>
           </LinearGradient>
         </View>
       ) : null}
@@ -109,13 +155,15 @@ const MEDAL = ['#FFD54A', '#CBD5E1', '#F4A261'];
 /** Fallback for an older Worker that sends only the rank name (default ids are its lowercase). */
 const rankIdOf = (title: string) => String(title || '').toLowerCase();
 
-const Row = React.memo(function Row({ r, p, isMe, onOpen, prevRank }: { r: XpRankRow; p: ExplorePalette; isMe: boolean; onOpen: () => void; prevRank?: number }) {
+const Row = React.memo(function Row({ r, p, isMe, onOpen, prevRank, unit, fmt }: {
+  r: XpRankRow; p: ExplorePalette; isMe: boolean; onOpen: () => void; prevRank?: number; unit: string; fmt: (n: number) => string;
+}) {
   return (
     <TouchableOpacity
       style={[styles.row, { backgroundColor: isMe ? (p.isDark ? '#2A1A22' : '#FFF1F3') : p.card, borderColor: isMe ? BRAND : p.border }]}
       onPress={onOpen}
       accessibilityRole="link"
-      accessibilityLabel={`Rank ${r.rank}, ${r.username || r.fullName}, level ${r.level}, ${r.score} XP`}
+      accessibilityLabel={`Rank ${r.rank}, ${r.username || r.fullName}, level ${r.level}, ${r.score} ${unit}`}
     >
       {r.rank <= 3 ? (
         <View style={[styles.medal, { backgroundColor: MEDAL[r.rank - 1] }]}><Text style={styles.medalText}>{r.rank}</Text></View>
@@ -136,8 +184,8 @@ const Row = React.memo(function Row({ r, p, isMe, onOpen, prevRank }: { r: XpRan
         </View>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[styles.score, { color: BRAND }]}>{formatXp(r.score)}</Text>
-        <Text style={[styles.unit, { color: p.sub }]}>XP</Text>
+        <Text style={[styles.score, { color: BRAND }]}>{fmt(r.score)}</Text>
+        <Text style={[styles.unit, { color: p.sub }]}>{unit}</Text>
       </View>
     </TouchableOpacity>
   );
