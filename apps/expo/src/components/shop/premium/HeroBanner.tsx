@@ -37,12 +37,12 @@ import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { Ionicons } from '@/src/lib/icons';
 import { countdownParts, slideImage, type HeroSlide, type HeroSlides, type ShopNav } from '@/src/lib/shopModel';
-import { BRAND, BRAND_BUTTON, RARITY_TOKENS, TH, TH_DARK, type RarityToken } from '@/src/theme/tophunt';
+import { BRAND, BRAND_BUTTON, RARITY_TOKENS, SHOP_HERO_GRAD, TH, TH_DARK, type RarityToken } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
 import { FONT_FLOOR, HERO, HERO_M, MOCK, MOCK_M, fitFont, font, loopDelta, mfont, px, slideOffset, snapTarget, wrapIndex } from './mock';
 import { ProductPreview } from './ProductPreview';
-import { CrownLogo, Laurel } from './ShopArt';
+import { CrownLogo, HeroWaves, Laurel } from './ShopArt';
 
 /** Wall clock ticking once a second, only while `on`. */
 function useSecondClock(on: boolean): number {
@@ -180,10 +180,10 @@ export function HeroBanner({
   const dotsTop = px(mobile ? HERO_M.dots.y : HERO.dots.y, u) - dotSize / 2;
   return (
     <View style={{ width: W, height: H, borderRadius: radius }}>
-      <View style={[styles.clip, { width: W, height: H, borderRadius: radius }]}>
-        <LinearGradient colors={TH.gradients.banner} start={{ x: 0, y: 0.1 }} end={{ x: 1, y: 0.9 }} style={StyleSheet.absoluteFill} />
+      <View style={[styles.clip, mobile && styles.clipM, { width: W, height: H, borderRadius: radius }]}>
+        <LinearGradient colors={mobile ? SHOP_HERO_GRAD : TH.gradients.banner} start={{ x: 0, y: 0.1 }} end={{ x: 1, y: 0.9 }} style={StyleSheet.absoluteFill} />
         {mobile ? (
-          <HeroBurst width={W} height={H} vw={HERO_M.w} vh={HERO_M.h} cx={HERO_M.w - HERO_M.art / 2 + 4} cy={HERO_M.h / 2} k={0.42} />
+          <View style={StyleSheet.absoluteFill} pointerEvents="none"><HeroWaves width={W} height={H} /></View>
         ) : (
           <HeroBurst width={W} height={H} cx={artCenter(timed)} />
         )}
@@ -269,7 +269,7 @@ export function HeroBanner({
 
         {n > 1 ? (
           <View
-            style={[styles.dots, { top: dotsTop, gap: px(mobile ? 4 : 5, u) }]}
+            style={[mobile ? [styles.dotsM, { right: px(14, u) }] : styles.dots, { top: dotsTop, gap: px(mobile ? 4 : 5, u) }]}
             accessible
             accessibilityRole="adjustable"
             accessibilityLabel={`Slide ${index + 1} / ${n}: ${slideName(hero.slides[index])}`}
@@ -284,7 +284,7 @@ export function HeroBanner({
                   onPress={() => go(loopDelta(index, i, n))}
                   hitSlop={8}
                   accessible={false}
-                  style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: i === index ? BRAND : 'rgba(255,255,255,0.4)' }}
+                  style={{ width: mobile && i === index ? d * 2.4 : d, height: d, borderRadius: d / 2, backgroundColor: i === index ? (mobile ? TH.colors.white : BRAND) : 'rgba(255,255,255,0.4)' }}
                 />
               );
             })}
@@ -472,30 +472,17 @@ const SlideView = React.memo(function SlideView({
   );
 });
 
-/** One line of white title text with a dark outline (react-native-svg), left-aligned, shrunk to fit `width`. */
-function HeroLine({ text, width, size }: { text: string; width: number; size: number }) {
-  const fs = fitFont(text, width, size, Math.min(size, 10));
-  const height = Math.ceil(fs * 1.12);
-  const y = height / 2 + fs * 0.35;
-  const common = { x: 1, y, fontSize: fs, fontFamily: TH.fonts.bold, textAnchor: 'start' as const };
-  return (
-    <View style={{ width, height }} pointerEvents="none">
-      <Svg width={width} height={height}>
-        <SvgText {...common} y={y + fs * 0.06} fill="rgba(0,0,0,0.55)">{text}</SvgText>
-        <SvgText {...common} fill="none" stroke={TH_DARK.bg} strokeWidth={Math.max(1, fs * 0.08) * 2} strokeLinejoin="round">{text}</SvgText>
-        <SvgText {...common} fill={TH.colors.white}>{text}</SvgText>
-      </Svg>
-    </View>
-  );
-}
-
 /** "MYTHIC COLLECTION" caps → "Mythic Collection" for the second title line of the phone hero. */
 const titleCase = (s: string) => s.toLowerCase().replace(/(^|\s)(\S)/g, (_m, sp: string, c: string) => sp + c.toUpperCase());
 
+/** All-caps model text ("ROYAL KING") reads as title case on the phone hero ("Royal King"); mixed case is kept. */
+const displayCase = (s: string) => (s && s === s.toUpperCase() ? titleCase(s) : s);
+
 /**
- * One slide of the phone hero (HERO_M, 316×124 mock px): text column left
- * (badge, two title lines, the type line, CTA), the item art large on the
- * right, bleeding past the edge.
+ * One slide of the phone hero (HERO_M, 316×144 mock px, design mock): text
+ * column left (gold crown + white-bordered badge pill, a two-line bold italic
+ * title in white and pink, the subtitle, the pink CTA), the item art large on
+ * the right between gold laurels.
  */
 const MobileSlideView = React.memo(function MobileSlideView({
   i, n, pos, slide, viewer, u, W, H, visible, onExplore, onOpen,
@@ -512,7 +499,13 @@ const MobileSlideView = React.memo(function MobileSlideView({
   const ctaFs = mfont(HERO_M.cta.size, u);
   const ctaH = px(HERO_M.cta.h, u);
   const subFs = mfont(HERO_M.sub, u);
-  const line2 = slide.caps ? titleCase(slide.caps) : '';
+  const l1 = mfont(HERO_M.line1, u);
+  const l2 = mfont(HERO_M.line2, u);
+  const line1 = displayCase(slide.title);
+  const line2 = slide.caps ? displayCase(slide.caps) : '';
+  const artLeft = W - art - px(16, u);
+  const laurelW = px(20, u);
+  const laurelH = px(64, u);
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, moving]}
@@ -522,43 +515,58 @@ const MobileSlideView = React.memo(function MobileSlideView({
       {image ? (
         <SlideArtwork uri={image} W={W} H={H} label={`${slideName(slide)}: ${slide.ctaLabel}`} onOpen={onOpen} textFrac={(HERO_M.textX + HERO_M.textW) / HERO_M.w} />
       ) : slide.item ? (
-        <TouchableOpacity
-          onPress={onOpen}
-          activeOpacity={0.92}
-          accessibilityRole="button"
-          accessibilityLabel={`${slide.item.name} details`}
-          style={[styles.abs, { left: W - art + px(8, u), top: (H - art) / 2, width: art, height: art }]}
-        >
-          <ProductPreview item={slide.item} viewer={viewer} width={art} height={art} radius={px(14, u)} bare />
-        </TouchableOpacity>
+        <>
+          <View style={[styles.abs, { left: artLeft - laurelW * 0.55, top: (H - laurelH) / 2 + px(4, u) }]} pointerEvents="none">
+            <Laurel width={laurelW} height={laurelH} color={TH.colors.gold} />
+          </View>
+          <View style={[styles.abs, { left: artLeft + art - laurelW * 0.45, top: (H - laurelH) / 2 + px(4, u) }]} pointerEvents="none">
+            <Laurel width={laurelW} height={laurelH} flip color={TH.colors.gold} />
+          </View>
+          <TouchableOpacity
+            onPress={onOpen}
+            activeOpacity={0.92}
+            accessibilityRole="button"
+            accessibilityLabel={`${slide.item.name} details`}
+            style={[styles.abs, { left: artLeft, top: (H - art) / 2 - px(2, u), width: art, height: art }]}
+          >
+            <ProductPreview item={slide.item} viewer={viewer} width={art} height={art} radius={px(14, u)} bare />
+          </TouchableOpacity>
+        </>
       ) : null}
 
-      <View style={[styles.abs, styles.columnLeft, { left: px(HERO_M.textX, u), top: 0, width: textW, height: H - px(10, u), gap: px(2, u) }]} pointerEvents="box-none">
+      <View style={[styles.abs, styles.columnLeft, { left: px(HERO_M.textX, u), top: 0, width: textW, height: H - px(8, u), gap: px(3, u) }]} pointerEvents="box-none">
         {slide.badge ? (
-          <View pointerEvents="none">
-            <LinearGradient colors={badgeLook(slide.badge).colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeH, borderRadius: badgeH / 2, paddingHorizontal: px(6, u), gap: px(3, u) }]}>
-              <CrownLogo width={badgeFs * 1.2} height={badgeFs} />
-              <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: 0.5 * u, color: badgeLook(slide.badge).ink }]} numberOfLines={1}>{slide.badge}</Text>
-            </LinearGradient>
+          <View style={[styles.badge, { gap: px(4, u) }]} pointerEvents="none">
+            <CrownLogo width={badgeFs * 1.7} height={badgeFs * 1.4} />
+            <View style={[styles.badgeOutline, { height: badgeH, borderRadius: badgeH / 2, paddingHorizontal: px(7, u) }]}>
+              <Text style={[styles.badgeText, styles.badgeInk, { fontSize: badgeFs, letterSpacing: 0.6 * u }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{slide.badge}</Text>
+            </View>
           </View>
         ) : null}
-        <View accessible accessibilityRole="header" accessibilityLabel={`${slide.title} ${line2}`.trim()}>
-          <HeroLine text={slide.title} width={textW} size={mfont(HERO_M.line1, u)} />
-          {line2 ? <HeroLine text={line2} width={textW} size={mfont(HERO_M.line2, u)} /> : null}
+        <View accessible accessibilityRole="header" accessibilityLabel={`${line1} ${line2}`.trim()} style={{ width: textW }}>
+          <Text style={[styles.line, styles.line1, { fontSize: l1, lineHeight: l1 * 1.12 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{line1}</Text>
+          {line2 ? <Text style={[styles.line, styles.line2, { fontSize: l2, lineHeight: l2 * 1.12 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{line2}</Text> : null}
         </View>
         {slide.subtitle ? (
-          <Text style={[styles.sub, { textAlign: 'left', width: textW, fontSize: subFs, lineHeight: subFs * 1.25 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+          <Text style={[styles.sub, { textAlign: 'left', width: textW, fontSize: subFs, lineHeight: subFs * 1.25 }]} numberOfLines={2}>
             {slide.subtitle}
           </Text>
         ) : null}
-        <TouchableOpacity onPress={onExplore} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel={slide.ctaLabel} style={{ marginTop: px(4, u) }}>
+        <TouchableOpacity
+          onPress={onExplore}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={slide.ctaLabel}
+          hitSlop={{ top: 8, bottom: 8 }}
+          style={{ marginTop: px(4, u) }}
+        >
           <LinearGradient
             colors={BRAND_BUTTON}
             start={{ x: 0, y: 0 }}
             end={{ x: 0, y: 1 }}
-            style={[styles.cta, { width: px(HERO_M.cta.w, u), height: ctaH, borderRadius: ctaH / 2, paddingHorizontal: px(8, u), gap: px(4, u) }]}
+            style={[styles.cta, { minWidth: px(HERO_M.cta.w, u), maxWidth: textW, height: ctaH, borderRadius: ctaH / 2, paddingHorizontal: px(12, u), gap: px(5, u) }]}
           >
-            <Text style={[styles.ctaText, { fontSize: ctaFs }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{slide.ctaLabel}</Text>
+            <Text style={[styles.ctaText, { fontSize: ctaFs, flexShrink: 1 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{slide.ctaLabel}</Text>
             <ArrowIcon variant="arrow" direction="right" size={ctaFs} color={TH.colors.white} />
           </LinearGradient>
         </TouchableOpacity>
@@ -569,6 +577,13 @@ const MobileSlideView = React.memo(function MobileSlideView({
 
 const styles = StyleSheet.create({
   clip: { overflow: 'hidden', borderWidth: 1, borderColor: TH_DARK.border, backgroundColor: TH_DARK.cardAlt },
+  clipM: { borderWidth: 0, backgroundColor: SHOP_HERO_GRAD[1] },
+  dotsM: { position: 'absolute', flexDirection: 'row', alignItems: 'center' },
+  badgeOutline: { justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.85)', backgroundColor: 'rgba(255,255,255,0.08)' },
+  badgeInk: { color: '#FFE4EC' },
+  line: { fontFamily: TH.fonts.bold, fontStyle: 'italic', textShadowColor: 'rgba(0,0,0,0.25)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3 },
+  line1: { color: '#FFFFFF' },
+  line2: { color: '#FF8FB8' },
   abs: { position: 'absolute' },
   center: { alignItems: 'center', justifyContent: 'center' },
   column: { alignItems: 'center', justifyContent: 'center' },

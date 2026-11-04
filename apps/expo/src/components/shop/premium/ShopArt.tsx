@@ -627,3 +627,159 @@ export function WingedCrownArt({ width, height }: TileArtProps) {
     </Svg>
   );
 }
+
+// ------------------------------------------------------------------ phone home (design mock) art
+
+const pinkStops = () => [
+  <Stop key="0" offset="0" stopColor="#FF9EB8" />,
+  <Stop key="1" offset="0.5" stopColor="#FF4D8D" />,
+  <Stop key="2" offset="1" stopColor="#D61F69" />,
+];
+
+/** Pink shopping bag: outline (title block) or filled (section header). 24×24. */
+export function PinkBagIcon({ size, outline = false }: IconProps & { outline?: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Defs>
+        <LinearGradient id="sa-pbag" x1="0" y1="0" x2="1" y2="1">{pinkStops()}</LinearGradient>
+      </Defs>
+      <Path d="M8.5 8 V6.5 C8.5 4.3 10 2.8 12 2.8 C14 2.8 15.5 4.3 15.5 6.5 V8" fill="none" stroke="url(#sa-pbag)" strokeWidth={1.9} strokeLinecap="round" />
+      <Path d="M4.5 8 H19.5 L18.5 21 H5.5 Z" fill={outline ? 'none' : 'url(#sa-pbag)'} stroke="url(#sa-pbag)" strokeWidth={outline ? 1.9 : 0.8} strokeLinejoin="round" />
+      {outline ? <Circle cx={12} cy={14} r={1.6} fill="url(#sa-pbag)" /> : <Path d="M7 10.5 L7.5 18" stroke="#FFF" strokeWidth={1.1} strokeLinecap="round" opacity={0.7} />}
+    </Svg>
+  );
+}
+
+/**
+ * Decorative 3D pink shopping bag with a small gold crown for the phone title
+ * block (viewBox 110×110): pink gradient front, darker side panel, handle.
+ */
+export function ShopBagArt({ size }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 110 110">
+      <Defs>
+        <RadialGradient id="sa-sb-glow" cx="0.5" cy="0.6" r="0.5">
+          <Stop offset="0" stopColor="#FF4D8D" stopOpacity={0.28} />
+          <Stop offset="1" stopColor="#FF4D8D" stopOpacity={0} />
+        </RadialGradient>
+        <LinearGradient id="sa-sb-front" x1="0" y1="0" x2="1" y2="1">{pinkStops()}</LinearGradient>
+        <LinearGradient id="sa-sb-side" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#C2185B" />
+          <Stop offset="1" stopColor="#880E4F" />
+        </LinearGradient>
+        <LinearGradient id="sa-sb-handle" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#FFD1DF" />
+          <Stop offset="1" stopColor="#E0457B" />
+        </LinearGradient>
+        <LinearGradient id="sa-sb-crown" x1="0" y1="0" x2="0" y2="1">{goldStops()}</LinearGradient>
+      </Defs>
+      <Ellipse cx={58} cy={66} rx={52} ry={42} fill="url(#sa-sb-glow)" />
+      <Ellipse cx={58} cy={102} rx={34} ry={4} fill="#7C3AED" opacity={0.18} />
+      {/* handle */}
+      <Path d="M38 42 V32 C38 20 46 13 55 13 C64 13 72 20 72 32 V42" fill="none" stroke="url(#sa-sb-handle)" strokeWidth={5} strokeLinecap="round" />
+      {/* side panel */}
+      <Path d="M80 38 L94 46 L90 98 L78 100 Z" fill="url(#sa-sb-side)" />
+      {/* front */}
+      <Path d="M24 38 H80 L78 100 H22 Z" fill="url(#sa-sb-front)" />
+      <Path d="M24 38 H80 L94 46 H38 Z" fill="#FFB3C9" opacity={0.85} />
+      <Path d="M30 46 L28 92" stroke="#FFF" strokeWidth={2.4} strokeLinecap="round" opacity={0.45} />
+      {/* crown on the bag */}
+      <G transform="translate(33 52) scale(0.8)">
+        <Path d={CROWN} fill="url(#sa-sb-crown)" stroke="#92400E" strokeWidth={1} strokeLinejoin="round" />
+        <Rect x={8} y={30} width={32} height={5} rx={1.5} fill="#D97706" />
+        <Circle cx={24} cy={24} r={2.6} fill="#EC4899" stroke="#FFF" strokeWidth={0.6} />
+        <Circle cx={24} cy={6} r={2.2} fill="#FFF6C2" />
+      </G>
+      <Sparks pts={[[100, 22, 4], [12, 30, 3], [104, 78, 2.6]]} />
+    </Svg>
+  );
+}
+
+/** Violet laurel sprig after the phone tagline (viewBox 12×24, leaning right). */
+export function LaurelSprig({ width, height, color = '#8B5CF6' }: TileArtProps & { color?: string }) {
+  return <Laurel width={width} height={height} flip color={color} />;
+}
+
+/** Orange 3D box ("My Collection" card), viewBox 48×40. */
+export function CollectionBoxArt({ width, height }: TileArtProps) {
+  return (
+    <Svg width={width} height={height} viewBox="0 0 48 40">
+      <Defs>
+        <LinearGradient id="sa-cb-top" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#FFE0A3" />
+          <Stop offset="1" stopColor="#FDBA74" />
+        </LinearGradient>
+        <LinearGradient id="sa-cb-left" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#FB923C" />
+          <Stop offset="1" stopColor="#EA580C" />
+        </LinearGradient>
+        <LinearGradient id="sa-cb-right" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#EA580C" />
+          <Stop offset="1" stopColor="#9A3412" />
+        </LinearGradient>
+      </Defs>
+      <Path d="M24 4 L42 12 L24 20 L6 12 Z" fill="url(#sa-cb-top)" />
+      <Path d="M6 12 L24 20 V37 L6 29 Z" fill="url(#sa-cb-left)" />
+      <Path d="M42 12 L24 20 V37 L42 29 Z" fill="url(#sa-cb-right)" />
+      <Path d="M15 8 L33 16 V22" fill="none" stroke="#9A3412" strokeWidth={2} opacity={0.7} />
+      <Path d="M9 15 L9 27" stroke="#FFF" strokeWidth={1.2} strokeLinecap="round" opacity={0.6} />
+      <Sparks pts={[[43, 5, 2.6], [5, 35, 1.8]]} />
+    </Svg>
+  );
+}
+
+/** Clipboard with a checklist ("Orders" card), viewBox 48×40. */
+export function ClipboardArt({ width, height }: TileArtProps) {
+  return (
+    <Svg width={width} height={height} viewBox="0 0 48 40">
+      <Defs>
+        <LinearGradient id="sa-cl-board" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#C4B5FD" />
+          <Stop offset="1" stopColor="#6D28D9" />
+        </LinearGradient>
+        <LinearGradient id="sa-cl-clip" x1="0" y1="0" x2="0" y2="1">{goldStops()}</LinearGradient>
+      </Defs>
+      <Rect x={11} y={6} width={26} height={32} rx={4} fill="url(#sa-cl-board)" />
+      <Rect x={14} y={10} width={20} height={25} rx={2} fill="#FFFFFF" />
+      <Rect x={18} y={3} width={12} height={6} rx={2} fill="url(#sa-cl-clip)" stroke="#92400E" strokeWidth={0.6} />
+      {[15, 22, 29].map((y) => (
+        <G key={y}>
+          <Path d={`M16.5 ${y} L18 ${y + 1.5} L20.5 ${y - 1.2}`} fill="none" stroke="#22C55E" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" />
+          <Rect x={22.5} y={y - 0.8} width={9} height={1.8} rx={0.9} fill="#C4B5FD" />
+        </G>
+      ))}
+      <Sparks pts={[[42, 8, 2.4], [6, 32, 1.8]]} />
+    </Svg>
+  );
+}
+
+/** Scattered white sparkles over a banner (viewBox = the banner size in px, drawn once, static). */
+export const SparkleField = React.memo(function SparkleField({ width, height }: TileArtProps) {
+  const pts: [number, number, number][] = [
+    [0.06, 0.2, 2.2], [0.3, 0.12, 1.6], [0.44, 0.82, 1.8], [0.55, 0.18, 2.4], [0.62, 0.7, 1.4], [0.9, 0.12, 2], [0.96, 0.78, 1.6], [0.18, 0.88, 1.4],
+  ];
+  return (
+    <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} pointerEvents="none">
+      <Sparks pts={pts.map(([x, y, r]) => [x * width, y * height, r * 1.4] as [number, number, number])} color="#FFFFFF" />
+    </Svg>
+  );
+});
+
+/** Soft light waves over the phone hero slide (static, scaled to W×H). */
+export const HeroWaves = React.memo(function HeroWaves({ width, height }: TileArtProps) {
+  return (
+    <Svg width={width} height={height} viewBox="0 0 316 144" preserveAspectRatio="none" pointerEvents="none">
+      <Defs>
+        <RadialGradient id="sa-hw-glow" cx="0.75" cy="0.5" r="0.45">
+          <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.22} />
+          <Stop offset="1" stopColor="#FFFFFF" stopOpacity={0} />
+        </RadialGradient>
+      </Defs>
+      <Path d="M0 104 C60 80 120 132 190 104 C240 84 280 96 316 80 V144 H0 Z" fill="#FFFFFF" opacity={0.07} />
+      <Path d="M0 122 C70 104 130 144 210 120 C260 106 290 116 316 108 V144 H0 Z" fill="#FFFFFF" opacity={0.07} />
+      <Path d="M0 30 C70 10 140 52 220 22 C260 8 290 14 316 4" fill="none" stroke="#FFFFFF" strokeWidth={1.2} opacity={0.14} />
+      <Circle cx={237} cy={72} r={70} fill="url(#sa-hw-glow)" />
+      <Sparks pts={[[170, 18, 2.4], [300, 20, 2.6], [186, 120, 1.8], [302, 126, 2]]} color="#FFFFFF" />
+    </Svg>
+  );
+});

@@ -1118,3 +1118,87 @@ export function showUpgradeBanner(storeEnabled: boolean, items: ShopItem[]): boo
   const ok = new Set<string>(UPGRADE_RARITIES);
   return storeEnabled && items.some((i) => ok.has(i.rarity));
 }
+
+// ------------------------------------------------------------------ popular collections (phone home)
+
+/** Max cards of the phone "Popular Collection" grid. */
+export const POPULAR_COLLECTIONS_MAX = 6;
+/** Below this many rarity cards, per-type cards are added. */
+const POPULAR_MIN_RARITY_CARDS = 4;
+
+const TYPE_ONE: Record<string, string> = {
+  frame: 'Frame', theme: 'Theme', badge: 'Badge', title: 'Title', effect: 'Effect', sticker: 'Sticker', collectible: 'Collectible', accessory: 'Accessory',
+};
+
+/** "A", "A & B", "A, B & C". */
+const andList = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} & ${xs[xs.length - 1]}`);
+
+export interface PopularCollection<T extends ShopItem = ShopItem> {
+  key: string;
+  /** 'rarity': every listing of one rarity; 'type': every listing of one item type. */
+  kind: 'rarity' | 'type';
+  /** The rarity (kind 'rarity') or the item type (kind 'type'): the Digital tab filter. */
+  value: string;
+  /** "Legendary Collection", "Frame Collection". */
+  title: string;
+  /** The real contents: item types ("Frames, Badges & Titles") or rarities ("Legendary & Epic"). */
+  subtitle: string;
+  /** Live listings in the group. */
+  count: number;
+  /** The best item of the group (rarest, then priciest): the card art. */
+  art: T;
+  /** Highest rarity rank in the group (ordering). */
+  rank: number;
+}
+
+/**
+ * The phone "Popular Collection" cards, built only from real groupings of the
+ * store (the backend has no themed collections): one card per known rarity
+ * that has listings, highest rarity first (ties: more listings first). When
+ * fewer than 4 rarity cards exist, one card per item type follows (rarest
+ * group first, then more listings), skipping a type whose listings are
+ * exactly one rarity card's. Never more than `max`; [] without items.
+ */
+export function popularCollections<T extends ShopItem>(items: T[], max = POPULAR_COLLECTIONS_MAX): PopularCollection<T>[] {
+  const cap = Math.max(0, Math.floor(Number(max) || 0));
+  const list = (items ?? []).filter((i) => i && i.itemId && i.type);
+  if (!list.length || cap === 0) return [];
+  const group = (key: (i: T) => string | null) => {
+    const m = new Map<string, T[]>();
+    for (const i of list) {
+      const k = key(i);
+      if (!k) continue;
+      const g = m.get(k);
+      if (g) g.push(i);
+      else m.set(k, [i]);
+    }
+    return m;
+  };
+  const sig = (g: T[]) => g.map((i) => i.itemId).sort().join('|');
+  const order = (a: PopularCollection<T>, b: PopularCollection<T>) => b.rank - a.rank || b.count - a.count || a.key.localeCompare(b.key);
+
+  const byRarity = group((i) => (RARITY_LABELS[i.rarity] ? i.rarity : null));
+  const rarityCards: PopularCollection<T>[] = [...byRarity].map(([r, g]) => {
+    const sorted = [...g].sort(byRarityThenPrice);
+    const types = typeLine(g).split(' • ').filter(Boolean);
+    return { key: `rarity:${r}`, kind: 'rarity', value: r, title: `${RARITY_LABELS[r]} Collection`, subtitle: andList(types), count: g.length, art: sorted[0], rank: rarityRankOf(r) };
+  });
+  rarityCards.sort(order);
+  const out = [...rarityCards];
+
+  if (rarityCards.length < POPULAR_MIN_RARITY_CARDS) {
+    const taken = new Set([...byRarity.values()].map(sig));
+    const typeCards: PopularCollection<T>[] = [];
+    for (const [t, g] of group((i) => i.type)) {
+      if (taken.has(sig(g))) continue;
+      const sorted = [...g].sort(byRarityThenPrice);
+      const rarities = [...new Set(sorted.map((i) => i.rarity))].filter((r) => RARITY_LABELS[r]).map((r) => RARITY_LABELS[r]);
+      const one = TYPE_ONE[t] ?? t.charAt(0).toUpperCase() + t.slice(1);
+      const subtitle = `${g.length} ${g.length === 1 ? 'item' : 'items'}${rarities.length ? ` • ${andList(rarities)}` : ''}`;
+      typeCards.push({ key: `type:${t}`, kind: 'type', value: t, title: `${one} Collection`, subtitle, count: g.length, art: sorted[0], rank: rarityRankOf(sorted[0].rarity) });
+    }
+    typeCards.sort(order);
+    out.push(...typeCards);
+  }
+  return out.slice(0, cap);
+}

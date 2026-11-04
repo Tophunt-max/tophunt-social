@@ -151,40 +151,43 @@ export function mfont(ref: number, u: number): number {
  * `gap` between them and `head` from a section header to its body.
  */
 export const MOCK_M = {
-  header: { h: 40, rowTop: 16, logo: 22, word: 17, dpW: 76, diaW: 66, pillH: 24, pillText: 12, pillIcon: 15, cart: 22, badge: 14, orders: 22, gap: 6 },
+  header: { h: 40, rowTop: 14, logo: 22, word: 17, pillH: 25, pillText: 11.5, pillIcon: 14, cart: 22, badge: 14, gap: 6 },
   crown: { w: 28, h: 18 },
-  title: { y: 44, h: 30, bag: 26, size: 22, tagline: 8.5, laurel: 14, back: 18 },
-  tabs: { y: 80, h: 26, radius: 13, activeW: 64, text: 11, icon: 12, inset: 2 },
-  hero: { y: 114, h: 124, radius: 14 },
+  /** Title block: pink bag (≈36 pt on a 390 phone), "Shop" (≈28 pt), tagline, the 3D bag art (≈110 pt) on the right. */
+  title: { y: 44, h: 54, bag: 31, size: 24.5, tagline: 11.3, laurel: 13, art: 84, artTop: 30 },
+  tabs: { y: 104, h: 35, radius: 17.5, text: 11.5, icon: 12.5, inset: 3 },
+  hero: { y: 151, h: 144, radius: 16 },
   /** Gap between blocks, and from a section header to its body. */
-  gap: 10,
-  head: 6,
+  gap: 12,
+  head: 7,
   section: { h: 20, title: 14, icon: 16, link: 10.5 },
-  cat: { h: 52, gap: 6, radius: 9, artW: 30, artH: 24, label: 9.5, cols: 5, rowGap: 6 },
-  feat: { h: 110, gap: 6, radius: 10, artW: 70, artH: 52, name: 10, price: 11, tag: 8, cols: 3 },
-  trend: { h: 82, gap: 5, radius: 9, artW: 46, artH: 36, name: 8.5, price: 9.5, cols: 5 },
-  deals: { h: 92, radius: 12, chestW: 96, chestH: 80, ribbonW: 44, ribbonH: 48, title: 15, sub: 9.5, ctaW: 110, ctaH: 26, cta: 10.5, timerH: 20, timer: 10 },
+  cat: { h: 58, gap: 6, radius: 12, artW: 35, artH: 29, label: 9.5, cols: 5, rowGap: 6 },
+  feat: { h: 106, gap: 6, radius: 12, artW: 62, artH: 46, name: 10, price: 9.5, tag: 7.5, cols: 3 },
+  trend: { h: 84, gap: 5, radius: 10, artW: 46, artH: 36, name: 9, price: 9.5, cols: 5 },
+  deals: { h: 72, radius: 14, giftW: 54, giftH: 50, title: 14, sub: 9, ctaW: 84, ctaH: 24, cta: 10, timerH: 18, timer: 9.5 },
+  popular: { h: 60, gap: 7, radius: 12, art: 46, title: 12, sub: 8.5, cols: 2 },
+  shortcut: { h: 60, gap: 7, radius: 12, art: 32, title: 11, sub: 8.5, arrow: 22 },
+  /** Kept for the shared geometry tests; the phone home no longer draws these rows. */
   phys: { h: 92, gap: 6, radius: 10, imgH: 56, title: 9.5, price: 9.5, cols: 4 },
   col: { h: 60, gap: 6, icon: 30, label: 9.5, count: 9, cols: 5, radius: 9 },
-  upgrade: { h: 86, radius: 12, title: 14, sub: 9.5, ctaW: 112, ctaH: 24, cta: 10.5, artW: 110, artH: 70 },
-  quick: { h: 40, radius: 10, gap: 6, icon: 20, title: 11, sub: 8.5 },
+  upgrade: { h: 83, radius: 14, title: 14, sub: 9, ctaW: 104, ctaH: 24, cta: 10, artW: 104, artH: 68 },
   bottom: 20,
 } as const;
 
-/** Mobile hero, relative to its own top-left (316 × 124). Text column x 14..170, art on the right. */
+/** Mobile hero, relative to its own top-left (316 × 144). Text column x 14..176, art on the right. */
 export const HERO_M = {
   w: MOCK_M_INNER,
-  h: 124,
+  h: 144,
   textX: 14,
-  textW: 156,
-  badge: { h: 16, text: 9 },
-  line1: 26,
-  line2: 20,
-  sub: 8.5,
-  cta: { w: 132, h: 24, size: 10.5 },
-  art: 120,
+  textW: 162,
+  badge: { h: 17, text: 8 },
+  line1: 22.5,
+  line2: 19,
+  sub: 9,
+  cta: { w: 104, h: 26, size: 10.5 },
+  art: 108,
   timer: { right: 8, top: 8, pillW: 70, pillH: 18, box: 18, boxH: 22, gap: 2, num: 10, unit: 6, label: 7.5 },
-  dots: { y: 116, size: 5 },
+  dots: { y: 134, size: 5 },
 } as const;
 
 // ------------------------------------------------------------------ hero slider math

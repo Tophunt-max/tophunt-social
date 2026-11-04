@@ -32,6 +32,8 @@ import {
   heroFallbackItems,
   heroTitleLines,
   typeLine,
+  popularCollections,
+  POPULAR_COLLECTIONS_MAX,
   type ShopItem,
 } from '@/src/lib/shopModel';
 import { isCrownRarity, rarityColor, rarityRank } from '@/src/lib/progression';
@@ -440,5 +442,62 @@ describe('reference home: collection, physical and wishlist helpers', () => {
     expect(filterDigital(store, withWishlist({ ...NO_FILTER, wishlist: true }, [])).length).toBe(0);
     expect(withWishlist(NO_FILTER, ['a'])).toBe(NO_FILTER);
     expect(filterDigital(store, { ...NO_FILTER, rarities: ['legendary', 'mythic'] }).map((i) => i.itemId)).toEqual(['b', 'c']);
+  });
+});
+
+describe('popularCollections', () => {
+  it('is empty without items', () => {
+    expect(popularCollections([])).toEqual([]);
+    expect(popularCollections(null as unknown as ShopItem[])).toEqual([]);
+  });
+
+  it('one card per rarity with listings, highest rarity first, real types as subtitle', () => {
+    const store = [
+      item('f1', { rarity: 'legendary', type: 'frame', priceCoins: 100 }),
+      item('b1', { rarity: 'legendary', type: 'badge', priceCoins: 900 }),
+      item('t1', { rarity: 'legendary', type: 'title' }),
+      item('m1', { rarity: 'mythic', type: 'theme' }),
+      item('e1', { rarity: 'epic', type: 'frame' }),
+      item('r1', { rarity: 'rare', type: 'badge' }),
+    ];
+    const cards = popularCollections(store);
+    expect(cards.map((c) => c.key)).toEqual(['rarity:mythic', 'rarity:legendary', 'rarity:epic', 'rarity:rare']);
+    const leg = cards[1];
+    expect(leg).toMatchObject({ kind: 'rarity', value: 'legendary', title: 'Legendary Collection', subtitle: 'Frames, Badges & Titles', count: 3 });
+    // Best item: rarest, then priciest.
+    expect(leg.art.itemId).toBe('b1');
+    // 4 rarity cards: no per-type cards.
+    expect(cards.every((c) => c.kind === 'rarity')).toBe(true);
+  });
+
+  it('adds per-type cards when fewer than 4 rarities exist, without duplicating a rarity card', () => {
+    const store = [
+      item('f1', { rarity: 'legendary', type: 'frame' }),
+      item('f2', { rarity: 'epic', type: 'frame' }),
+      item('f3', { rarity: 'epic', type: 'frame' }),
+      item('b1', { rarity: 'epic', type: 'badge' }),
+    ];
+    const cards = popularCollections(store);
+    expect(cards.map((c) => c.key)).toEqual(['rarity:legendary', 'rarity:epic', 'type:frame', 'type:badge']);
+    expect(cards[2]).toMatchObject({ kind: 'type', value: 'frame', title: 'Frame Collection', subtitle: '3 items • Legendary & Epic', count: 3 });
+    // A type whose listings equal one rarity card is skipped.
+    const solo = popularCollections([item('a', { rarity: 'rare', type: 'title' }), item('b', { rarity: 'rare', type: 'title' })]);
+    expect(solo.map((c) => c.key)).toEqual(['rarity:rare']);
+  });
+
+  it('never returns more than max and invents nothing', () => {
+    const rarities = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+    const types = ['frame', 'theme', 'badge', 'title'];
+    const store = rarities.flatMap((r, k) => types.map((t) => item(`${r}-${t}`, { rarity: r, type: t, priceCoins: 10 + k })));
+    expect(POPULAR_COLLECTIONS_MAX).toBe(6);
+    expect(popularCollections(store)).toHaveLength(6);
+    expect(popularCollections(store, 2).map((c) => c.value)).toEqual(['mythic', 'legendary']);
+    expect(popularCollections(store, 0)).toEqual([]);
+    for (const c of popularCollections(store)) {
+      expect(store.filter((i) => (c.kind === 'rarity' ? i.rarity : i.type) === c.value)).toHaveLength(c.count);
+      expect(store).toContain(c.art);
+    }
+    // Unknown rarities get no rarity card (no made-up label).
+    expect(popularCollections([item('x', { rarity: 'cosmic', type: 'frame' })]).map((c) => c.key)).toEqual(['type:frame']);
   });
 });

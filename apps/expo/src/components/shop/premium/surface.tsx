@@ -6,7 +6,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { TH, type TophuntPalette } from '@/src/theme/tophunt';
+import { SHOP_LAVENDER, SHOP_VIOLET, TH, type TophuntPalette } from '@/src/theme/tophunt';
 
 /** Dark mode: none. Light mode: a very soft neutral shadow under a flat card. */
 export function cardShadow(p: TophuntPalette) {
@@ -26,4 +26,15 @@ export function ArtStage({ width, height, radius, children }: { width: number; h
       {children}
     </View>
   );
+}
+
+/** Phone home card border: soft lavender in light mode, the app border in dark. */
+export function shopBorder(p: TophuntPalette): string {
+  return p.isDark ? p.border : SHOP_LAVENDER;
+}
+
+/** Phone home card shadow: a soft violet-tinted shadow in light mode, none in dark. */
+export function lavenderShadow(p: TophuntPalette) {
+  if (p.isDark) return null;
+  return { shadowColor: SHOP_VIOLET, shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 };
 }
