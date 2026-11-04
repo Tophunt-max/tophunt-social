@@ -1097,6 +1097,11 @@ describe('deletion completeness across the whole schema', () => {
     season_results: 'season award record + finalize replay guard',
     // Evidence about suspicious activity, reviewed by staff, like `reports`.
     xp_flags: 'moderation evidence',
+    // Special events (migration 0086): the claim is the Diamond payout's replay
+    // guard and the event budget's counter; participation backs the event stats.
+    // Neither carries personal data beyond the anonymised uid.
+    reward_event_claims: 'financial record (event Diamond payout + replay guard)',
+    reward_event_participants: 'event participation record (anonymised uid)',
   };
 
   /** Column names that identify a person in this schema. */

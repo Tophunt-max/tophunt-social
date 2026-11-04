@@ -88,7 +88,7 @@ Also:
 
 One scrolling page in the order of the design reference: header (Diamonds, XP, level), shortcuts, 7-day streak,
 today's missions (daily tasks), weekly missions (quests), contest rewards, Watch & Earn, referral, XP convert,
-special events (the live season), achievements, leaderboard and reward history. It adds no earning logic of its
+special events (the featured admin event, else the live season), achievements, leaderboard and reward history. It adds no earning logic of its
 own: every amount, limit, progress bar and claim comes from the existing actions (`getDailyReward`,
 `getDailyTasks`, `getQuests`, `getAchievements`, `getXpConversion`, `/read/me/referrals`, the rewarded-ad
 platform with SSV) and every claim is re-checked by the Worker. Winning a contest pays 🪙 DP coin; the
@@ -108,6 +108,25 @@ account has an open abuse flag (released when the flag is reviewed).
 | Contest participation / runner-up | Coin Economy → XP → "Contest rewards (Diamonds)" (`monetization.earning.contestRewards {enabled, participation, runnerUp, paidOnly}`) | Created inside the winner settlement batch (`contestSettlement.ts#settleWinner`), gated on that settlement: `contest:<match>:participation:<uid>` for both players and `contest:<match>:runner_up:<loser>`. Never for refunded/cancelled matches or farmed repeat pairs; with `paidOnly` (default) only for battles with an entry fee. Claimable even with the gamification experience off. |
 
 The contest **winner** still gets the DP coin prize only. "Special" in the Rewards Center is the Hall of Fame.
+
+### Special events (`/earn/events`, migration 0086)
+
+Admin: Gamification → Events (`GET/PUT /admin/earning/events[/:id]`, `GET .../:id/participants`; saving is a
+sensitive action). An event has a title, banner (shop-banner upload), start / end, eligibility (minimum level,
+minimum account age, verified only), an optional Diamond budget, and tasks. Each task uses a quest metric (`votes`, `entries`, `wins`, `checkins`,
+`active_days`, `xp`), a target and a 💎 Diamond reward.
+
+- The user joins (`joinEvent`). Progress counts from the later of the event start and the join time to the earlier
+  of now and the event end, with the same counters as quests (`questProgress`).
+- `claimEventTask` pays once per user per task (`reward_event_claims` primary key; ledger type `event_reward`, id
+  `event:<event>:<task>:<uid>`). It pays from the free-rewards budget and counts in `dailyFreeDiamondCap`. Errors:
+  `event_ineligible`, `event_budget_exhausted` (the sum of claims reached the event budget), `rewards_held`
+  (bonus-chasing hold), `daily_free_limit`, `free_rewards_exhausted`.
+- Claims stay open for 24 hours after the event ends. A task that has claims can't be edited, and the budget
+  can't be set below what has already been claimed.
+- Events are not tied to the gamification experience switch. They stop with the earning kill switch (App Control).
+- The Rewards Center "Special Events" card shows the featured live event, or the season when there is none.
+- Account deletion keeps the event claim and participant rows with the uid anonymised.
 
 ## Daily check-in, daily tasks, referrals (admin controls)
 

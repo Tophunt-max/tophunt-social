@@ -39,6 +39,7 @@ import { newRequestId, useMonetizationConfig } from '@/src/services/monetization
 import { useConvertXp, useXpConversion } from '@/src/services/shop';
 import { useAchievements, useClaimQuest, useClaimRewardGrant, useProgression, useQuests, type AchievementView, type QuestView } from '@/src/services/gamification';
 import { useMyReferrals } from '@/src/services/referrals';
+import { featuredEvent, useEvents } from '@/src/services/events';
 import { notificationService } from '@/src/services/notifications/notificationService';
 import { appShareOrigin, isCompletedShare, shareBattleLink } from '@/src/lib/share';
 import { referralCaption } from '@/src/lib/shareCaptions';
@@ -74,6 +75,8 @@ export default function RewardsCenterScreen() {
   const achievements = useAchievements(signedIn);
   const xpConv = useXpConversion(signedIn && mon.earning.xpConversion.enabled);
   const referrals = useMyReferrals(signedIn);
+  const eventsQ = useEvents(signedIn);
+  const event = featuredEvent(eventsQ.data?.events ?? []);
   const claimQuest = useClaimQuest();
   const claimGrant = useClaimRewardGrant();
   const bal = balancesOf(me as any);
@@ -243,8 +246,9 @@ export default function RewardsCenterScreen() {
     void quests.refetch();
     void achievements.refetch();
     void referrals.refetch();
+    void eventsQ.refetch();
     if (mon.earning.xpConversion.enabled) void xpConv.refetch();
-  }, [refetchMe, prog, daily, tasksQ, quests, achievements, referrals, xpConv, mon.earning.xpConversion.enabled]);
+  }, [refetchMe, prog, daily, tasksQ, quests, achievements, referrals, eventsQ, xpConv, mon.earning.xpConversion.enabled]);
 
   const shortcuts: { key: string; art: EarningArtKey; label: string; onPress: () => void }[] = [
     { key: 'checkin', art: 'checkIn', label: 'Check-in', onPress: () => jump('checkin') },
@@ -565,8 +569,29 @@ export default function RewardsCenterScreen() {
 
         {/* J. Special events */}
         <NeonCard>
-          <SectionTitle art="specialEvent" title="Special Events" sub="Limited Time Earning Events" action="View All" onAction={() => router.push('/rewards' as any)} />
-          {season ? (
+          <SectionTitle art="specialEvent" title="Special Events" sub="Limited Time Earning Events" action="View All" onAction={() => router.push('/earn/events' as any)} />
+          {event ? (
+            <PressScale onPress={() => router.push({ pathname: '/earn/events', params: { focus: event.id } } as any)} label={`${event.title}, ${event.phase}. Join now`}>
+              <LinearGradient colors={['#7C3AED', '#C026D3', '#DB2777']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.event}>
+                <View style={styles.eventArt}>
+                  <Art name="eventGiftBox" size={74} />
+                </View>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <View style={styles.eventTop}>
+                    <Text style={styles.eventTitle} numberOfLines={1}>{event.title}</Text>
+                    {event.phase === 'live' ? <View style={styles.live}><View style={styles.liveDot} /><Text style={styles.liveText}>LIVE</Text></View> : null}
+                  </View>
+                  <Text style={styles.eventDesc} numberOfLines={2}>{event.description || 'Event tasks poore karo aur Diamond jeeto!'}</Text>
+                  <Text style={styles.eventMeta}>
+                    +{event.totalCoins.toLocaleString()} 💎 · {event.phase === 'scheduled' ? `${countdown(event.startsAt)} me shuru` : `${countdown(event.endsAt)} left`}
+                  </Text>
+                  <View style={{ alignSelf: 'flex-start', marginTop: 4 }}>
+                    <GoldButton small label={event.joined ? 'Open' : 'Join Now'} onPress={() => router.push({ pathname: '/earn/events', params: { focus: event.id } } as any)} />
+                  </View>
+                </View>
+              </LinearGradient>
+            </PressScale>
+          ) : season ? (
             <PressScale onPress={() => router.push('/rewards/leaderboard' as any)} label={`${season.name}, live. Join now`}>
               <LinearGradient colors={['#7C3AED', '#C026D3', '#DB2777']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.event}>
                 <View style={styles.eventArt}>
@@ -585,7 +610,7 @@ export default function RewardsCenterScreen() {
                 </View>
               </LinearGradient>
             </PressScale>
-          ) : prog.isLoading ? <ActivityIndicator color={RC.gold} /> : (
+          ) : prog.isLoading || eventsQ.isLoading ? <ActivityIndicator color={RC.gold} /> : (
             <StateNote text="Abhi koi event live nahi hai. Naye events jaldi aayenge." />
           )}
         </NeonCard>

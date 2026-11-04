@@ -11,6 +11,7 @@ import { equipCosmetic, loadAchievementDefs, loadCatalog, loadInventory, parseEq
 import { creatorInsights } from "./creatorInsights";
 import { experienceOn, featureLevel, fillMilestones, getProgression, isFillerMilestone, levelFor, xpForLevel, type Progression } from "./progression";
 import { claimQuest, listQuests } from "./quests";
+import { claimEventTask, joinEvent, listEvents } from "./rewardEvents";
 import { claimRewardGrant, listGrants, rewardBudgetFor } from "./rewardGrants";
 import { currentSeason, LEADERBOARD_PERIODS, myRank, rangeFor, type LeaderboardPeriod } from "./seasons";
 
@@ -27,6 +28,9 @@ export const GAMIFICATION_ACTIONS = new Set([
   "claimRewardGrant",
   "getCreatorInsights",
   "getXpRank",
+  "getEvents",
+  "joinEvent",
+  "claimEventTask",
 ]);
 
 const ACTION_LABELS: Record<string, string> = {
@@ -420,6 +424,24 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
         })),
         nextCursor: list.length > limit ? `${page[page.length - 1].created_at}:${page[page.length - 1].id}` : null,
       };
+    }
+
+    // Special events (lib/rewardEvents.ts): not gated on the gamification experience.
+    case "getEvents": {
+      await rateLimit(env, `events:${uid}`, 240, 3600);
+      return { events: await listEvents(env, uid, p) };
+    }
+
+    case "joinEvent": {
+      await rateLimit(env, `eventjoin:${uid}`, 60, 3600);
+      return { success: true, ...(await joinEvent(env, uid, p, body.eventId)) };
+    }
+
+    case "claimEventTask": {
+      await rateLimit(env, `eventclaim:${uid}`, 60, 3600, { failClosed: true });
+      const res = await claimEventTask(env, uid, p, body.eventId, body.taskId);
+      ctx.purgeProfile();
+      return { success: true, ...res };
     }
 
     case "claimRewardGrant": {

@@ -946,6 +946,12 @@ export const api = {
     reconcile: (uids?: string[]) => post<{ checked: number; mismatches: any[] }>("/admin/gamification/reconcile", uids ? { uids } : {}),
     grants: (status = "claimable") => get<any[]>(`/admin/gamification/grants?status=${encodeURIComponent(status)}`),
   },
+  // Special events (worker routes/adminEvents.ts).
+  earning: {
+    events: () => get<{ statuses: string[]; events: any[] }>("/admin/earning/events"),
+    saveEvent: (id: string, payload: any) => put<{ success: boolean; id: string }>(`/admin/earning/events/${encodeURIComponent(id)}`, payload),
+    eventParticipants: (id: string) => get<any[]>(`/admin/earning/events/${encodeURIComponent(id)}/participants`),
+  },
   rewards: () => get<any>("/admin/rewards"),
   saveRewards: (payload: any) => post("/admin/rewards", payload),
   // Ads, sponsorships, gifts, digital store (worker routes/adminMonetization.ts).

@@ -41,6 +41,7 @@ export const LEDGER_CATEGORIES: Record<string, string> = {
   quest_reward: "rewards",
   achievement_reward: "rewards",
   contest_reward: "rewards",
+  event_reward: "rewards",
   admin_adjustment: "admin",
   house_coins: "admin",
   contest_entry_fee: "contests",

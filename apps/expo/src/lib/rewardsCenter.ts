@@ -38,3 +38,11 @@ export function pickAchievements(list: AchievementView[], n = 4): AchievementVie
 
 /** The streak strip shows at most seven days (the reference card). */
 export const streakDays = <T,>(track: T[]): T[] => track.slice(0, 7);
+
+/** The event the Rewards Center banner shows: live (ending soonest) first, then the soonest scheduled. */
+export function featuredEvent<T extends { phase: string; startsAt: number; endsAt: number }>(list: T[]): T | null {
+  const live = list.filter((e) => e.phase === 'live').sort((a, b) => a.endsAt - b.endsAt);
+  if (live.length) return live[0];
+  const soon = list.filter((e) => e.phase === 'scheduled').sort((a, b) => a.startsAt - b.startsAt);
+  return soon[0] ?? list[0] ?? null;
+}
