@@ -25,7 +25,7 @@ export const DAILY_FREE_LIMIT = "daily_free_limit";
 export const FREE_DIAMOND_TYPES = [
   "daily_reward", "daily_task", "ad_reward", "xp_conversion",
   // Rewards Center: weekly / monthly mission, achievement and contest reward Diamonds.
-  "quest_reward", "achievement_reward", "contest_reward",
+  "quest_reward", "achievement_reward", "contest_reward", "event_reward",
 ] as const;
 const FREE_TYPES_SQL = FREE_DIAMOND_TYPES.map((t) => `'${t}'`).join(", ");
 

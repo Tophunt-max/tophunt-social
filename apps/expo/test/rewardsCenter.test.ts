@@ -32,3 +32,13 @@ describe('rewards center helpers', () => {
     expect(streakDays([1, 2, 3, 4, 5, 6, 7, 8, 9])).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 });
+
+import { featuredEvent } from '@/src/lib/rewardsCenter';
+describe('featured event', () => {
+  const ev = (id: string, phase: string, startsAt: number, endsAt: number) => ({ id, phase, startsAt, endsAt } as any);
+  it('prefers the live event ending soonest, then the next scheduled one', () => {
+    expect(featuredEvent([ev('a', 'scheduled', 5, 9), ev('b', 'live', 1, 20), ev('c', 'live', 1, 10)])?.id).toBe('c');
+    expect(featuredEvent([ev('a', 'scheduled', 9, 19), ev('b', 'scheduled', 5, 9)])?.id).toBe('b');
+    expect(featuredEvent([])).toBeNull();
+  });
+});

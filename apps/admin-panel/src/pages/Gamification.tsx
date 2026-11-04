@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { XpRewardsTab } from "@/components/gamification/XpRewardsTab";
+import { EventsTab } from "@/components/gamification/EventsTab";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, describeError } from "@/lib/api";
 import { Table } from "@/components/ui/Table";
@@ -22,7 +23,7 @@ import {
  * coins ask for a recent sign-in, and budget-linked rewards ask for the
  * approval password (handled by lib/api.ts `req`).
  */
-const TABS = ["overview", "rules", "achievements", "xp-rewards", "catalog", "seasons", "grants", "users", "flags"] as const;
+const TABS = ["overview", "rules", "achievements", "events", "xp-rewards", "catalog", "seasons", "grants", "users", "flags"] as const;
 type Tab = (typeof TABS)[number];
 
 const field = "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -45,6 +46,7 @@ export default function GamificationPage() {
       {tab === "overview" && <Overview />}
       {tab === "rules" && <Rules />}
       {tab === "achievements" && <Achievements />}
+      {tab === "events" && <EventsTab />}
       {tab === "xp-rewards" && <XpRewardsTab />}
       {tab === "catalog" && <Catalog />}
       {tab === "seasons" && <Seasons />}

@@ -4011,6 +4011,9 @@ apiRoute.post("/", async (c) => {
     case "claimRewardGrant":
     case "getCreatorInsights":
     case "getXpRank":
+    case "getEvents":
+    case "joinEvent":
+    case "claimEventTask":
       return c.json(
         await handleGamificationAction(action, {
           env,

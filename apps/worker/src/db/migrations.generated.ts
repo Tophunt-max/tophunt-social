@@ -87,6 +87,7 @@ import m_0082_shop_product_compare_price_sql from "../../migrations/0082_shop_pr
 import m_0083_comment_stickers_sql from "../../migrations/0083_comment_stickers.sql";
 import m_0084_xp_level_rewards_100_sql from "../../migrations/0084_xp_level_rewards_100.sql";
 import m_0085_achievement_diamonds_sql from "../../migrations/0085_achievement_diamonds.sql";
+import m_0086_reward_events_sql from "../../migrations/0086_reward_events.sql";
 
 export interface Migration {
   name: string;
@@ -180,4 +181,5 @@ export const MIGRATIONS: Migration[] = [
   { name: "0083_comment_stickers.sql", sql: m_0083_comment_stickers_sql },
   { name: "0084_xp_level_rewards_100.sql", sql: m_0084_xp_level_rewards_100_sql },
   { name: "0085_achievement_diamonds.sql", sql: m_0085_achievement_diamonds_sql },
+  { name: "0086_reward_events.sql", sql: m_0086_reward_events_sql },
 ];
