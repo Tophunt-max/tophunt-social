@@ -18,13 +18,40 @@ vi.mock('../src/lib/observability', () => ({ captureError: async () => undefined
 import { makeEnv, makeApp, fakeCtx, drizzleOf, type TestEnv } from './helpers/harness';
 import * as schema from '../src/db/schema';
 import { isSensitiveAdminRoute } from '../src/routes/admin';
-import { EARNING_ART_FILES, isEarningAssetUrl, sanitizeEarningAssets } from '../src/lib/earningAssets';
+import { EARNING_ART_FILES, earningAssetProblem, isEarningAssetUrl, readImageHeader, sanitizeEarningAssets } from '../src/lib/earningAssets';
 import { csvCell, earningWindow } from '../src/lib/earningAnalytics';
 import { runCoinAlerts } from '../src/lib/coinAlerts';
 
 const app = makeApp();
-const WEBP = new Uint8Array([...new TextEncoder().encode('RIFF'), 0, 0, 0, 0, ...new TextEncoder().encode('WEBPVP8 '), 0, 0, 0, 0]);
-const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+/** Minimal PNG header: signature + IHDR (w x h, 8-bit, colour type 6 = RGBA by default). */
+function png(w: number, h: number, colorType = 6): Uint8Array {
+  const b = new Uint8Array(45);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  const dv = new DataView(b.buffer);
+  dv.setUint32(16, w);
+  dv.setUint32(20, h);
+  b[24] = 8;
+  b[25] = colorType;
+  dv.setUint32(33, 0);
+  b.set([0x49, 0x45, 0x4e, 0x44], 37); // IEND
+  return b;
+}
+/** Minimal extended WebP header (VP8X) with the alpha flag. */
+function webp(w: number, h: number, alpha = true): Uint8Array {
+  const b = new Uint8Array(40);
+  const enc = new TextEncoder();
+  b.set(enc.encode('RIFF'), 0);
+  new DataView(b.buffer).setUint32(4, 32, true);
+  b.set(enc.encode('WEBPVP8X'), 8);
+  new DataView(b.buffer).setUint32(16, 10, true);
+  b[20] = alpha ? 0x10 : 0;
+  const u24 = (o: number, v: number) => { b[o] = v & 0xff; b[o + 1] = (v >> 8) & 0xff; b[o + 2] = (v >> 16) & 0xff; };
+  u24(24, w - 1);
+  u24(27, h - 1);
+  return b;
+}
+const WEBP = webp(512, 512);
+const PNG = png(512, 512);
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
 const ASSET = 'https://cdn.test/earning-assets/2026/11/0b9f3a8e-1c2d-4e5f-8a9b-0c1d2e3f4a5b.webp';
 
@@ -76,6 +103,25 @@ describe('artwork URL rules', () => {
     expect(sanitizeEarningAssets({ diamond: ASSET, notAKey: ASSET, xp: 'javascript:alert(1)' })).toEqual({ diamond: ASSET });
   });
 
+  it('reads PNG / WebP headers and applies the artwork rules', () => {
+    expect(readImageHeader(png(300, 300), 'image/png')).toEqual({ width: 300, height: 300, alpha: true, animated: false });
+    expect(readImageHeader(webp(256, 256), 'image/webp')).toEqual({ width: 256, height: 256, alpha: true, animated: false });
+    expect(readImageHeader(png(10, 10), 'image/webp')).toBeNull();
+    expect(readImageHeader(new Uint8Array(4), 'image/png')).toBeNull();
+    expect(earningAssetProblem({ width: 512, height: 505, alpha: true, animated: false })).toBeNull(); // within 2%
+    expect(earningAssetProblem(null)).toContain('readable');
+  });
+
+  it('the bundled app artwork itself passes the upload rules', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    for (const [, file] of EARNING_ART_FILES) {
+      const bytes = new Uint8Array(fs.readFileSync(path.join(__dirname, '..', '..', 'expo', 'assets', 'earning', file)));
+      const h = readImageHeader(bytes, 'image/webp');
+      expect(earningAssetProblem(h), file).toBeNull();
+    }
+  });
+
   it('knows every Rewards Center artwork key', () => {
     expect(EARNING_ART_FILES.length).toBe(48);
     expect(new Set(EARNING_ART_FILES.map(([k]) => k)).size).toBe(48);
@@ -98,12 +144,20 @@ describe('artwork overrides', () => {
     const big = new Uint8Array(1024 * 1024 + 10);
     big.set(PNG);
     expect((await upload(env, 'boss:admin', big, 'image/png')).status).toBe(400);
+    const why = async (bytes: Uint8Array, type: string) => ((await (await upload(env, 'boss:admin', bytes, type)).json()) as any).error?.message as string;
+    expect(await why(png(512, 300), 'image/png')).toContain('square');
+    expect(await why(png(64, 64), 'image/png')).toContain('at least 128');
+    expect(await why(png(4096, 4096), 'image/png')).toContain('at most 2048');
+    expect(await why(png(512, 512, 2), 'image/png')).toContain('transparent');
+    expect(await why(webp(512, 512, false), 'image/webp')).toContain('transparent');
+    expect((await upload(env, 'boss:admin', WEBP)).status).toBe(200);
     const ok = await upload(env, 'boss:admin', PNG, 'image/png');
     expect(ok.status).toBe(200);
     const body = (await ok.json()) as any;
+    expect(body).toMatchObject({ width: 512, height: 512, alpha: true, animated: false });
     expect(body.fileKey).toMatch(/^earning-assets\/\d{4}\/\d{2}\/[A-Za-z0-9-]+\.png$/);
     expect(isEarningAssetUrl(body.publicUrl, 'https://cdn.test')).toBe(true);
-    const audit = await env.DB.prepare(`SELECT target_id FROM admin_audit_log WHERE action = 'earning.asset.upload'`).first<any>();
+    const audit = await env.DB.prepare(`SELECT target_id FROM admin_audit_log WHERE action = 'earning.asset.upload' AND target_id = ?`).bind(body.fileKey).first<any>();
     expect(audit?.target_id).toBe(body.fileKey);
   });
 
@@ -113,10 +167,14 @@ describe('artwork overrides', () => {
     expect((await admin(env, 'PUT', '/earning/assets/diamond', { url: 'https://evil.test/x.webp' })).status).toBe(400);
     expect((await admin(env, 'PUT', '/earning/assets/diamond', { url: ASSET }, 'mod:moderator')).status).toBe(403);
 
+    // Not in storage yet: refused.
+    expect((await admin(env, 'PUT', '/earning/assets/diamond', { url: ASSET })).body.error.message).toContain('not found');
+    await env.MEDIA.put(ASSET.replace('https://cdn.test/', ''), new Uint8Array([1]));
     const set = await admin(env, 'PUT', '/earning/assets/diamond', { url: ASSET });
     expect(set.status).toBe(200);
     const list = await admin(env, 'GET', '/earning/assets');
-    expect(list.body.assets.find((a: any) => a.key === 'diamond')).toMatchObject({ url: ASSET, file: 'currencies/diamond.svg', group: 'currencies' });
+    expect(list.body.assets.find((a: any) => a.key === 'diamond')).toMatchObject({ url: ASSET, file: 'currencies/diamond.webp', group: 'currencies', changedBy: expect.anything() });
+    expect(list.body.rules).toEqual({ minSide: 128, maxSide: 2048, square: true, alpha: true });
     expect(list.body.assets.find((a: any) => a.key === 'xp').url).toBeNull();
 
     const pub = await app.request('/read/app-config', {}, env, fakeCtx());
@@ -131,6 +189,9 @@ describe('artwork overrides', () => {
     const pub2 = await app.request('/read/app-config?_=2', {}, env, fakeCtx());
     expect(((await pub2.json()) as any).earningAssets).toEqual({});
 
+    const hist = await admin(env, 'GET', '/earning/assets/diamond/history');
+    expect(hist.body.map((h: any) => [h.action, h.url])).toEqual([['earning.asset.reset', null], ['earning.asset.update', ASSET]]);
+    expect((await admin(env, 'GET', '/earning/assets/nope/history')).status).toBe(400);
     const audit = await admin(env, 'GET', '/earning/audit');
     expect(audit.body.items.map((i: any) => i.action)).toEqual(['earning.asset.reset', 'earning.asset.update']);
     expect(audit.body.items[1].detail).toMatchObject({ before: null, after: ASSET });

@@ -103,7 +103,7 @@ import { registerGamificationRoutes } from "./adminGamification";
 import { registerMonetizationRoutes } from "./adminMonetization";
 import { registerEventRoutes } from "./adminEvents";
 import { registerEarningRoutes } from "./adminEarning";
-import { EARNING_ASSET_MAX_BYTES, EARNING_ASSET_MIME_TYPES } from "../lib/earningAssets";
+import { EARNING_ASSET_MAX_BYTES, EARNING_ASSET_MIME_TYPES, earningAssetProblem, readImageHeader } from "../lib/earningAssets";
 import { assertIdentifiersAvailable, recordUsernameTransition, validateUsername } from "../lib/userIdentifiers";
 import { revokeAllSessions } from "../lib/sessionRevocation";
 import {
@@ -1130,9 +1130,12 @@ adminRoute.post("/media/earning-asset", async (c) => {
   if (declared > EARNING_ASSET_MAX_BYTES) throw httpsError("invalid-argument", "Artwork must be 1 MB or smaller.");
   const body = await readAdminImageBody(c);
   if (body.byteLength > EARNING_ASSET_MAX_BYTES) throw httpsError("invalid-argument", "Artwork must be 1 MB or smaller.");
+  const header = readImageHeader(new Uint8Array(body), fileType);
+  const problem = earningAssetProblem(header);
+  if (problem) throw httpsError("invalid-argument", problem);
   const uploaded = await uploadToR2(c.env, fileType, EARNING_ASSET_PREFIX, body, [fileType]);
-  await logAudit(c, "earning.asset.upload", "earning-asset", uploaded.fileKey, { publicUrl: uploaded.publicUrl, bytes: body.byteLength });
-  return c.json(uploaded);
+  await logAudit(c, "earning.asset.upload", "earning-asset", uploaded.fileKey, { publicUrl: uploaded.publicUrl, bytes: body.byteLength, ...header });
+  return c.json({ ...uploaded, ...header, bytes: body.byteLength });
 });
 
 /**
