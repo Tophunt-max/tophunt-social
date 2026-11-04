@@ -43,7 +43,7 @@ describe('Rewards Center artwork', () => {
 describe('Rewards Center screen covers every reference section', () => {
   const screen = fs.readFileSync(path.join(ROOT, 'app', 'earn', 'index.tsx'), 'utf8');
   it.each([
-    'Rewards Center', 'Play • Complete Tasks • Earn Rewards', 'Your Diamonds', 'Your XP',
+    'Rewards Center', 'Play • Complete Tasks • Earn Rewards', 'Rewards to Claim', 'Rewards review me hain', 'Your Diamonds', 'Your XP',
     "label: 'Check-in'", "label: 'Missions'", "label: 'Weekly'", "label: 'Referral'", "label: 'Watch & Earn'", "label: 'XP Convert'",
     'Daily Streak', "Claim Today's Reward", "Today's Missions", 'Weekly Missions', 'Contest Rewards', 'Participation', 'Winner', 'Runners-up', 'Special',
     'Watch & Earn', 'Daily Limit', 'Watch Now', 'Referral Program', 'Your Code', 'Invite Now', 'XP Convert', 'Convert Now',

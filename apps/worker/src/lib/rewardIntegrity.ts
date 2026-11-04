@@ -41,6 +41,19 @@ export async function rewardsHeld(env: Env, p: Progression, uid: string): Promis
   return !!row;
 }
 
+/**
+ * SQL for the status a NEW Diamond grant gets for `?` (the uid, bound once):
+ * 'held' while the bonus-chasing guard holds the account, else 'claimable'.
+ * Evaluated inside the INSERT, so it is exact at the moment of the grant.
+ */
+export function grantStatusSql(p: Progression): string {
+  if (p.cfg.holdRewardsWhenFlagged === false) return `'claimable'`;
+  const kinds = HOLD_FLAG_KINDS.map((k) => `'${k}'`).join(", ");
+  return `CASE WHEN EXISTS (SELECT 1 FROM xp_flags WHERE uid = ? AND status = 'open' AND kind IN (${kinds})) THEN 'held' ELSE 'claimable' END`;
+}
+/** Bindings for grantStatusSql. */
+export const grantStatusArgs = (p: Progression, uid: string): unknown[] => (p.cfg.holdRewardsWhenFlagged === false ? [] : [uid]);
+
 export interface SettleResult {
   level: number;
   held: boolean;
@@ -114,6 +127,11 @@ export async function settleLevelRewards(env: Env, p: Progression, uid: string, 
     ]);
     itemsRestored = Number(res[0]?.meta?.changes || 0);
     grantsReleased = Number(res[1]?.meta?.changes || 0);
+    // Achievement and contest Diamonds held while the account was under review.
+    const other = await env.DB.prepare(
+      `UPDATE reward_grants SET status = 'claimable', updated_at = ? WHERE uid = ? AND source_type IN ('achievement', 'contest') AND status = 'held'`,
+    ).bind(ts, uid).run();
+    grantsReleased += Number(other.meta?.changes || 0);
     const [legacy, xp] = await Promise.all([
       grantMilestoneItems(env, p, uid, level, ts),
       grantXpCosmeticItems(env, uid, level, ts),

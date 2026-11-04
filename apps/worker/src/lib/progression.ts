@@ -94,6 +94,8 @@ export interface QuestDef {
   metric: QuestMetric;
   target: number;
   xp: number;
+  /** Diamonds paid on claim (free-rewards budget, daily free cap). 0 = XP only. */
+  coins?: number;
   minLevel: number;
   enabled: boolean;
 }
@@ -196,6 +198,9 @@ export function fillMilestones(list: unknown[], maxLevel: number): Milestone[] {
   for (let l = 1; l <= maxLevel; l++) if (!byLevel.has(l)) byLevel.set(l, fillerMilestone(l));
   return [...byLevel.values()].sort((a, b) => a.level - b.level);
 }
+
+/** Upper bound for one quest's Diamond reward. */
+export const MAX_QUEST_DIAMONDS = 100_000;
 
 export const DEFAULT_QUESTS: QuestDef[] = [
   { id: "weekly_votes", title: "Vote in 25 battles this week", period: "week", metric: "votes", target: 25, xp: 25, minLevel: 1, enabled: true },
@@ -420,6 +425,7 @@ export function validateProgression(p: any, curve: Pick<LevelCurve, "xpThreshold
       if (!QUEST_METRICS.includes(q.metric)) throw new Error(`Quest "${q.id}": metric must be ${QUEST_METRICS.join(", ")}.`);
       if (!isInt(q.target, 1, 100_000)) throw new Error(`Quest "${q.id}": target must be 1-100,000.`);
       if (!isInt(q.xp, 0, MAX_RULE_XP)) throw new Error(`Quest "${q.id}": xp must be 0-${MAX_RULE_XP}.`);
+      if (q.coins !== undefined && !isInt(q.coins, 0, MAX_QUEST_DIAMONDS)) throw new Error(`Quest "${q.id}": Diamond reward must be 0-${MAX_QUEST_DIAMONDS}.`);
       if (!isInt(q.minLevel ?? 1, 1, maxLevel)) throw new Error(`Quest "${q.id}": minLevel must be 1-${maxLevel}.`);
       if (q.enabled !== undefined && typeof q.enabled !== "boolean") throw new Error(`Quest "${q.id}": enabled must be true or false.`);
     }

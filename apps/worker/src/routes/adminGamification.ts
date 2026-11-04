@@ -189,6 +189,7 @@ export function registerGamificationRoutes(
       metric,
       threshold: int(b.threshold, "threshold", 1, 1_000_000, 1),
       xpReward: int(b.xpReward, "xpReward", 0, MAX_RULE_XP, 0),
+      diamondReward: int(b.diamondReward, "diamondReward", 0, 100_000, 0),
       itemId,
       repeatable: b.repeatable === true,
       maxTiers: int(b.maxTiers, "maxTiers", 1, 100, 1),
@@ -203,15 +204,15 @@ export function registerGamificationRoutes(
     // Changing what an achievement requires never takes it away from anyone who
     // already unlocked it: unlocks are rows, not re-evaluations.
     await c.env.DB.prepare(
-      `INSERT INTO achievement_definitions (id, name, description, icon, category, rarity, metric, threshold, xp_reward, item_id,
+      `INSERT INTO achievement_definitions (id, name, description, icon, category, rarity, metric, threshold, xp_reward, diamond_reward, item_id,
          repeatable, max_tiers, active, hidden, starts_at, ends_at, sort, version, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
        ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description, icon = excluded.icon,
          category = excluded.category, rarity = excluded.rarity, metric = excluded.metric, threshold = excluded.threshold,
-         xp_reward = excluded.xp_reward, item_id = excluded.item_id, repeatable = excluded.repeatable, max_tiers = excluded.max_tiers,
+         xp_reward = excluded.xp_reward, diamond_reward = excluded.diamond_reward, item_id = excluded.item_id, repeatable = excluded.repeatable, max_tiers = excluded.max_tiers,
          active = excluded.active, hidden = excluded.hidden, starts_at = excluded.starts_at, ends_at = excluded.ends_at,
          sort = excluded.sort, version = achievement_definitions.version + 1, updated_at = excluded.updated_at`,
-    ).bind(id, v.name, v.description, v.icon, v.category, v.rarity, v.metric, v.threshold, v.xpReward, v.itemId,
+    ).bind(id, v.name, v.description, v.icon, v.category, v.rarity, v.metric, v.threshold, v.xpReward, v.diamondReward, v.itemId,
       v.repeatable ? 1 : 0, v.maxTiers, v.active ? 1 : 0, v.hidden ? 1 : 0, v.startsAt, v.endsAt, v.sort, ts, ts).run();
     invalidateGamificationCatalog();
     await logAudit(c, before ? "gamification.achievement.update" : "gamification.achievement.create", "achievement", id, { before, after: v });

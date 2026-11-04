@@ -6,7 +6,7 @@ import { toast } from "@/lib/toast";
 import { fmtNumber } from "@/lib/format";
 import { Table } from "@/components/ui/Table";
 import { Button, Card, Notice, Num, Toggle, inr } from "@/components/monetization/shared";
-import { XpConversionCard } from "@/components/coin/ClosedLoopCards";
+import { ContestRewardsCard, XpConversionCard } from "@/components/coin/ClosedLoopCards";
 import { FraudRulesTab } from "@/components/shop/FraudRulesTab";
 
 /**
@@ -102,6 +102,7 @@ export function XpTab() {
       )}
       <div className="grid gap-6 lg:grid-cols-2 items-start">
         <XpConversionCard />
+        <ContestRewardsCard />
         <Card title="XP kaise milta hai" subtitle="XP comes from playing: votes, contests, wins, daily activity. Levels and the XP rules are in Gamification.">
           <p className="text-sm text-muted-foreground">
             Converting never lowers a user&apos;s XP, level or leaderboard rank: TopHunt tracks the converted part separately.

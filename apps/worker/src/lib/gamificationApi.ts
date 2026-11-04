@@ -156,7 +156,8 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
               WHERE uid = ? AND source <> 'backfill' AND unlocked_at > ? ORDER BY unlocked_at DESC LIMIT 5`,
           ).bind(uid, Date.now() - 7 * 86_400_000).all<any>()).results ?? []
         : [];
-      const grants = on ? (await listGrants(env, uid)).filter((g) => g.status === "claimable") : [];
+      // Contest Diamonds are claimable even while the gamification experience is off.
+      const grants = (await listGrants(env, uid)).filter((g) => g.status === "claimable" && (on || g.sourceType === "contest"));
       return {
         enabled: on,
         levelInfo: sync.levelInfo,
@@ -229,6 +230,7 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
               category: d.category,
               rarity: d.rarity,
               xpReward: d.xpReward,
+              diamondReward: d.diamondReward,
               itemId: d.itemId,
               repeatable: d.repeatable,
               tier: got?.tier ?? 0,
@@ -380,6 +382,7 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
       if (!on) throw httpsError("failed-precondition", "Quests are not available yet.");
       await rateLimit(env, `quest:${uid}`, 30, 3600, { failClosed: true });
       const res = await claimQuest(env, uid, p, body.questId);
+      if (res.diamonds > 0) ctx.purgeProfile();
       ctx.waitUntil(syncProgression(env, uid, { p }).catch(() => undefined));
       return { success: true, ...res };
     }
@@ -422,6 +425,7 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
     case "claimRewardGrant": {
       await rateLimit(env, `grant:${uid}`, 30, 3600, { failClosed: true });
       const res = await claimRewardGrant(env, uid, p, body.grantId, ctx.waitUntil);
+      ctx.purgeProfile();
       return { success: true, ...res };
     }
 

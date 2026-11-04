@@ -72,7 +72,15 @@ export interface MonetizationConfig {
    */
   shop: { enabled: boolean; monthlyBudgetInr: number; fraud: ShopFraudConfig };
   /** Ways to earn Diamonds that live here (others: Coin Economy → Earn). */
-  earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
+  earning: {
+    xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number };
+    /**
+     * Diamonds for taking part in a contest battle (lib/contestSettlement.ts),
+     * created as claimable grants only when a match settles with a winner.
+     * Winning itself pays DP coin. `paidOnly`: only matches with an entry fee.
+     */
+    contestRewards: { enabled: boolean; participation: number; runnerUp: number; paidOnly: boolean };
+  };
   /** Economy guardrails (lib/economyLimits.ts). Every knob: 0 = off. */
   economy: EconomyConfig;
 }
@@ -181,7 +189,10 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
       reviewAboveCoins: 2000,
     },
   },
-  earning: { xpConversion: { enabled: false, xpPerDiamond: 100, maxDiamondsPerDay: 20 } },
+  earning: {
+    xpConversion: { enabled: false, xpPerDiamond: 100, maxDiamondsPerDay: 20 },
+    contestRewards: { enabled: false, participation: 50, runnerUp: 100, paidOnly: true },
+  },
   economy: { contestPlatformFeePercent: 0, dailyFreeDiamondCap: 0, monthlyDpCoinWinCap: 0, sameOpponentRewardsPerDay: 0 },
 };
 
@@ -200,6 +211,7 @@ const BOUNDS = {
   maxCoinsPerSend: [1, 1_000_000],
   creatorShareBps: [0, 10_000],
   xpPerDiamond: [1, 1_000_000],
+  contestReward: [0, 100_000],
   maxDiamondsPerDay: [1, 10_000],
   minAccountAgeDays: [0, 365],
   maxOrdersPer30Days: [1, 100],
@@ -331,6 +343,12 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
         enabled: bool(m.earning?.xpConversion?.enabled, false),
         xpPerDiamond: int(m.earning?.xpConversion?.xpPerDiamond, d.earning.xpConversion.xpPerDiamond, BOUNDS.xpPerDiamond),
         maxDiamondsPerDay: int(m.earning?.xpConversion?.maxDiamondsPerDay, d.earning.xpConversion.maxDiamondsPerDay, BOUNDS.maxDiamondsPerDay),
+      },
+      contestRewards: {
+        enabled: bool(m.earning?.contestRewards?.enabled, false),
+        participation: int(m.earning?.contestRewards?.participation, d.earning.contestRewards.participation, BOUNDS.contestReward),
+        runnerUp: int(m.earning?.contestRewards?.runnerUp, d.earning.contestRewards.runnerUp, BOUNDS.contestReward),
+        paidOnly: bool(m.earning?.contestRewards?.paidOnly, true),
       },
     },
     economy: Object.fromEntries(
@@ -647,7 +665,14 @@ export function validateMonetizationPatch(patch: any, nowMs: number = Date.now()
 
   const e = patch.earning;
   if (obj(e, "earning")) {
-    only(e, ["xpConversion"], "earning");
+    only(e, ["xpConversion", "contestRewards"], "earning");
+    if (obj(e.contestRewards, "earning.contestRewards")) {
+      only(e.contestRewards, ["enabled", "participation", "runnerUp", "paidOnly"], "earning.contestRewards");
+      isBool(e.contestRewards.enabled, "earning.contestRewards.enabled");
+      isBool(e.contestRewards.paidOnly, "earning.contestRewards.paidOnly");
+      isInt(e.contestRewards.participation, "earning.contestRewards.participation", BOUNDS.contestReward);
+      isInt(e.contestRewards.runnerUp, "earning.contestRewards.runnerUp", BOUNDS.contestReward);
+    }
     if (obj(e.xpConversion, "earning.xpConversion")) {
       only(e.xpConversion, ["enabled", "xpPerDiamond", "maxDiamondsPerDay"], "earning.xpConversion");
       isBool(e.xpConversion.enabled, "earning.xpConversion.enabled");

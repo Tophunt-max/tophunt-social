@@ -184,7 +184,7 @@ function Rules() {
             .filter((m) => m.level <= (Number(rest.maxLevel) || 100))
             .map((m) => ({ ...m, title: m.title.trim() || `Level ${m.level}`, coins: Number(m.coins || 0), feature: m.feature || null })),
           quests: (rest.quests as QuestRow[]).map((x) => ({
-            ...x, id: x.id.trim(), target: Number(x.target), xp: Number(x.xp), minLevel: Number(x.minLevel || 1), enabled: x.enabled !== false,
+            ...x, id: x.id.trim(), target: Number(x.target), xp: Number(x.xp), coins: Number(x.coins || 0), minLevel: Number(x.minLevel || 1), enabled: x.enabled !== false,
           })),
         },
       });
@@ -285,7 +285,7 @@ function Rules() {
 }
 
 // ------------------------------------------------------------ achievements
-const EMPTY_ACH = { id: "", name: "", description: "", icon: "trophy", category: "general", rarity: "common", metric: "wins", threshold: 1, xpReward: 25, itemId: "", repeatable: false, maxTiers: 1, active: true, hidden: false, sort: 0 };
+const EMPTY_ACH = { id: "", name: "", description: "", icon: "trophy", category: "general", rarity: "common", metric: "wins", threshold: 1, xpReward: 25, diamondReward: 0, itemId: "", repeatable: false, maxTiers: 1, active: true, hidden: false, sort: 0 };
 
 function Achievements() {
   const qc = useQueryClient();
@@ -294,7 +294,7 @@ function Achievements() {
   const [edit, setEdit] = useState<any>(null);
   const save = useMutation({
     mutationFn: () => api.gamification.saveAchievement(edit.id, {
-      ...edit, threshold: Number(edit.threshold), xpReward: Number(edit.xpReward), maxTiers: Number(edit.maxTiers), sort: Number(edit.sort), itemId: edit.itemId || null,
+      ...edit, threshold: Number(edit.threshold), xpReward: Number(edit.xpReward), diamondReward: Number(edit.diamondReward || 0), maxTiers: Number(edit.maxTiers), sort: Number(edit.sort), itemId: edit.itemId || null,
     }),
     onSuccess: () => { toast.success("Saved"); setEdit(null); qc.invalidateQueries({ queryKey: ["gam", "achievements"] }); },
     onError: (e) => toast.error(describeError(e)),
@@ -316,6 +316,7 @@ function Achievements() {
             </label>
             <label className="text-sm">Threshold<input type="number" className={field} value={edit.threshold} onChange={(e) => setEdit({ ...edit, threshold: e.target.value })} /></label>
             <label className="text-sm">XP reward<input type="number" className={field} value={edit.xpReward} onChange={(e) => setEdit({ ...edit, xpReward: e.target.value })} /></label>
+            <label className="text-sm">Diamond reward (per tier)<input type="number" min={0} className={field} value={edit.diamondReward ?? 0} onChange={(e) => setEdit({ ...edit, diamondReward: e.target.value })} /></label>
             <label className="text-sm">Category<input className={field} value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} /></label>
             <label className="text-sm">Rarity
               <select className={field} value={edit.rarity} onChange={(e) => setEdit({ ...edit, rarity: e.target.value })}>
@@ -343,6 +344,7 @@ function Achievements() {
           { key: "name", header: "Achievement", render: (a: any) => <div><p className="font-medium">{a.name}</p><p className="text-xs text-muted-foreground">{a.id} · {a.description}</p></div> },
           { key: "rule", header: "Rule", render: (a: any) => <span className="text-xs">{a.metric} ≥ {a.threshold}{a.repeatable ? ` ×${a.maxTiers}` : ""}</span> },
           { key: "xp", header: "XP", render: (a: any) => <span>{a.xpReward}</span> },
+          { key: "dia", header: "Diamond", render: (a: any) => <span>{a.diamondReward ?? 0}</span> },
           { key: "state", header: "State", render: (a: any) => <Badge variant={a.active ? "primary" : undefined}>{a.active ? "active" : "inactive"}</Badge> },
           { key: "n", header: "Unlocked by", render: (a: any) => <span>{fmtNumber(a.unlockedBy)}</span> },
           { key: "edit", header: "", render: (a: any) => <button className={btn2} onClick={() => setEdit({ ...a, itemId: a.itemId ?? "", _existing: true })}>Edit</button> },
