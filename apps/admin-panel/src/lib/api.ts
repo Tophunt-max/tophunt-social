@@ -1044,6 +1044,15 @@ export const api = {
       put<{ success: boolean; itemId: string }>(`/admin/monetization/store/items/${encodeURIComponent(itemId)}`, payload),
     purchases: (status?: string) => get<any[]>(`/admin/monetization/store/purchases${status ? `?status=${status}` : ""}`),
     refundPurchase: (id: string, reason: string) => post(`/admin/monetization/store/purchases/${encodeURIComponent(id)}/refund`, { reason }),
+    // Shop Collections + Diamond-priced Shop Bundles (worker lib/storeBundles.ts).
+    collections: () => get<{ collections: ShopCollection[] }>("/admin/monetization/collections"),
+    saveCollection: (id: string, body: ShopCollectionInput) => put<{ collection: ShopCollection }>(`/admin/monetization/collections/${encodeURIComponent(id)}`, body),
+    deleteCollection: (id: string) => del<{ ok: true }>(`/admin/monetization/collections/${encodeURIComponent(id)}`),
+    bundles: () => get<{ bundles: ShopBundle[] }>("/admin/monetization/bundles"),
+    saveBundle: (id: string, body: ShopBundleInput) => put<{ bundle: ShopBundle }>(`/admin/monetization/bundles/${encodeURIComponent(id)}`, body),
+    bundlePurchases: (status: "completed" | "refunded" | "all" = "all") =>
+      get<{ purchases: ShopBundlePurchase[] }>(`/admin/monetization/bundles/purchases?status=${status}`),
+    refundBundlePurchase: (id: string, reason: string) => post<{ ok: true }>(`/admin/monetization/bundles/purchases/${encodeURIComponent(id)}/refund`, { reason }),
     advertisers: () => get<any[]>("/admin/monetization/advertisers"),
     createAdvertiser: (payload: any) => post<{ id: string }>("/admin/monetization/advertisers", payload),
     updateAdvertiser: (id: string, payload: any) => patch(`/admin/monetization/advertisers/${encodeURIComponent(id)}`, payload),
@@ -1423,4 +1432,62 @@ export interface UserStatement {
     lockedAfter: number;
   }[];
   truncated: boolean;
+}
+
+// ---------------------------------------------------------------- Shop Collections + Bundles
+
+export type CollectionAccent = "violet" | "blue" | "plum" | "pink" | "purple" | "gold";
+
+export interface ShopCollectionInput {
+  name: string;
+  subtitle: string;
+  imageUrl: string | null;
+  accent: CollectionAccent;
+  sort: number;
+  active: boolean;
+  itemIds: string[];
+}
+
+export interface ShopCollection extends ShopCollectionInput {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ShopBundleInput {
+  name: string;
+  description: string;
+  imageUrl: string | null;
+  badge: string | null;
+  priceDiamonds: number;
+  compareAtDiamonds: number | null;
+  startsAt: number | null;
+  endsAt: number | null;
+  stockLimit: number | null;
+  sort: number;
+  active: boolean;
+  itemIds: string[];
+}
+
+export interface ShopBundle extends ShopBundleInput {
+  id: string;
+  soldCount: number;
+  purchases: number;
+  diamondsEarned: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ShopBundlePurchase {
+  id: string;
+  uid: string;
+  username?: string | null;
+  bundleId: string;
+  bundleName: string;
+  priceDiamonds: number;
+  granted: string[];
+  status: "completed" | "refunded";
+  createdAt: number;
+  refundedAt: number | null;
+  refundReason: string | null;
 }

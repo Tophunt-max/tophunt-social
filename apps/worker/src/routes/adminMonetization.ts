@@ -23,6 +23,17 @@ import { adRevenueImportJob, importConfigured } from "../lib/adRevenueImport";
 import { adPerformance, adsSuppressedUntil, clearAdsSuppression } from "../lib/adStats";
 import { GIFT_ID_RE, toGift, validateGiftInput } from "../lib/gifts";
 import { refundStorePurchase, validateListingInput } from "../lib/store";
+import {
+  assertCatalogItems,
+  BUNDLE_PURCHASE_TYPE,
+  BUNDLE_REFUND_TYPE,
+  refundBundlePurchase,
+  toAdminBundle,
+  toAdminBundlePurchase,
+  toAdminCollection,
+  validateBundleInput,
+  validateCollectionInput,
+} from "../lib/storeBundles";
 import { assertTypeChangeAllowed, CATALOG_CACHE_KEY, catalogUpsertStatement, itemOwnerCount, validateCatalogItemInput } from "../lib/catalogItem";
 import { invalidateGamificationCatalog } from "../lib/cosmetics";
 import {
@@ -372,6 +383,139 @@ export function registerMonetizationRoutes(
     return c.json(out);
   });
 
+  // ------------------------------------------------------------ shop collections + Diamond bundles (lib/storeBundles.ts)
+  // The app reads these through the per-user `getShopCollections` action, which
+  // is not edge-cached, so a save needs no purge.
+
+  /** Member item ids in admin order, by collection / bundle id (optionally for one owner). */
+  const itemIdsBy = async (env: Env, kind: "collection" | "bundle", id?: string) => {
+    const [table, col] = kind === "collection" ? ["store_collection_items", "collection_id"] : ["store_bundle_items", "bundle_id"];
+    const rows = ((await env.DB.prepare(
+      `SELECT ${col} AS owner, item_id FROM ${table} ${id ? `WHERE ${col} = ?` : ""} ORDER BY ${col}, position, item_id`,
+    ).bind(...(id ? [id] : [])).all<any>()).results ?? []) as any[];
+    const by = new Map<string, string[]>();
+    for (const r of rows) {
+      const list = by.get(r.owner) ?? [];
+      list.push(r.item_id);
+      by.set(r.owner, list);
+    }
+    return by;
+  };
+
+  adminRoute.get("/monetization/collections", async (c) => {
+    const rows = await c.env.DB.prepare(`SELECT * FROM store_collections ORDER BY sort, name, id`).all<any>();
+    const items = await itemIdsBy(c.env, "collection");
+    return c.json({ collections: (rows.results ?? []).map((r) => toAdminCollection(r, items.get(r.id) ?? [])) });
+  });
+
+  adminRoute.put("/monetization/collections/:id", async (c) => {
+    const id = c.req.param("id");
+    if (!ITEM_ID_RE.test(id)) throw httpsError("invalid-argument", "Collection id: 2-40 lowercase letters, digits, _ or -.");
+    const v = validateCollectionInput(await c.req.json<any>().catch(() => ({})));
+    await assertCatalogItems(c.env, v.itemIds, { requireActive: false });
+    const beforeRow = await c.env.DB.prepare(`SELECT * FROM store_collections WHERE id = ?`).bind(id).first<any>();
+    const before = beforeRow ? toAdminCollection(beforeRow, (await itemIdsBy(c.env, "collection", id)).get(id) ?? []) : null;
+    const ts = Date.now();
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO store_collections (id, name, subtitle, image_url, accent, sort, active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, subtitle = excluded.subtitle, image_url = excluded.image_url,
+           accent = excluded.accent, sort = excluded.sort, active = excluded.active, updated_at = excluded.updated_at`,
+      ).bind(id, v.name, v.subtitle, v.imageUrl, v.accent, v.sort, v.active, ts, ts),
+      c.env.DB.prepare(`DELETE FROM store_collection_items WHERE collection_id = ?`).bind(id),
+      ...v.itemIds.map((itemId, i) =>
+        c.env.DB.prepare(`INSERT INTO store_collection_items (collection_id, item_id, position) VALUES (?, ?, ?)`).bind(id, itemId, i),
+      ),
+    ]);
+    const row = await c.env.DB.prepare(`SELECT * FROM store_collections WHERE id = ?`).bind(id).first<any>();
+    const collection = toAdminCollection(row, v.itemIds);
+    await logAudit(c, before ? "store.collection.update" : "store.collection.create", "store_collection", id, { before, after: collection });
+    return c.json({ collection });
+  });
+
+  adminRoute.delete("/monetization/collections/:id", async (c) => {
+    const id = c.req.param("id");
+    if (!ITEM_ID_RE.test(id)) throw httpsError("invalid-argument", "Invalid collection id.");
+    const row = await c.env.DB.prepare(`SELECT * FROM store_collections WHERE id = ?`).bind(id).first<any>();
+    if (!row) throw httpsError("not-found", "Collection not found.");
+    const before = toAdminCollection(row, (await itemIdsBy(c.env, "collection", id)).get(id) ?? []);
+    await c.env.DB.batch([
+      c.env.DB.prepare(`DELETE FROM store_collection_items WHERE collection_id = ?`).bind(id),
+      c.env.DB.prepare(`DELETE FROM store_collections WHERE id = ?`).bind(id),
+    ]);
+    await logAudit(c, "store.collection.delete", "store_collection", id, { before, after: null });
+    return c.json({ ok: true });
+  });
+
+  const BUNDLE_STATS = `(SELECT COUNT(*) FROM store_bundle_purchases p WHERE p.bundle_id = b.id AND p.status = 'completed') AS purchases,
+    (SELECT COALESCE(SUM(p.price_diamonds), 0) FROM store_bundle_purchases p WHERE p.bundle_id = b.id AND p.status = 'completed') AS diamonds_earned`;
+
+  adminRoute.get("/monetization/bundles", async (c) => {
+    const rows = await c.env.DB.prepare(`SELECT b.*, ${BUNDLE_STATS} FROM store_bundles b ORDER BY b.sort, b.price_diamonds, b.id`).all<any>();
+    const items = await itemIdsBy(c.env, "bundle");
+    return c.json({ bundles: (rows.results ?? []).map((r) => toAdminBundle(r, items.get(r.id) ?? [])) });
+  });
+
+  adminRoute.get("/monetization/bundles/purchases", async (c) => {
+    const status = c.req.query("status");
+    const filter = status === "completed" || status === "refunded" ? "WHERE p.status = ?" : "";
+    const rows = await c.env.DB.prepare(
+      `SELECT p.*, u.username FROM store_bundle_purchases p LEFT JOIN users u ON u.uid = p.uid
+        ${filter} ORDER BY p.created_at DESC, p.id DESC LIMIT 200`,
+    ).bind(...(filter ? [status] : [])).all<any>();
+    return c.json({ purchases: (rows.results ?? []).map(toAdminBundlePurchase) });
+  });
+
+  adminRoute.put("/monetization/bundles/:id", async (c) => {
+    const id = c.req.param("id");
+    if (!ITEM_ID_RE.test(id)) throw httpsError("invalid-argument", "Bundle id: 2-40 lowercase letters, digits, _ or -.");
+    const v = validateBundleInput(await c.req.json<any>().catch(() => ({})));
+    await assertCatalogItems(c.env, v.itemIds, { requireActive: true });
+    const beforeRow = await c.env.DB.prepare(`SELECT b.*, ${BUNDLE_STATS} FROM store_bundles b WHERE b.id = ?`).bind(id).first<any>();
+    if (beforeRow && v.stockLimit !== null && v.stockLimit < Number(beforeRow.sold_count)) {
+      throw httpsError("invalid-argument", `Stock limit cannot be below the ${beforeRow.sold_count} already sold.`);
+    }
+    const before = beforeRow ? toAdminBundle(beforeRow, (await itemIdsBy(c.env, "bundle", id)).get(id) ?? []) : null;
+    // updated_at must move on every save: an in-flight purchase gated on the old value is refused.
+    const ts = Math.max(Date.now(), Number(beforeRow?.updated_at ?? 0) + 1);
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO store_bundles (id, name, description, image_url, badge, price_diamonds, compare_at_diamonds, starts_at, ends_at, stock_limit, sort, active, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description, image_url = excluded.image_url, badge = excluded.badge,
+           price_diamonds = excluded.price_diamonds, compare_at_diamonds = excluded.compare_at_diamonds, starts_at = excluded.starts_at,
+           ends_at = excluded.ends_at, stock_limit = excluded.stock_limit, sort = excluded.sort, active = excluded.active, updated_at = excluded.updated_at`,
+      ).bind(id, v.name, v.description, v.imageUrl, v.badge, v.priceDiamonds, v.compareAtDiamonds, v.startsAt, v.endsAt, v.stockLimit, v.sort, v.active, ts, ts),
+      c.env.DB.prepare(`DELETE FROM store_bundle_items WHERE bundle_id = ?`).bind(id),
+      ...v.itemIds.map((itemId, i) =>
+        c.env.DB.prepare(`INSERT INTO store_bundle_items (bundle_id, item_id, position) VALUES (?, ?, ?)`).bind(id, itemId, i),
+      ),
+    ]);
+    const row = await c.env.DB.prepare(`SELECT b.*, ${BUNDLE_STATS} FROM store_bundles b WHERE b.id = ?`).bind(id).first<any>();
+    const bundle = toAdminBundle(row, v.itemIds);
+    await logAudit(c, before ? "store.bundle.update" : "store.bundle.create", "store_bundle", id, { before, after: bundle });
+    return c.json({ bundle });
+  });
+
+  adminRoute.post("/monetization/bundles/purchases/:id/refund", async (c) => {
+    const id = c.req.param("id");
+    const reason = reasonOf(await c.req.json<any>().catch(() => ({})));
+    const before = await c.env.DB.prepare(`SELECT * FROM store_bundle_purchases WHERE id = ?`).bind(id).first<any>();
+    const out = await refundBundlePurchase(c.env, id, actorOf(c), reason);
+    await logAudit(c, "store.bundle.refund", "store_bundle_purchase", id, {
+      reason,
+      uid: out.uid,
+      diamonds: out.diamonds,
+      revoked: out.revoked,
+      before: before ? toAdminBundlePurchase(before) : null,
+      after: { status: "refunded", refundReason: reason },
+    });
+    // Refunded items were unequipped: drop the cached public profile now.
+    c.executionCtx.waitUntil(purgeShared(c, userCacheKey(out.uid)).catch(() => undefined));
+    return c.json({ ok: true });
+  });
+
   // ------------------------------------------------------------ sponsorships
 
   adminRoute.get("/monetization/advertisers", async (c) => {
@@ -632,15 +776,18 @@ export function registerMonetizationRoutes(
     const since = Date.now() - days * DAY_MS;
     const earnTypes = ["daily_reward", "daily_task", "referral_bonus", "verification_bonus", "signup_bonus", "ad_reward", "gamification_reward", "xp_conversion", "monthly_hall_of_fame_reward"];
     const spendTypes = ["gift_send", "store_purchase", "shop_order", "store_refund", "shop_refund"];
+    // Shop Bundles are paid in Diamonds (net of bundle refunds), reported apart from DP coin spend.
+    const diamondSpendTypes = [BUNDLE_PURCHASE_TYPE, BUNDLE_REFUND_TYPE];
     const ph = (a: string[]) => a.map(() => "?").join(",");
     const [ledger, orders] = await Promise.all([
       c.env.DB.prepare(
         `SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch') AS day,
                 COALESCE(SUM(CASE WHEN type IN (${ph(earnTypes)}) AND locked_delta > 0 THEN locked_delta ELSE 0 END), 0) AS diamonds_earned,
                 COALESCE(SUM(CASE WHEN type = 'contest_win_reward' AND amount > 0 THEN amount - locked_delta ELSE 0 END), 0) AS dp_won,
-                COALESCE(SUM(CASE WHEN type IN (${ph(spendTypes)}) THEN -amount ELSE 0 END), 0) AS dp_spent
+                COALESCE(SUM(CASE WHEN type IN (${ph(spendTypes)}) THEN -amount ELSE 0 END), 0) AS dp_spent,
+                COALESCE(SUM(CASE WHEN type IN (${ph(diamondSpendTypes)}) THEN -locked_delta ELSE 0 END), 0) AS diamonds_spent_shop
            FROM coin_transactions WHERE created_at >= ? GROUP BY day`,
-      ).bind(...earnTypes, ...spendTypes, since).all<any>(),
+      ).bind(...earnTypes, ...spendTypes, ...diamondSpendTypes, since).all<any>(),
       c.env.DB.prepare(
         `SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
            FROM shop_orders WHERE created_at >= ? AND status != 'cancelled' GROUP BY day`,
@@ -649,11 +796,11 @@ export function registerMonetizationRoutes(
     const byDay = new Map<string, any>();
     for (let i = days - 1; i >= 0; i--) {
       const d = utcDay(Date.now() - i * DAY_MS);
-      byDay.set(d, { date: d, diamondsEarned: 0, dpCoinWon: 0, dpCoinSpent: 0, orders: 0 });
+      byDay.set(d, { date: d, diamondsEarned: 0, dpCoinWon: 0, dpCoinSpent: 0, diamondsSpentShop: 0, orders: 0 });
     }
     for (const r of ledger.results ?? []) {
       const row = byDay.get(r.day);
-      if (row) Object.assign(row, { diamondsEarned: Number(r.diamonds_earned), dpCoinWon: Number(r.dp_won), dpCoinSpent: Number(r.dp_spent) });
+      if (row) Object.assign(row, { diamondsEarned: Number(r.diamonds_earned), dpCoinWon: Number(r.dp_won), dpCoinSpent: Number(r.dp_spent), diamondsSpentShop: Number(r.diamonds_spent_shop) });
     }
     for (const r of orders.results ?? []) {
       const row = byDay.get(r.day);
@@ -695,6 +842,9 @@ export function registerMonetizationRoutes(
     const EARN = ["daily_reward", "daily_task", "referral_bonus", "verification_bonus", "signup_bonus", "ad_reward", "gamification_reward", "monthly_hall_of_fame_reward", "xp_conversion", "admin_adjustment"];
     const SPEND = ["gift_send", "store_purchase", "shop_order"];
     const REFUND = ["store_refund", "shop_refund"];
+    // Diamond spend outside contests: Shop Bundles (lib/storeBundles.ts). Never DP coin.
+    const DIAMOND_SPEND = [BUNDLE_PURCHASE_TYPE];
+    const DIAMOND_REFUND = [BUNDLE_REFUND_TYPE];
     const cfg = parseMonetizationConfig(await getAppConfig(c.env));
     const values = coinValuesFromConfig(await getAppConfig(c.env));
     const diamondEarned = EARN.map((k) => ({ type: k, count: get(k).n, diamonds: Math.max(0, get(k).diamonds) })).filter((r) => r.count > 0);
@@ -718,6 +868,11 @@ export function registerMonetizationRoutes(
         earnedTotal: diamondEarned.reduce((s2, r) => s2 + r.diamonds, 0),
         contestEntries: { count: get("contest_entry_fee").n, diamonds: -get("contest_entry_fee").diamonds },
         contestRefunds: get("contest_refund").diamonds + get("contest_entry_refund").diamonds,
+        shopBundles: {
+          count: DIAMOND_SPEND.reduce((s2, k) => s2 + get(k).n, 0),
+          diamonds: DIAMOND_SPEND.reduce((s2, k) => s2 - get(k).diamonds, 0),
+          refunded: DIAMOND_REFUND.reduce((s2, k) => s2 + get(k).diamonds, 0),
+        },
       },
       dpCoin: {
         supply: Number(supply?.dp ?? 0),

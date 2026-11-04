@@ -412,7 +412,7 @@ export const FEATURE_ACTIONS: Record<FeatureKey, string[]> = {
   // Emergency switches for the closed loop. Turning one off stops new claims /
   // purchases; cancelling an order or viewing history keeps working.
   earning: ["claimDailyReward", "claimDailyTask", "claimAdReward", "startWebAd", "claimWebAdReward", "convertXp", "claimRewardGrant", "joinEvent", "claimEventTask"],
-  shopping: ["placeShopOrder", "buyStoreItem", "sendGift"],
+  shopping: ["placeShopOrder", "buyStoreItem", "buyStoreBundle", "sendGift"],
   posts: ["createPost"],
 };
 const ACTION_FEATURE = new Map<string, FeatureKey>(

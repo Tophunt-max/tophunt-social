@@ -1044,6 +1044,8 @@ describe('deletion completeness across the whole schema', () => {
     // Coin spends (migration 0072): the other half of the coin ledger rows, and
     // the refund replay guard. No personal data beyond the anonymised uid.
     store_purchases: 'financial record (coin spend + refund guard)',
+    // Migration 0088: Diamond spend on Shop Bundles, the ledger counterpart and refund guard.
+    store_bundle_purchases: 'financial record (Diamond spend + refund guard)',
     gift_transactions: 'financial record (coin spend; counterparty gift history)',
     // Migration 0073. Orders keep the DP coin ledger counterpart; the address is scrubbed.
     shop_orders: 'financial record (delivery address scrubbed)',

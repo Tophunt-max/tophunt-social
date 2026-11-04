@@ -17,8 +17,10 @@ import { parseMonetizationConfig } from "./monetizationConfig";
 import { getAppConfig } from "./settings";
 
 export const STORE_REFUND_REASON_PREFIX = "store_refund:";
+/** revoke_reason of items taken back by a bundle refund (lib/storeBundles.ts). */
+export const BUNDLE_REFUND_REASON_PREFIX = "store_bundle_refund:";
 
-const LIVE_LISTING_SQL = `l.active = 1 AND r.active = 1
+export const LIVE_LISTING_SQL = `l.active = 1 AND r.active = 1
   AND (l.starts_at IS NULL OR l.starts_at <= ?) AND (l.ends_at IS NULL OR l.ends_at > ?)
   AND (l.stock_limit IS NULL OR l.sold_count < l.stock_limit)`;
 
@@ -113,11 +115,12 @@ const toPurchase = (r: any, replayed: boolean): PurchaseResult => ({
 });
 
 /**
- * Not owned (an item revoked by a store refund may be bought again; one
- * revoked by an admin for another reason may not).
+ * Not owned (an item revoked by a store or bundle refund may be bought again;
+ * one revoked by an admin for another reason may not).
  */
 const NOT_OWNED_SQL = `NOT EXISTS (SELECT 1 FROM user_inventory i WHERE i.uid = ? AND i.item_id = ?
-  AND (i.revoked_at IS NULL OR COALESCE(i.revoke_reason, '') NOT LIKE '${STORE_REFUND_REASON_PREFIX}%'))`;
+  AND (i.revoked_at IS NULL OR (COALESCE(i.revoke_reason, '') NOT LIKE '${STORE_REFUND_REASON_PREFIX}%'
+                                AND COALESCE(i.revoke_reason, '') NOT LIKE '${BUNDLE_REFUND_REASON_PREFIX}%')))`;
 
 export async function buyStoreItem(
   env: Env,

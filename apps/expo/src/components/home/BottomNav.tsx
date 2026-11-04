@@ -28,6 +28,7 @@ export const BottomNav = ({ backgroundColor, isDark }: BottomNavProps) => {
   const insets = useSafeAreaInsets();
   const contestsEnabled = useFeature('contests'); // admin feature flag
   const storiesEnabled = useFeature('stories'); // admin feature flag
+  const shoppingEnabled = useFeature('shopping'); // admin feature flag (App Control)
   
   const animation = useRef(new Animated.Value(0)).current;
   const panY = useRef(new Animated.Value(0)).current;
@@ -99,8 +100,9 @@ export const BottomNav = ({ backgroundColor, isDark }: BottomNavProps) => {
     })
   ).current;
 
-  const NavItem = ({ icon: InactiveIcon, activeIcon: ActiveIcon, label, path }: any) => {
-    const isActive = pathname === path;
+  const NavItem = ({ icon: InactiveIcon, activeIcon: ActiveIcon, label, path, prefix }: any) => {
+    // `prefix`: the tab also stays active on its sub-screens (Shop → item, bundle, collections…).
+    const isActive = pathname === path || (prefix && pathname.startsWith(`${path}/`));
     const color = isActive ? activeColor : inactiveColor;
     const CurrentIcon = isActive ? ActiveIcon : InactiveIcon;
 
@@ -109,6 +111,9 @@ export const BottomNav = ({ backgroundColor, isDark }: BottomNavProps) => {
         style={styles.navItem} 
         onPress={() => handlePress(path)}
         activeOpacity={0.7}
+        accessibilityRole="tab"
+        accessibilityState={{ selected: isActive }}
+        accessibilityLabel={label}
       >
         <View style={styles.iconWrapper}>
             <CurrentIcon width={24} height={24} color={color} />
@@ -165,18 +170,34 @@ export const BottomNav = ({ backgroundColor, isDark }: BottomNavProps) => {
             style={styles.addTab} 
             onPress={openMenu}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Create"
         >
             <View style={styles.uploadButton}>
                 <Icons.Add_Icon width={22} height={22} color="#FFF" />
             </View>
+            <Text style={[styles.navLabel, styles.createLabel, { color: inactiveColor }]}>Create</Text>
         </TouchableOpacity>
 
-        <NavItem 
-            icon={Icons.Inbox_Light} 
-            activeIcon={Icons.Inbox_Dark} 
-            label="Inbox" 
-            path="/messages" 
-        />
+        {/* Shop takes the Inbox slot (design mock: Home · Explore · Create · Shop · Profile).
+            Inbox stays one tap away from the chat icon in the Home header. When an admin
+            turns Shopping off (App Control), the Inbox tab comes back here. */}
+        {shoppingEnabled ? (
+          <NavItem 
+              icon={Icons.Shop_Light} 
+              activeIcon={Icons.Shop_Dark} 
+              label="Shop" 
+              path="/shop" 
+              prefix
+          />
+        ) : (
+          <NavItem 
+              icon={Icons.Inbox_Light} 
+              activeIcon={Icons.Inbox_Dark} 
+              label="Inbox" 
+              path="/messages" 
+          />
+        )}
         <NavItem 
             icon={Icons.Profile_Light} 
             activeIcon={Icons.Profile_Dark} 
@@ -324,6 +345,10 @@ const styles = StyleSheet.create({
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
+  },
+  createLabel: {
+      fontFamily: 'Urbanist-Medium',
+      marginTop: 2,
   },
   uploadButton: {
       width: 48,

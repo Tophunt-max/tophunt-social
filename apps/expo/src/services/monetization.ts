@@ -15,7 +15,17 @@ import { setAdsSuppressedUntil } from '@/src/ads/optimizer';
 import { useAppConfig } from '@/src/services/appSettings';
 import type { SlotRule, SponsoredCampaign } from '@/src/lib/adSlots';
 import { GAMIFICATION_KEYS } from '@/src/services/gamification';
-import type { PublicDeals, PublicFeaturedDrop, PublicSlider } from '@/src/lib/shopModel';
+import {
+  EMPTY_SHOP_COLLECTIONS,
+  isUnknownActionError,
+  normalizeShopCollections,
+  type PublicDeals,
+  type PublicFeaturedDrop,
+  type PublicSlider,
+  type ShopBundleDef,
+  type ShopBundleItemDef,
+  type ShopCollectionDef,
+} from '@/src/lib/shopModel';
 
 // ------------------------------------------------------------------ config
 
@@ -121,6 +131,7 @@ export const MONETIZATION_KEYS = {
   giftWall: (uid: string) => ['gift-wall', uid] as const,
   store: ['digital-store'] as const,
   wishlist: ['store-wishlist'] as const,
+  collections: ['shop-collections'] as const,
   sponsored: ['sponsored-feed'] as const,
 };
 
@@ -220,6 +231,68 @@ export function useBuyStoreItem() {
     mutationFn: (v: { item: StoreItemView; requestId: string }) =>
       callApi('buyStoreItem', { itemId: v.item.itemId, expectedPrice: v.item.priceCoins, requestId: v.requestId }, { retries: 1 }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: MONETIZATION_KEYS.store });
+      qc.invalidateQueries({ queryKey: GAMIFICATION_KEYS.inventory });
+      qc.invalidateQueries({ queryKey: ['profile'] });
+    },
+  });
+}
+
+// ------------------------------------------------------------------ admin collections + Diamond bundles
+
+/** An admin-curated group of store items (shown in the phone "Popular Collection"). */
+export type PublicShopCollection = ShopCollectionDef;
+/** One item inside a bundle. */
+export type PublicShopBundleItem = ShopBundleItemDef;
+/** A Diamond-priced bundle of digital items (items only). */
+export type PublicShopBundle = ShopBundleDef;
+export interface ShopCollectionsView {
+  collections: PublicShopCollection[];
+  bundles: PublicShopBundle[];
+}
+
+export interface BundlePurchaseResult {
+  id: string;
+  bundleId: string;
+  priceDiamonds: number;
+  granted: string[];
+  replayed: boolean;
+}
+
+/**
+ * Admin collections and bundles (empty arrays while the store is off). An
+ * older server that does not know `getShopCollections` answers as "none"
+ * instead of an error, so the Shop keeps its automatic blocks.
+ */
+export function useShopCollections(enabled: boolean) {
+  return useQuery({
+    queryKey: MONETIZATION_KEYS.collections,
+    queryFn: async (): Promise<ShopCollectionsView> => {
+      try {
+        return normalizeShopCollections(await callApi('getShopCollections'));
+      } catch (e) {
+        if (isUnknownActionError(e)) return EMPTY_SHOP_COLLECTIONS;
+        throw e;
+      }
+    },
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+/** Buy a bundle with Diamonds. The server re-checks price, schedule, stock, ownership and balance. */
+export function useBuyStoreBundle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { bundle: PublicShopBundle; requestId: string }) =>
+      callApi(
+        'buyStoreBundle',
+        { bundleId: v.bundle.id, expectedPrice: v.bundle.priceDiamonds, requestId: v.requestId },
+        // Safe to retry: the server de-duplicates on requestId.
+        { retries: 1 },
+      ) as Promise<{ success: true; purchase: BundlePurchaseResult }>,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: MONETIZATION_KEYS.collections });
       qc.invalidateQueries({ queryKey: MONETIZATION_KEYS.store });
       qc.invalidateQueries({ queryKey: GAMIFICATION_KEYS.inventory });
       qc.invalidateQueries({ queryKey: ['profile'] });

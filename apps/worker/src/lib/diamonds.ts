@@ -2,8 +2,9 @@
  * Diamonds and DP coins: the two balances a user sees.
  *
  *   Diamond   users.locked_coins. Free: the ONLY way to pay a contest entry
- *             fee. Comes from the signup bonus, daily rewards, tasks, ads,
- *             referrals, Hall of Fame and XP conversion.
+ *             fee, and the price of Shop Bundles (items only,
+ *             lib/storeBundles.ts). Comes from the signup bonus, daily
+ *             rewards, tasks, ads, referrals, Hall of Fame and XP conversion.
  *   DP coin   users.dpcoin - users.locked_coins. Contest prizes, spent only in
  *             Shopping (gifts, digital items, physical products).
  *

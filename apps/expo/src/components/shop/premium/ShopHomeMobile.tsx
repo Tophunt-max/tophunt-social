@@ -23,8 +23,9 @@ import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { Ionicons } from '@/src/lib/icons';
-import { discountOf, type CardTag, type CategoryTile, type DealCardView, type DealsSummary, type PopularCollection, type ShopNav } from '@/src/lib/shopModel';
+import { discountOf, type CardTag, type CategoryTile, type CollectionCard, type DealCardView, type DealsSummary, type PopularCollection, type ShopNav } from '@/src/lib/shopModel';
 import {
+  SHOP_ACCENT_GRADS,
   SHOP_DARK_CARD,
   SHOP_DEALS_GRAD,
   SHOP_POPULAR_GRADS,
@@ -62,8 +63,8 @@ const slopFor = (h: number) => {
 // ------------------------------------------------------------------ shared bits
 
 export function SectionHeaderM({
-  p, u, icon, title, action, right, style,
-}: { p: TophuntPalette; u: number; icon: React.ReactNode; title: string; action?: { label: string; onPress: () => void }; right?: React.ReactNode; style?: any }) {
+  p, u, icon, title, titleAccessory, action, right, style,
+}: { p: TophuntPalette; u: number; icon: React.ReactNode; title: string; titleAccessory?: React.ReactNode; action?: { label: string; onPress: () => void }; right?: React.ReactNode; style?: any }) {
   const S = MOCK_M.section;
   const link = mfont(S.link, u);
   const color = linkColor(p);
@@ -71,6 +72,7 @@ export function SectionHeaderM({
     <View style={[styles.head, { height: px(S.h, u), gap: px(6, u) }, style]}>
       {icon}
       <Text style={[styles.headTitle, { fontSize: mfont(S.title, u), color: p.text }]} accessibilityRole="header" numberOfLines={1}>{title}</Text>
+      {titleAccessory}
       <View style={{ flex: 1 }} />
       {right}
       {action ? (
@@ -408,37 +410,97 @@ export function DealCardM({
 
 // ------------------------------------------------------------------ popular collection (2 columns)
 
-const PopularCardM = React.memo(function PopularCardM({
-  c, index, u, width, viewer, onPress,
-}: { c: PopularCollection<StoreItemView>; index: number; u: number; width: number; viewer: Viewer; onPress: (c: PopularCollection<StoreItemView>) => void }) {
+/** The Popular Collection card look (gradient, art on the left, title + subtitle, crown and arrow). */
+function CollectionCardShell({
+  u, width, grad, art, title, subtitle, a11y, onPress,
+}: { u: number; width: number; grad: [string, string]; art: React.ReactNode; title: string; subtitle: string; a11y: string; onPress: () => void }) {
   const P = MOCK_M.popular;
   const r = px(P.radius, u);
-  const art = px(P.art, u);
+  const size = px(P.art, u);
   const titleFs = mfont(P.title, u);
   const subFs = mfont(P.sub, u);
-  const grad = SHOP_POPULAR_GRADS[index % SHOP_POPULAR_GRADS.length];
   return (
     <TouchableOpacity
-      onPress={() => onPress(c)}
+      onPress={onPress}
       activeOpacity={0.88}
       accessibilityRole="button"
-      accessibilityLabel={`${c.title}: ${c.subtitle}, ${c.count} items. Dekho`}
-      style={{ width, minHeight: px(P.h, u), borderRadius: r }}
+      accessibilityLabel={a11y}
+      style={{ width, minHeight: Math.max(40, px(P.h, u)), borderRadius: r }}
     >
       <LinearGradient colors={grad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.popular, { minHeight: px(P.h, u), borderRadius: r, paddingLeft: px(4, u), paddingRight: px(22, u), paddingVertical: px(6, u), gap: px(5, u) }]}>
-        <View style={{ width: art, height: art }} pointerEvents="none">
-          <ProductPreview item={c.art} viewer={viewer} width={art} height={art} radius={px(8, u)} bare />
-        </View>
+        <View style={{ width: size, height: size }} pointerEvents="none">{art}</View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.popTitle, { fontSize: titleFs, lineHeight: titleFs * 1.15 }]} numberOfLines={2}>{c.title}</Text>
-          <Text style={[styles.popSub, { fontSize: subFs, lineHeight: subFs * 1.25 }]} numberOfLines={2}>{c.subtitle}</Text>
+          <Text style={[styles.popTitle, { fontSize: titleFs, lineHeight: titleFs * 1.15 }]} numberOfLines={2}>{title}</Text>
+          {subtitle ? <Text style={[styles.popSub, { fontSize: subFs, lineHeight: subFs * 1.25 }]} numberOfLines={2}>{subtitle}</Text> : null}
         </View>
         <View style={[styles.abs, { top: px(5, u), right: px(6, u) }]} pointerEvents="none"><CrownIcon size={px(12, u)} /></View>
         <View style={[styles.abs, { bottom: px(5, u), right: px(5, u) }]}><ArrowCircle u={u} size={16} /></View>
       </LinearGradient>
     </TouchableOpacity>
   );
+}
+
+const PopularCardM = React.memo(function PopularCardM({
+  c, index, u, width, viewer, onPress,
+}: { c: PopularCollection<StoreItemView>; index: number; u: number; width: number; viewer: Viewer; onPress: (c: PopularCollection<StoreItemView>) => void }) {
+  const art = px(MOCK_M.popular.art, u);
+  return (
+    <CollectionCardShell
+      u={u}
+      width={width}
+      grad={SHOP_POPULAR_GRADS[index % SHOP_POPULAR_GRADS.length]}
+      art={<ProductPreview item={c.art} viewer={viewer} width={art} height={art} radius={px(8, u)} bare />}
+      title={c.title}
+      subtitle={c.subtitle}
+      a11y={`${c.title}: ${c.subtitle}, ${c.count} items. Dekho`}
+      onPress={() => onPress(c)}
+    />
+  );
 });
+
+/** One admin collection: the accent gradient, the admin image (else its best live item), name and subtitle. */
+export const AdminCollectionCardM = React.memo(function AdminCollectionCardM({
+  card, u, width, viewer, onPress,
+}: { card: CollectionCard<StoreItemView>; u: number; width: number; viewer: Viewer; onPress: (id: string) => void }) {
+  const art = px(MOCK_M.popular.art, u);
+  const c = card.collection;
+  return (
+    <CollectionCardShell
+      u={u}
+      width={width}
+      grad={SHOP_ACCENT_GRADS[c.accent] ?? SHOP_ACCENT_GRADS.violet}
+      art={c.imageUrl ? (
+        <AppImage source={{ uri: c.imageUrl }} displayWidth={art} style={{ width: art, height: art, borderRadius: px(8, u) }} contentFit="cover" transition={150} accessibilityIgnoresInvertColors />
+      ) : (
+        <ProductPreview item={card.art} viewer={viewer} width={art} height={art} radius={px(8, u)} bare />
+      )}
+      title={c.name}
+      subtitle={card.subtitle}
+      a11y={`${c.name}${card.subtitle ? `: ${card.subtitle}` : ''}, ${card.items.length} items. Dekho`}
+      onPress={() => onPress(c.id)}
+    />
+  );
+});
+
+/** Admin collections in rows of 2 (same grid as PopularCollectionsM). */
+export function AdminCollectionsM({
+  cards, u, inner, viewer, onPress,
+}: { cards: CollectionCard<StoreItemView>[]; u: number; inner: number; viewer: Viewer; onPress: (id: string) => void }) {
+  const P = MOCK_M.popular;
+  const gap = px(P.gap, u);
+  const w = cellWidth(inner, P.cols, gap);
+  const rows: CollectionCard<StoreItemView>[][] = [];
+  for (let k = 0; k < cards.length; k += P.cols) rows.push(cards.slice(k, k + P.cols));
+  return (
+    <View style={{ gap }}>
+      {rows.map((row, k) => (
+        <View key={k} style={[styles.row, { gap, alignItems: 'stretch' }]}>
+          {row.map((c) => <AdminCollectionCardM key={c.collection.id} card={c} u={u} width={w} viewer={viewer} onPress={onPress} />)}
+        </View>
+      ))}
+    </View>
+  );
+}
 
 /** Up to 6 real collections (popularCollections) in rows of 2; a row's cards share its height. */
 export function PopularCollectionsM({

@@ -13,20 +13,24 @@ Settings, Referrals, Rewards) link there, so each setting has one editor.
 | Coin | Comes from | Used for | Admin (Coin Economy tab) |
 |---|---|---|---|
 | ⚡ XP | Playing (votes, contests, wins, daily activity) | Levels, and **converting to Diamonds** (`xp - xp_converted`; XP never goes down) | ⚡ XP: rate (XP per Diamond), daily cap |
-| 💎 Diamond (`users.locked_coins`) | Free only: check-in, tasks, referral, verification, verified ads, level/season, Hall of Fame, XP conversion. Never bought (deposits retired) | **Contest entry fees only** | 💎 Diamond: every earning setting, contest P&L |
+| 💎 Diamond (`users.locked_coins`) | Free only: check-in, tasks, referral, verification, verified ads, level/season, Hall of Fame, XP conversion. Never bought (deposits retired) | **Contest entry fees and Shop Bundles** (bundles contain items only, never DP coin or Diamonds) | 💎 Diamond: every earning setting, contest P&L |
 | 🪙 DP coin (`dpcoin - locked_coins`) | Only by winning contests | **All shopping**: digital items, gifts, physical products. Never withdrawn (withdrawals retired) | 🪙 DP coin: won vs spent, shop/digital/gift switches, **monthly shop budget (₹)**, fraud rules |
 
 - Free rewards are always Diamonds; the server refuses `rewardLocking: false`. There is no Diamond → DP coin conversion.
+- **Shop Bundles** (admin: Shopping → Bundles, `lib/storeBundles.ts`) are the only Diamond spend besides contest
+  entry: 2-12 catalogue items for a Diamond price, once per user. Contents are items only, so a bundle can never turn
+  Diamonds into DP coin. Shopping → Collections only groups items for the Shop home; it sells nothing itself.
 - ₹ per coin: Coin Economy → Coin value (`coinPricing.dpCoinInr` prices products; `diamondInr` is for reports).
 - **Spend limit:** `monetization.shop.monthlyBudgetInr` caps the ₹ value of physical shop orders per calendar month
   (UTC), checked again inside the checkout transaction. Cancelled/returned orders free their share. 0 = no limit.
   Digital items and gifts are not counted (they cost nothing to deliver).
 - Report: `GET /admin/monetization/coins` (XP / Diamond / DP coin supply, earned, spent, shop budget meter).
 - Ledger types: `xp_conversion` (Diamond in), `contest_entry_fee` (Diamond out), `contest_win_reward` (DP coin in),
-  `gift_send`, `store_purchase`, `shop_order` (DP coin out), `store_refund`, `shop_refund`, and the one-off
+  `gift_send`, `store_purchase`, `shop_order` (DP coin out), `store_refund`, `shop_refund`,
+  `store_bundle_purchase` (Diamond out: `amount = locked_delta = -price`), `store_bundle_refund` (Diamond back), and the one-off
   `economy_reset` of 2026-10-30. Every one is written in the same batch as the balance change, so the invariants below hold.
 - Real money is removed entirely: no purchases, deposits, withdrawals or coin packages (see MONETIZATION.md).
-- `users.dpcoin` is the total; every ledger row's `locked_delta` is its Diamond part, so both ledger invariants cover both balances. Entry fee: `MIN(locked_coins, dpcoin) >= fee`, all Diamonds (`lib/diamonds.ts`); a refund returns Diamonds.
+- `users.dpcoin` is the total; every ledger row's `locked_delta` is its Diamond part, so both ledger invariants cover both balances. Entry fee: `MIN(locked_coins, dpcoin) >= fee`, all Diamonds (`lib/diamonds.ts`); a refund returns Diamonds. Bundle purchases use the same cover check (`diamondSpendStatements`, `lib/coinSpend.ts`).
 
 ### Signup bonus (paid only after verification, `lib/verificationReward.ts`)
 

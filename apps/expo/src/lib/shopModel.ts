@@ -1202,3 +1202,296 @@ export function popularCollections<T extends ShopItem>(items: T[], max = POPULAR
   }
   return out.slice(0, cap);
 }
+
+// ------------------------------------------------------------------ admin collections + Diamond bundles
+
+/** Named card gradients an admin can pick for a collection (tophuntTokens SHOP_ACCENT_GRADS). */
+export const SHOP_ACCENTS = ['violet', 'blue', 'plum', 'pink', 'purple', 'gold'] as const;
+export type ShopAccent = (typeof SHOP_ACCENTS)[number];
+
+/** One admin collection from getShopCollections (worker). */
+export interface ShopCollectionDef {
+  id: string;
+  name: string;
+  subtitle: string;
+  imageUrl: string | null;
+  accent: ShopAccent;
+  /** Store item ids, in the admin's order. */
+  itemIds: string[];
+}
+
+/** One item inside a bundle, as the server describes it (it need not be on sale on its own). */
+export interface ShopBundleItemDef {
+  itemId: string;
+  type: string;
+  name: string;
+  rarity: string;
+  asset: Record<string, any>;
+  owned: boolean;
+}
+
+/** One Diamond-priced bundle of digital items from getShopCollections. */
+export interface ShopBundleDef {
+  id: string;
+  name: string;
+  description: string;
+  imageUrl: string | null;
+  badge: string | null;
+  priceDiamonds: number;
+  compareAtDiamonds: number | null;
+  startsAt: number | null;
+  endsAt: number | null;
+  remaining: number | null;
+  items: ShopBundleItemDef[];
+  ownedCount: number;
+  purchased: boolean;
+}
+
+export interface ShopCollectionsData {
+  collections: ShopCollectionDef[];
+  bundles: ShopBundleDef[];
+}
+
+export const EMPTY_SHOP_COLLECTIONS: ShopCollectionsData = { collections: [], bundles: [] };
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null);
+const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/**
+ * Defensive parse of the getShopCollections answer: entries without an id /
+ * name / valid price are dropped, an unknown accent becomes violet, missing
+ * arrays become []. Never throws.
+ */
+export function normalizeShopCollections(raw: unknown): ShopCollectionsData {
+  const r = (raw ?? {}) as { collections?: unknown; bundles?: unknown };
+  const collections: ShopCollectionDef[] = [];
+  for (const c of Array.isArray(r.collections) ? r.collections : []) {
+    if (!c || typeof c !== 'object') continue;
+    const id = str(c.id);
+    const name = str(c.name).trim();
+    if (!id || !name) continue;
+    const accent = (SHOP_ACCENTS as readonly string[]).includes(c.accent) ? (c.accent as ShopAccent) : 'violet';
+    const itemIds = Array.isArray(c.itemIds) ? c.itemIds.filter((x: unknown): x is string => typeof x === 'string' && !!x) : [];
+    collections.push({ id, name, subtitle: str(c.subtitle).trim(), imageUrl: strOrNull(c.imageUrl), accent, itemIds });
+  }
+  const bundles: ShopBundleDef[] = [];
+  for (const b of Array.isArray(r.bundles) ? r.bundles : []) {
+    if (!b || typeof b !== 'object') continue;
+    const id = str(b.id);
+    const name = str(b.name).trim();
+    const price = numOrNull(b.priceDiamonds);
+    if (!id || !name || price === null || price < 0) continue;
+    const items: ShopBundleItemDef[] = [];
+    for (const i of Array.isArray(b.items) ? b.items : []) {
+      if (!i || typeof i !== 'object' || !str(i.itemId)) continue;
+      items.push({
+        itemId: i.itemId,
+        type: str(i.type),
+        name: str(i.name) || i.itemId,
+        rarity: str(i.rarity) || 'common',
+        asset: i.asset && typeof i.asset === 'object' ? i.asset : {},
+        owned: i.owned === true,
+      });
+    }
+    const compare = numOrNull(b.compareAtDiamonds);
+    const owned = numOrNull(b.ownedCount);
+    bundles.push({
+      id,
+      name,
+      description: str(b.description).trim(),
+      imageUrl: strOrNull(b.imageUrl),
+      badge: strOrNull(b.badge)?.trim() ?? null,
+      priceDiamonds: Math.floor(price),
+      compareAtDiamonds: compare !== null && compare > price ? Math.floor(compare) : null,
+      startsAt: numOrNull(b.startsAt),
+      endsAt: numOrNull(b.endsAt),
+      remaining: numOrNull(b.remaining),
+      items,
+      ownedCount: owned !== null ? Math.max(0, Math.floor(owned)) : items.filter((i) => i.owned).length,
+      purchased: b.purchased === true,
+    });
+  }
+  return { collections, bundles };
+}
+
+/**
+ * True when a getShopCollections failure only means "this server does not
+ * know the action yet" (older Worker): a 404 without a reason, an `unknown_action` reason, or
+ * the router's 400 "Action '…' nahi mila." / "Unknown action". The Shop then
+ * behaves as if no collections exist, without an error banner.
+ */
+export function isUnknownActionError(e: unknown): boolean {
+  const err = (e ?? {}) as { status?: number; reason?: string; message?: string };
+  if (err.reason === 'unknown_action') return true;
+  // A 404 with a reason is a real answer (e.g. bundle_unavailable), not a missing action.
+  if (err.status === 404 && !err.reason) return true;
+  return err.status === 400 && !err.reason && /unknown action|action '.*' nahi mila/i.test(String(err.message ?? ''));
+}
+
+/** The collection's store items, in the admin's order; ids not on sale (or repeated) are dropped. */
+export function collectionItems<T extends ShopItem>(collection: Pick<ShopCollectionDef, 'itemIds'>, storeItems: T[]): T[] {
+  const byId = new Map((storeItems ?? []).map((i) => [i.itemId, i]));
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const id of collection.itemIds ?? []) {
+    const i = byId.get(id);
+    if (!i || seen.has(id)) continue;
+    seen.add(id);
+    out.push(i);
+  }
+  return out;
+}
+
+/** The best item of a list (rarest, then priciest): a collection's card art. */
+export function bestItem<T extends ShopItem>(items: T[]): T | null {
+  return items.length ? [...items].sort(byRarityThenPrice)[0] : null;
+}
+
+export interface CollectionCard<T extends ShopItem = ShopItem> {
+  collection: ShopCollectionDef;
+  items: T[];
+  /** The best live item (art when there is no admin image). */
+  art: T;
+  /** The admin subtitle, else the real item types ("Frames, Badges & Titles"). */
+  subtitle: string;
+}
+
+/** Admin collections with at least one item on sale, in the admin's order. */
+export function collectionCards<T extends ShopItem>(collections: ShopCollectionDef[], storeItems: T[]): CollectionCard<T>[] {
+  const out: CollectionCard<T>[] = [];
+  for (const c of collections ?? []) {
+    const items = collectionItems(c, storeItems);
+    const art = bestItem(items);
+    if (!art) continue;
+    out.push({ collection: c, items, art, subtitle: c.subtitle || andList(typeLine(items).split(' • ').filter(Boolean)) });
+  }
+  return out;
+}
+
+/** "Frame, Badge & Title": the distinct types of a bundle's items, in display order. */
+export function bundleTypeLine(items: Pick<ShopItem, 'type'>[]): string {
+  const present = new Set((items ?? []).map((i) => i.type).filter(Boolean));
+  const known = CATEGORY_DEFS.map((d) => d.type).filter((t) => present.has(t));
+  const extra = [...present].filter((t) => !TYPE_ONE[t]).sort();
+  return andList([...known, ...extra].map((t) => TYPE_ONE[t] ?? t.charAt(0).toUpperCase() + t.slice(1)));
+}
+
+/** "3 items • Frame, Badge & Title". */
+export function bundleItemsLine(items: Pick<ShopItem, 'type'>[]): string {
+  const n = (items ?? []).length;
+  const types = bundleTypeLine(items);
+  return `${n} ${n === 1 ? 'item' : 'items'}${types ? ` • ${types}` : ''}`;
+}
+
+/** Real discount percent from the compare-at price (0 = none). */
+export function bundleDiscount(b: Pick<ShopBundleDef, 'priceDiamonds' | 'compareAtDiamonds'>): number {
+  const c = Number(b.compareAtDiamonds);
+  if (!Number.isFinite(c) || c <= b.priceDiamonds || c <= 0) return 0;
+  return Math.round(((c - b.priceDiamonds) / c) * 100);
+}
+
+/** On sale right now: started, not ended, not sold out. */
+export function bundleAvailable(b: Pick<ShopBundleDef, 'startsAt' | 'endsAt' | 'remaining'>, now: number): boolean {
+  if (typeof b.startsAt === 'number' && b.startsAt > now) return false;
+  if (typeof b.endsAt === 'number' && b.endsAt <= now) return false;
+  if (typeof b.remaining === 'number' && b.remaining <= 0) return false;
+  return true;
+}
+
+/** Bundles worth a card: available ones, plus ones the user bought (shown as Owned). */
+export function visibleBundles<T extends ShopBundleDef>(bundles: T[], now: number): T[] {
+  return (bundles ?? []).filter((b) => b.purchased || bundleAvailable(b, now));
+}
+
+/** True when every item of the bundle is already in the user's collection. */
+export function bundleAllOwned(b: Pick<ShopBundleDef, 'items' | 'ownedCount'>): boolean {
+  const n = b.items.length;
+  return n > 0 && (b.ownedCount >= n || b.items.every((i) => i.owned));
+}
+
+export type BundleState = 'buy' | 'owned' | 'all_owned' | 'short' | 'signin' | 'unavailable';
+
+/**
+ * What the bundle's buy button does. Bought → 'owned'; signed out → 'signin';
+ * not on sale (with `now`) → 'unavailable'; every item owned → 'all_owned';
+ * a known Diamond balance below the price → 'short' (earn CTA); else 'buy'.
+ * An unknown balance never blocks: the server decides.
+ */
+export function bundleState(
+  b: ShopBundleDef,
+  opts: { live: boolean; diamonds: number; signedIn: boolean; now?: number },
+): BundleState {
+  if (b.purchased) return 'owned';
+  if (!opts.signedIn) return 'signin';
+  if (typeof opts.now === 'number' && !bundleAvailable(b, opts.now)) return 'unavailable';
+  if (bundleAllOwned(b)) return 'all_owned';
+  if (isShort(opts.diamonds, b.priceDiamonds, opts.live)) return 'short';
+  return 'buy';
+}
+
+/** "2 of 3 already owned — sirf baaki 1 item milega", or null when none is owned. */
+export function bundleOwnedNote(b: Pick<ShopBundleDef, 'items' | 'ownedCount'>): string | null {
+  const total = b.items.length;
+  const owned = Math.min(total, Math.max(0, b.ownedCount));
+  if (!owned || !total) return null;
+  const left = total - owned;
+  return `${owned} of ${total} already owned — sirf baaki ${left} ${left === 1 ? 'item milega' : 'items milenge'}`;
+}
+
+/** "Sirf 5 bache" only for a real stock number. */
+export function bundleStockLabel(remaining: unknown): string | null {
+  return typeof remaining === 'number' && Number.isFinite(remaining) && remaining > 0 ? `Sirf ${Math.floor(remaining)} bache` : null;
+}
+
+export type BundleErrorKind =
+  | 'insufficient'
+  | 'owned'
+  | 'all_owned'
+  | 'price_changed'
+  | 'unavailable'
+  | 'store_closed'
+  | 'invalid'
+  | 'network'
+  | 'other';
+
+export interface BundleErrorView {
+  kind: BundleErrorKind;
+  title: string;
+  message: string;
+  /** Retry with the SAME request id (the server may already have the purchase). */
+  retrySameRequest: boolean;
+  /** Reload the bundles (price / stock / schedule changed). */
+  refresh: boolean;
+}
+
+/**
+ * Map a buyStoreBundle failure to what the bundle sheet shows. No HTTP status
+ * = no server answer: retried with the same request id, so it cannot charge twice.
+ */
+export function bundleErrorView(e: unknown): BundleErrorView {
+  const err = (e ?? {}) as { status?: number; reason?: string; message?: string };
+  const view = (kind: BundleErrorKind, title: string, message: string, extra: Partial<BundleErrorView> = {}): BundleErrorView => ({
+    kind, title, message, retrySameRequest: false, refresh: false, ...extra,
+  });
+  switch (err.reason) {
+    case 'not_enough_diamonds':
+      return view('insufficient', 'Diamond kam hain', 'Is bundle ke liye aapke paas Diamond kaafi nahi hain. Diamond kamao aur wapas aao.');
+    case 'already_purchased':
+      return view('owned', 'Bundle pehle se aapka hai', 'Ye bundle aap pehle hi kharid chuke ho. Items aapke collection mein hain.', { refresh: true });
+    case 'already_owned':
+      return view('all_owned', 'Sab items aapke paas hain', 'Is bundle ke saare items aapke collection mein already hain.', { refresh: true });
+    case 'price_changed':
+      return view('price_changed', 'Price badal gaya', 'Is bundle ka price abhi update hua hai. Naya price dekh kar dobara confirm karo.', { refresh: true });
+    case 'bundle_unavailable':
+      return view('unavailable', 'Bundle available nahi hai', 'Ye bundle ab sale par nahi hai ya stock khatam ho gaya.', { refresh: true });
+    case 'store_disabled':
+      return view('store_closed', 'Store abhi band hai', 'Digital store thodi der ke liye band hai. Baad mein try karo.');
+    case 'invalid_request':
+      return view('invalid', 'Purchase nahi hua', 'Request sahi nahi thi. Screen refresh karke dobara try karo.', { refresh: true });
+  }
+  if (!err.status) {
+    return view('network', 'Connection nahi hua', 'Network issue. Dobara try karo: ye wahi request hai, isliye double charge nahi hoga.', { retrySameRequest: true });
+  }
+  return view('other', 'Purchase nahi hua', err.message || 'Kuch galat ho gaya. Thodi der baad try karo.');
+}
