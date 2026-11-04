@@ -12,12 +12,13 @@ import { useLocalSearchParams } from 'expo-router';
 import { BackButton } from '@/src/components/ui/BackButton';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useDesignWindow } from '@/src/lib/layout';
-import type { EarningArtKey } from '@/assets/earning';
 import { Art, RC, StateNote } from '@/src/components/rewardsCenter/RewardsBits';
 import { useRewardHistory } from '@/src/services/rewardHistory';
 import {
   REWARD_HISTORY_TABS,
   historyAmounts,
+  historyArt,
+  isReversedRow,
   historyDay,
   historyTabOf,
   historyTitle,
@@ -26,40 +27,6 @@ import {
   type HistoryTab,
   type RewardHistoryItem,
 } from '@/src/lib/rewardHistory';
-
-const COIN_ART: Record<string, EarningArtKey> = {
-  daily_reward: 'checkIn',
-  daily_task: 'dailyMission',
-  quest_reward: 'weeklyMission',
-  achievement_reward: 'achievement',
-  contest_reward: 'participation',
-  contest_win_reward: 'winnerCrown',
-  contest_entry_fee: 'contest',
-  contest_refund: 'contest',
-  contest_entry_refund: 'contest',
-  event_reward: 'eventGiftBox',
-  ad_reward: 'watchEarn',
-  xp_conversion: 'xpConvert',
-  referral_bonus: 'referralGift',
-  referral_clawback: 'referral',
-  gamification_reward: 'levelUp',
-  monthly_hall_of_fame_reward: 'topEarnerCrown',
-  signup_bonus: 'giftBox',
-  verification_bonus: 'giftBox',
-  promo_bonus: 'giftBox',
-};
-
-const XP_ART: Record<string, EarningArtKey> = {
-  vote: 'missionVote',
-  contest_entry: 'missionContest',
-  match_win: 'winnerCrown',
-  match_loss: 'participation',
-  daily_checkin: 'checkIn',
-  daily_task: 'dailyMission',
-  quest: 'weeklyMission',
-  achievement: 'achievement',
-  hall_of_fame: 'topEarnerCrown',
-};
 
 const UNIT: Record<AmountUnit, { suffix: string; color: string }> = {
   diamond: { suffix: '💎', color: RC.cyan },
@@ -153,8 +120,8 @@ export default function RewardHistoryScreen() {
 const Row = React.memo(function Row({ item }: { item: RewardHistoryItem }) {
   const title = historyTitle(item);
   const amounts = historyAmounts(item);
-  const art: EarningArtKey = item.source === 'xp' ? XP_ART[item.type] ?? 'xp' : COIN_ART[item.type] ?? (item.diamonds ? 'diamond' : 'dpCoin');
-  const reversed = item.type === 'reversal' || item.type.endsWith('_clawback');
+  const art = historyArt(item);
+  const reversed = isReversedRow(item);
   const time = new Date(item.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   return (
     <View
@@ -185,7 +152,7 @@ const Row = React.memo(function Row({ item }: { item: RewardHistoryItem }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: RC.bg },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10, alignSelf: 'center' },
-  title: { color: RC.text, fontFamily: 'Urbanist-Black', fontSize: 22 },
+  title: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 22 },
   sub: { color: RC.sub, fontFamily: 'Urbanist-Medium', fontSize: 12.5 },
   pad: { padding: 16 },
   tabs: { paddingHorizontal: 16, paddingBottom: 10, gap: 8 },
@@ -197,8 +164,8 @@ const styles = StyleSheet.create({
   icon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: RC.cardHi },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   rowTitle: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 14.5, flexShrink: 1 },
-  badge: { color: '#FFF', backgroundColor: RC.red, fontFamily: 'Urbanist-Black', fontSize: 9.5, borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden' },
+  badge: { color: '#FFF', backgroundColor: RC.red, fontFamily: 'Urbanist-Bold', fontSize: 9.5, borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden' },
   desc: { color: RC.sub, fontFamily: 'Urbanist-Medium', fontSize: 12 },
   time: { color: RC.muted, fontFamily: 'Urbanist-Medium', fontSize: 11 },
-  amount: { fontFamily: 'Urbanist-Black', fontSize: 14 },
+  amount: { fontFamily: 'Urbanist-Bold', fontSize: 14 },
 });

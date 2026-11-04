@@ -250,8 +250,8 @@ export function ShopCard({ p, kicker, children, style }: { p: ExplorePalette; ki
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', height: 60, paddingHorizontal: 16, gap: 8 },
-  kicker: { fontFamily: 'Urbanist-Black', fontSize: 10, letterSpacing: 1.6 },
-  title: { fontSize: 22, fontFamily: 'Urbanist-Black', fontStyle: 'italic', marginTop: -2 },
+  kicker: { fontFamily: 'Urbanist-Bold', fontSize: 10, letterSpacing: 1.6 },
+  title: { fontSize: 22, fontFamily: 'Urbanist-Bold', fontStyle: 'italic', marginTop: -2 },
 
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 50, borderRadius: 16, paddingHorizontal: 14 },
   btnGlow: { shadowColor: '#FF4D67', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 6, elevation: 3 },
@@ -262,28 +262,28 @@ const styles = StyleSheet.create({
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 100, borderWidth: 1, padding: 3, alignSelf: 'flex-start' },
   stepBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   stepText: { fontSize: 17, fontFamily: 'Urbanist-Bold', lineHeight: 20 },
-  stepValue: { minWidth: 26, textAlign: 'center', fontFamily: 'Urbanist-Black', fontSize: 15 },
+  stepValue: { minWidth: 26, textAlign: 'center', fontFamily: 'Urbanist-Bold', fontSize: 15 },
 
   meterBox: { borderRadius: 16, borderWidth: 1, padding: 12, gap: 8 },
   meterRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   meterText: { fontFamily: 'Urbanist-Bold', fontSize: 13 },
-  meterTag: { fontFamily: 'Urbanist-Black', fontSize: 11, letterSpacing: 0.6 },
+  meterTag: { fontFamily: 'Urbanist-Bold', fontSize: 11, letterSpacing: 0.6 },
   meterTrack: { height: 9, borderRadius: 5, overflow: 'hidden' },
 
   pricePill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(245,158,11,0.12)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.55)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100, alignSelf: 'flex-start' },
-  pricePillText: { color: GOLD, fontFamily: 'Urbanist-Black' },
+  pricePillText: { color: GOLD, fontFamily: 'Urbanist-Bold' },
 
   statusPill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 100, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', maxWidth: '100%' },
-  statusText: { fontFamily: 'Urbanist-Black', letterSpacing: 0.5, flexShrink: 1 },
+  statusText: { fontFamily: 'Urbanist-Bold', letterSpacing: 0.5, flexShrink: 1 },
 
   track: { flexDirection: 'row', alignItems: 'flex-start' },
   trackStep: { alignItems: 'center', gap: 5, width: 62 },
   trackLine: { flex: 1, height: 4, borderRadius: 2, marginTop: 13, marginHorizontal: -16, overflow: 'hidden' },
   trackDot: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', zIndex: 1 },
   trackDotNow: { borderWidth: 2, borderColor: '#FFF', shadowColor: '#FF4D67', shadowOpacity: 0.5, shadowRadius: 6, shadowOffset: { width: 0, height: 0 }, elevation: 4 },
-  trackNum: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 12 },
+  trackNum: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 12 },
   trackLabel: { fontFamily: 'Urbanist-Bold', fontSize: 10.5, textAlign: 'center' },
 
   card: { borderRadius: 20, borderWidth: 1, padding: 14, gap: 10 },
-  cardKicker: { fontFamily: 'Urbanist-Black', fontSize: 10, letterSpacing: 1.4 },
+  cardKicker: { fontFamily: 'Urbanist-Bold', fontSize: 10, letterSpacing: 1.4 },
 });

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
@@ -43,7 +43,8 @@ import {
   type DealCardContent,
   type QuickCard,
 } from '@/src/components/shop/premium/ShopHomeMobile';
-import { Chip, EmptyState, ErrorState, SectionHeader as BlockHeader, ShopSkeleton } from '@/src/components/shop/premium/ShopBlocks';
+import { CategoryRail, Chip, EmptyState, ErrorState, SectionHeader as BlockHeader, ShopSkeleton, type RailEntry } from '@/src/components/shop/premium/ShopBlocks';
+import { BottomNav } from '@/src/components/home/BottomNav';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useProfile } from '@/src/hooks/useProfileData';
 import { useDigitalPurchase } from '@/src/hooks/useDigitalPurchase';
@@ -59,6 +60,7 @@ import {
   dealsTitle,
   deriveCategories,
   featuredCollection,
+  giftsCategory,
   featuredView,
   filterDigital,
   heroSlides,
@@ -152,7 +154,6 @@ export default function ShopScreen() {
   const ep = useMemo(() => asExplorePalette(p), [p]);
   const router = useRouter();
   const focused = useIsFocused();
-  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ tab?: string }>();
   const { user } = useAuth();
   const cfg = useMonetizationConfig();
@@ -312,6 +313,20 @@ export default function ShopScreen() {
     else if (t.target === 'gifts') router.push('/wallet/gifts' as any);
     else if (t.target === 'all') openDigital({});
   }, [openDigital, router]);
+
+  // Category rail under the tabs: Featured, every item type with live listings
+  // (frames, themes, badges, titles, effects…), and Gifts when the catalogue has
+  // some. Types with nothing on sale (VS / victory effects today) are left out
+  // here; the Shop Categories grid below shows them as "jaldi aa raha hai".
+  const gift = giftsCategory(cfg.gifts.enabled, gifts.data?.length);
+  const rail: RailEntry[] = useMemo(() => {
+    if (!cfg.store.enabled || !digital.length) return [];
+    const out: RailEntry[] = [];
+    if (featured.length) out.push({ key: 'featured', label: 'Featured', icon: 'star', onPress: () => openDigital({ ids: featured.map((i) => i.itemId) }) });
+    for (const c of categories) out.push({ key: c.type, label: c.label, icon: c.icon, count: c.count, onPress: () => openDigital({ type: c.type }) });
+    if (gift) out.push({ key: 'gifts', label: 'Virtual Gifts', icon: 'gift', count: gift.count, onPress: () => router.push('/wallet/gifts' as any) });
+    return out;
+  }, [cfg.store.enabled, digital.length, featured, categories, gift, openDigital, router]);
 
   const qaIcon = Math.max(14, px(26, u));
   const quickActions: QuickAction[] = [
@@ -608,7 +623,8 @@ export default function ShopScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={{ paddingBottom: bottomPad + insets.bottom + (tab === 'shop' ? 0 : 32), width: contentW, alignSelf: 'center' }}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: bottomPad + (tab === 'shop' ? 0 : 32), width: contentW, alignSelf: 'center' }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={TH.colors.primary} />}
           keyboardShouldPersistTaps="handled"
         >
@@ -628,6 +644,11 @@ export default function ShopScreen() {
               <View style={{ marginTop: px(MOCK_M.tabs.y - MOCK_M.title.y - MOCK_M.title.h, uM) }}>
                 <ShopNavigationTabsMobile u={uM} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
               </View>
+              {tab === 'shop' && rail.length ? (
+                <View style={{ marginTop: px(10, uM), marginHorizontal: -margin }}>
+                  <CategoryRail p={p} entries={rail} pad={margin} />
+                </View>
+              ) : null}
             </View>
           ) : (
           <View style={{ paddingHorizontal: margin }}>
@@ -645,6 +666,11 @@ export default function ShopScreen() {
             <View style={{ marginTop: gapY(MOCK.title.y + MOCK.title.h, MOCK.tabs.y, u) }}>
               <ShopNavigationTabs u={u} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
             </View>
+            {tab === 'shop' && rail.length ? (
+              <View style={{ marginTop: px(12, u), marginHorizontal: -margin }}>
+                <CategoryRail p={p} entries={rail} pad={margin} />
+              </View>
+            ) : null}
           </View>
           )}
           {tab === 'shop' ? (
@@ -702,6 +728,8 @@ export default function ShopScreen() {
             </>
           )}
         </ScrollView>
+        {/* The app-wide bottom bar, on the Shop's dark store surface (the safe-area bottom inset is applied inside it). */}
+        <BottomNav backgroundColor={PAGE_BG} isDark />
         {dialog}
       </SafeAreaView>
     </View>

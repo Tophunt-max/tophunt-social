@@ -151,14 +151,14 @@ const styles = StyleSheet.create({
   round: { alignItems: 'center', justifyContent: 'center' },
   roundGlow: { shadowColor: '#FF4D67', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 6, elevation: 3 },
   price: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  priceText: { fontFamily: 'Urbanist-Black' },
+  priceText: { fontFamily: 'Urbanist-Bold' },
 
   tile: { borderRadius: 24, borderWidth: 1, padding: 6 },
   stage: { borderRadius: 19, overflow: 'hidden' },
   urgent: { position: 'absolute', right: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(240,65,62,0.95)', borderRadius: 100, paddingHorizontal: 7, paddingVertical: 3 },
-  urgentText: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 9.5, letterSpacing: 0.4 },
+  urgentText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 9.5, letterSpacing: 0.4 },
   soldOut: { backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
-  soldOutText: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 13, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 100, overflow: 'hidden' },
+  soldOutText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 13, backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 100, overflow: 'hidden' },
   tileBody: { paddingHorizontal: 6, paddingTop: 9, paddingBottom: 4, gap: 2 },
   tileName: { fontFamily: 'Urbanist-Bold', fontSize: 14 },
   tileType: { fontFamily: 'Urbanist-Medium', fontSize: 11.5 },
@@ -167,5 +167,5 @@ const styles = StyleSheet.create({
 
   deal: { borderRadius: 26, overflow: 'hidden' },
   dealFoot: { position: 'absolute', left: 14, right: 12, bottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  dealTitle: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 18 },
+  dealTitle: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 18 },
 });
