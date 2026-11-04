@@ -56,6 +56,28 @@ describe('hot read paths use an index for both filter and order', () => {
     );
   });
 
+  it('reward history coin page (lib/rewardHistory.ts, keyset on uid + created_at + id)', () => {
+    expectIndexedNoSort(
+      plan(
+        "SELECT * FROM coin_transactions t WHERE t.uid = ? AND (t.created_at < ? OR (t.created_at = ? AND t.id < ?)) AND t.type = 'xp_conversion' ORDER BY t.created_at DESC, t.id DESC LIMIT 31",
+        'u1',
+        1,
+        1,
+        'x',
+      ),
+      'idx_txn_uid_created',
+    );
+  });
+
+  it('Diamond leaderboard reads only the period rows of the board types', () => {
+    const joined = plan(
+      "SELECT uid, SUM(locked_delta) AS score FROM coin_transactions WHERE type IN ('daily_reward', 'quest_reward') AND created_at >= ? AND created_at < ? GROUP BY uid",
+      1,
+      2,
+    ).join(' | ');
+    expect(joined, joined).toContain('INDEX idx_txn_type_created');
+  });
+
   it('match comment thread page', () => {
     expectIndexedNoSort(
       plan(

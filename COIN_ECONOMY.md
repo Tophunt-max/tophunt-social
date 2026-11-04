@@ -128,6 +128,29 @@ minimum account age, verified only), an optional Diamond budget, and tasks. Each
 - The Rewards Center "Special Events" card shows the featured live event, or the season when there is none.
 - Account deletion keeps the event claim and participant rows with the uid anonymised.
 
+### Reward History and Top Earners
+
+- **Reward History** (`/earn/history`, action `getRewardHistory {tab, cursor, limit}`, `lib/rewardHistory.ts`): the
+  caller's own rows from `coin_transactions` and `user_xp_events`, newest first, keyset cursor
+  `<created_at>:<c|x>:<id>` (index `idx_txn_uid_created`, migration 0087). Tabs:
+  | Tab | Rows |
+  |---|---|
+  | All | every coin ledger row and every XP event |
+  | Diamonds Earned | Diamond credits of the reward types (`locked_delta > 0`), incl. the Diamond part of a capped contest win |
+  | XP Earned | XP events with a positive delta, except reversals, admin adjustments and the opening balance |
+  | DP Coins Won | `contest_win_reward` rows with a DP coin part |
+  | Diamonds Spent | Diamond debits that are not a correction (contest entry fees) |
+  | XP Conversion | `xp_conversion` rows, with the XP used from `xp_conversions` |
+  | Reversed / Adjusted | clawbacks, admin adjustments, deletion forfeits, rounding, resets, and XP reversals |
+  XP staff reasons are never returned. The older XP-only list (`/rewards/history`) stays.
+- **Top Earners** (`/read/leaderboard/diamonds?period=day|week|month`, `/me`; app `/rewards/leaderboard?board=diamonds`):
+  Diamonds from `daily_reward`, `daily_task`, `ad_reward`, `gamification_reward`, `monthly_hall_of_fame_reward`,
+  `quest_reward`, `achievement_reward`, `contest_reward`, `event_reward`, `xp_conversion` and `referral_bonus`,
+  summed with `referral_clawback` so a reversed referral stops counting. One-off bonuses (signup, verification,
+  promo), refunds and DP coin don't rank. Periods are reward days (`dayResetOffsetMinutes`). Same visibility
+  rule, tie-break (score, lifetime XP, account age, uid), 500-deep limit and block filter as the XP boards.
+  The XP board also has a `day` (Today) period.
+
 ## Daily check-in, daily tasks, referrals (admin controls)
 
 - **Daily check-in** (Earn → Daily check-in, `gamification` row): on/off (`dailyLoginEnabled`), base + streak bonus (bonus capped at 30 days) or a fixed per-day schedule (`dailyRewardSchedule`, up to 30 days, repeats). The app draws its track from `getDailyReward`, which uses the same function the claim pays with, so the app and the server always agree.

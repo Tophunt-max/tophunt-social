@@ -13,6 +13,7 @@ import { experienceOn, featureLevel, fillMilestones, getProgression, isFillerMil
 import { claimQuest, listQuests } from "./quests";
 import { claimEventTask, joinEvent, listEvents } from "./rewardEvents";
 import { claimRewardGrant, listGrants, rewardBudgetFor } from "./rewardGrants";
+import { HISTORY_TABS, parseHistoryCursor, rewardHistoryPage, type HistoryTab } from "./rewardHistory";
 import { currentSeason, LEADERBOARD_PERIODS, myRank, rangeFor, type LeaderboardPeriod } from "./seasons";
 
 export const GAMIFICATION_ACTIONS = new Set([
@@ -31,6 +32,7 @@ export const GAMIFICATION_ACTIONS = new Set([
   "getEvents",
   "joinEvent",
   "claimEventTask",
+  "getRewardHistory",
 ]);
 
 const ACTION_LABELS: Record<string, string> = {
@@ -454,6 +456,21 @@ export async function handleGamificationAction(action: string, ctx: Ctx): Promis
     case "getCreatorInsights": {
       await rateLimit(env, `insights:${uid}`, 60, 3600);
       return await creatorInsights(env, uid, p);
+    }
+
+    case "getRewardHistory": {
+      // Reward History page (lib/rewardHistory.ts). The caller's own rows only;
+      // not tied to the experience switch, like the wallet history.
+      await rateLimit(env, `rwhist:${uid}`, 240, 3600);
+      const tab: HistoryTab = (HISTORY_TABS as string[]).includes(body.tab) ? body.tab : "all";
+      const limit = Math.min(50, Math.max(1, Number(body.limit) || 30));
+      const res = await rewardHistoryPage(env, uid, tab, parseHistoryCursor(body.cursor), limit);
+      return {
+        tab,
+        // XP rows carry the server label; staff reasons are never returned.
+        items: res.items.map((i) => (i.source === "xp" ? { ...i, label: ACTION_LABELS[i.type] ?? i.type } : i)),
+        nextCursor: res.nextCursor,
+      };
     }
 
     case "getXpRank": {

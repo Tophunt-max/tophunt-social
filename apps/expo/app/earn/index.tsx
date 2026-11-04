@@ -631,7 +631,7 @@ export default function RewardsCenterScreen() {
 
         {/* L + M. Leaderboard and reward history */}
         <View style={styles.pair}>
-          <PressScale style={half} onPress={() => router.push('/rewards/leaderboard' as any)} label="Leaderboard, top earners">
+          <PressScale style={half} onPress={() => router.push('/rewards/leaderboard?board=diamonds' as any)} label="Leaderboard, top earners">
             <NeonCard style={styles.tileCard}>
               <Art name="topEarnerCrown" size={40} />
               <View style={{ flex: 1 }}>
@@ -640,7 +640,7 @@ export default function RewardsCenterScreen() {
               </View>
             </NeonCard>
           </PressScale>
-          <PressScale style={half} onPress={() => router.push('/wallet')} label="Reward history, all your earnings">
+          <PressScale style={half} onPress={() => router.push('/earn/history' as any)} label="Reward history, all your earnings">
             <NeonCard style={styles.tileCard}>
               <Art name="rewardHistory" size={40} />
               <View style={{ flex: 1 }}>

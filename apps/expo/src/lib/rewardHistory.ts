@@ -1,0 +1,73 @@
+/**
+ * Reward History display helpers (server: apps/worker/src/lib/rewardHistory.ts).
+ * The server decides which rows belong to a tab and every amount; these only
+ * turn a row into a title and amount chips.
+ */
+import { ledgerLabel } from '@/src/lib/ledgerLabels';
+
+export type HistoryTab = 'all' | 'diamonds' | 'xp' | 'dpcoin' | 'spent' | 'conversion' | 'adjusted';
+
+export const REWARD_HISTORY_TABS: { key: HistoryTab; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'diamonds', label: 'Diamonds Earned' },
+  { key: 'xp', label: 'XP Earned' },
+  { key: 'dpcoin', label: 'DP Coins Won' },
+  { key: 'spent', label: 'Diamonds Spent' },
+  { key: 'conversion', label: 'XP Conversion' },
+  { key: 'adjusted', label: 'Reversed / Adjusted' },
+];
+
+export function historyTabOf(raw: unknown): HistoryTab {
+  return REWARD_HISTORY_TABS.some((t) => t.key === raw) ? (raw as HistoryTab) : 'all';
+}
+
+export interface RewardHistoryItem {
+  key: string;
+  source: 'coin' | 'xp';
+  type: string;
+  /** Server label for XP rows. */
+  label?: string;
+  diamonds: number;
+  dpcoin: number;
+  xp: number;
+  xpSpent: number | null;
+  description: string | null;
+  createdAt: number;
+}
+
+export type AmountUnit = 'diamond' | 'dpcoin' | 'xp';
+
+export function historyTitle(item: RewardHistoryItem): string {
+  if (item.source === 'xp') return item.label || ledgerLabel(item.type);
+  return ledgerLabel(item.type);
+}
+
+/** Non-zero amounts in display order. A conversion shows the XP it used, then the Diamonds. */
+export function historyAmounts(item: RewardHistoryItem): { unit: AmountUnit; value: number }[] {
+  const out: { unit: AmountUnit; value: number }[] = [];
+  if (item.source === 'xp') {
+    if (item.xp) out.push({ unit: 'xp', value: item.xp });
+    return out;
+  }
+  if (item.type === 'xp_conversion' && item.xpSpent) out.push({ unit: 'xp', value: -item.xpSpent });
+  if (item.diamonds) out.push({ unit: 'diamond', value: item.diamonds });
+  if (item.dpcoin) out.push({ unit: 'dpcoin', value: item.dpcoin });
+  return out;
+}
+
+export function signed(value: number): string {
+  const abs = Math.abs(value);
+  const text = Number.isInteger(abs) ? abs.toLocaleString() : abs.toFixed(2);
+  return `${value < 0 ? '−' : '+'}${text}`;
+}
+
+/** "Today", "Yesterday" or a short date, for grouping rows by day (device local time). */
+export function historyDay(ts: number, now = Date.now()): string {
+  const d = new Date(ts);
+  const n = new Date(now);
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((startOf(n) - startOf(d)) / 86_400_000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: d.getFullYear() === n.getFullYear() ? undefined : 'numeric' });
+}
