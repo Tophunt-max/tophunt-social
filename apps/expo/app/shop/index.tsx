@@ -24,24 +24,22 @@ import {
   TrendCard,
   type QuickAction,
 } from '@/src/components/shop/premium/ShopHomeSections';
-import { BagIcon, BoltIcon, BoxIcon, ClockIcon, CrownIcon, FlameIcon, GoldBoxIcon, HeartIcon, ShirtIcon, StarIcon } from '@/src/components/shop/premium/ShopArt';
+import { BagIcon, ClockIcon, CrownIcon, FlameIcon, GoldBoxIcon, HeartIcon, PinkBagIcon, ShirtIcon, StarIcon } from '@/src/components/shop/premium/ShopArt';
 import { MOCK, MOCK_M, MOCK_MARGIN, MOCK_M_MARGIN, cellWidth, isMobileShop, mobileScale, mockScale, px } from '@/src/components/shop/premium/mock';
 import { ShopHeader, ShopHeaderMobile } from '@/src/components/shop/premium/ShopHeader';
 import { DealPager } from '@/src/components/shop/premium/DealPager';
 import { ShopNavigationTabs, ShopNavigationTabsMobile } from '@/src/components/shop/premium/ShopNavigationTabs';
 import {
   CategoryGridM,
-  CollectionRowM,
   DealCardM,
-  DealTimerPill,
   FeatureCardM,
-  PhysicalRowM,
-  QuickCardsM,
+  PopularCollectionsM,
   SectionHeaderM,
+  ShortcutCardsM,
   TrendCardM,
   UpgradeBannerM,
   type DealCardContent,
-  type QuickCard,
+  type ShortcutCard,
 } from '@/src/components/shop/premium/ShopHomeMobile';
 import { CategoryRail, Chip, EmptyState, ErrorState, SectionHeader as BlockHeader, ShopSkeleton, type RailEntry } from '@/src/components/shop/premium/ShopBlocks';
 import { BottomNav } from '@/src/components/home/BottomNav';
@@ -67,9 +65,8 @@ import {
   hotDeals,
   isShort,
   mobileCategoryTiles,
-  mobileCollectionTiles,
   parseShopTab,
-  physicalPicks,
+  popularCollections,
   presentRarities,
   resolveDealCards,
   showUpgradeBanner,
@@ -77,6 +74,7 @@ import {
   withWishlist,
   type CategoryTile,
   type DigitalFilter,
+  type PopularCollection,
   type ShopNav,
   type ShopTab,
 } from '@/src/lib/shopModel';
@@ -209,6 +207,7 @@ export default function ShopScreen() {
   const featuredM = useMemo(() => featuredCollection(digital, feature, MOCK_M.feat.cols), [digital, feature]);
   const trendingM = useMemo(() => trendingItems(digital, MOCK_M.trend.cols), [digital]);
   const tilesM = useMemo(() => mobileCategoryTiles(tiles), [tiles]);
+  const popularM = useMemo(() => popularCollections(digital), [digital]);
   const deals0 = useMemo(() => dealsSummary(digital, now), [digital, now]);
   const upgrade = showUpgradeBanner(cfg.store.enabled, digital);
   const giftPage = giftsIn.data?.pages?.[0];
@@ -227,15 +226,12 @@ export default function ShopScreen() {
   // Hot deals: products the admin marked featured that are in stock.
   const deals = useMemo(() => hotDeals(allProducts), [allProducts]);
   const homeDeals = useMemo(() => dealsBlock(cfg.shop.enabled, allProducts), [cfg.shop.enabled, allProducts]);
-  const physM = useMemo(() => (cfg.shop.enabled && allProducts.length ? physicalPicks(allProducts, MOCK_M.phys.cols) : null), [cfg.shop.enabled, allProducts]);
   // Admin deal cards (their discount computed from real compare-at prices); none live → the automatic card below.
   const dealCards = useMemo(
     () => resolveDealCards(cfg.store.deals, cfg.store.enabled ? digital : [], cfg.shop.enabled ? allProducts : null, now),
     [cfg.store.deals, cfg.store.enabled, digital, cfg.shop.enabled, allProducts, now],
   );
   const dealsHeading = dealCards.length ? dealsTitle(cfg.store.deals) : 'Special Offers & Daily Deals';
-  const [dealIdx, setDealIdx] = useState(0);
-  const dealCur = dealCards[Math.min(dealIdx, Math.max(0, dealCards.length - 1))];
   // Phone deal card: a real store discount first, else an admin-featured product, else the honest placeholder.
   const dealContent: DealCardContent = cfg.store.enabled && deals0.items.length
     ? { kind: 'discount', summary: deals0 }
@@ -468,18 +464,32 @@ export default function ShopScreen() {
   const mIcon = px(MOCK_M.section.icon, uM);
   const mGap = px(MOCK_M.gap, uM);
   const mHead = px(MOCK_M.head, uM);
-  const mQaIcon = px(MOCK_M.quick.icon, uM);
   const featGapM = px(MOCK_M.feat.gap, uM);
   const trendGapM = px(MOCK_M.trend.gap, uM);
-  const quickCards: QuickCard[] = [
-    ...(cfg.store.enabled && user
-      ? [{ key: 'wish', icon: <HeartIcon size={mQaIcon} />, title: 'Wishlist', sub: 'Save Items', accent: BRAND, onPress: () => openDigital({ wishlist: true }) }]
-      : []),
-    { key: 'orders', icon: <GoldBoxIcon size={mQaIcon} />, title: 'Orders', sub: 'Track & Manage', accent: BRAND, onPress: () => router.push('/shop/orders' as any) },
-    { key: 'history', icon: <ClockIcon size={mQaIcon} />, title: 'History', sub: 'Purchase Records', accent: BRAND, onPress: () => router.push('/wallet' as any) },
+  const shortcuts: ShortcutCard[] = [
+    ...(user ? [{ key: 'collection' as const, title: 'My Collection', sub: 'View Owned Items & Equip Now', onPress: openCollection }] : []),
+    { key: 'orders', title: 'Orders', sub: 'Track & Manage Your Purchases', onPress: () => router.push('/shop/orders' as any) },
   ];
-  const collectionM = mobileCollectionTiles(collection.tiles);
+  const onPopular = useCallback(
+    (c: PopularCollection<StoreItemView>) => openDigital(c.kind === 'rarity' ? { rarity: c.value } : { type: c.value }),
+    [openDigital],
+  );
+  const dealPage = (content: DealCardContent) => (
+    <DealCardM
+      p={p}
+      content={content}
+      heading={dealsHeading}
+      u={uM}
+      width={inner}
+      onDeals={() => openDigital({ discounted: true })}
+      onProduct={openProduct}
+      onContest={() => router.push('/explore/battles' as any)}
+      onNav={followNav}
+    />
+  );
 
+  // Phone home, top to bottom as the design mock: hero, categories, featured,
+  // trending, daily deals, popular collections, My Collection / Orders, upgrade.
   const homeMobile = (
     <View style={{ paddingHorizontal: margin }}>
       {hero && cfg.store.enabled ? (
@@ -491,14 +501,14 @@ export default function ShopScreen() {
         <View style={{ marginHorizontal: -margin, marginTop: mGap }}>{digitalState}</View>
       ) : (
         <>
-          <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<CrownIcon size={mIcon} />} title="Shop Categories" action={{ label: 'View All', onPress: () => openDigital({}) }} />
+          <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap + px(2, uM) }} icon={<PinkBagIcon size={mIcon} />} title="Shop Categories" action={{ label: 'View All', onPress: () => openDigital({}) }} />
           <View style={{ marginTop: mHead }}>
             <CategoryGridM p={p} tiles={tilesM} u={uM} inner={inner} onPick={onTile} />
           </View>
 
           {featuredM.length ? (
             <>
-              <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<StarIcon size={mIcon} />} title="Featured Collection" action={{ label: 'View All', onPress: () => openDigital({ ids: featured.map((i) => i.itemId) }) }} />
+              <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<CrownIcon size={mIcon} />} title="Featured Collection" action={{ label: 'View All', onPress: () => openDigital({ ids: featured.map((i) => i.itemId) }) }} />
               <View style={[styles.row, { gap: featGapM, marginTop: mHead }]}>
                 {featuredM.map((i) => (
                   <FeatureCardM key={i.itemId} p={p} item={i} tag={cardTag(i, now)} u={uM} width={cellWidth(inner, MOCK_M.feat.cols, featGapM)} viewer={viewer} onOpen={() => openItem(i.itemId)} />
@@ -520,105 +530,41 @@ export default function ShopScreen() {
         </>
       )}
 
-      <SectionHeaderM
-        p={p}
-        u={uM}
-        style={{ marginTop: mGap }}
-        icon={<BoltIcon size={mIcon} />}
-        title={dealsHeading}
-        right={
-          dealCards.length
-            ? dealCur?.endsAt ? <DealTimerPill endsAt={dealCur.endsAt} u={uM} /> : null
-            : dealContent.kind === 'discount' && dealContent.summary.endsAt ? <DealTimerPill endsAt={dealContent.summary.endsAt} u={uM} /> : null
-        }
-      />
-      <View style={{ marginTop: mHead }}>
+      <View style={{ marginTop: mGap + px(2, uM) }}>
         {dealCards.length ? (
           <DealPager
             p={p}
             count={dealCards.length}
             width={inner}
             u={uM}
-            onIndex={setDealIdx}
             labelOf={(i) => dealCards[i]?.title ?? ''}
-            renderPage={(i) => (
-              <DealCardM
-                p={p}
-                content={{ kind: 'admin', card: dealCards[i] }}
-                u={uM}
-                width={inner}
-                onDeals={() => openDigital({ discounted: true })}
-                onProduct={openProduct}
-                onContest={() => router.push('/explore/battles' as any)}
-                onNav={followNav}
-              />
-            )}
+            renderPage={(i) => dealPage({ kind: 'admin', card: dealCards[i] })}
           />
         ) : (
-          <DealCardM
-            p={p}
-            content={dealContent}
-            u={uM}
-            width={inner}
-            onDeals={() => openDigital({ discounted: true })}
-            onProduct={openProduct}
-            onContest={() => router.push('/explore/battles' as any)}
-          />
+          dealPage(dealContent)
         )}
       </View>
 
-      <SectionHeaderM
-        p={p}
-        u={uM}
-        style={{ marginTop: mGap }}
-        icon={<BoxIcon size={mIcon} />}
-        title="Physical Products"
-        action={physM ? { label: 'View All', onPress: () => setTab('physical') } : undefined}
-      />
-      <View style={{ marginTop: mHead }}>
-        <PhysicalRowM p={p} products={physM} u={uM} inner={inner} onOpen={openProduct} />
-      </View>
-
-      {user ? (
+      {!digitalState && popularM.length ? (
         <>
-          <SectionHeaderM
-            p={p}
-            u={uM}
-            style={{ marginTop: mGap }}
-            icon={<CrownIcon size={mIcon} />}
-            title={inventory.data ? `My Collection (${collection.total}${collection.more ? '+' : ''} Items)` : 'My Collection'}
-            action={{ label: 'Manage', onPress: openCollection }}
-          />
+          <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<StarIcon size={mIcon} />} title="Popular Collection" action={{ label: 'View All', onPress: () => openDigital({}) }} />
           <View style={{ marginTop: mHead }}>
-            {inventory.data ? (
-              <CollectionRowM p={p} tiles={collectionM} u={uM} inner={inner} onPress={openCollection} />
-            ) : inventory.isError ? (
-              <View style={{ marginHorizontal: -margin, paddingHorizontal: pad }}>
-                <ErrorState p={p} text="Collection load nahi hui." onRetry={() => void inventory.refetch()} />
-              </View>
-            ) : (
-              <View style={[styles.row, { gap: px(MOCK_M.col.gap, uM) }]} accessible accessibilityLabel="Collection load ho rahi hai">
-                {Array.from({ length: MOCK_M.col.cols }, (_, i) => (
-                  <View key={i} style={{ width: cellWidth(inner, MOCK_M.col.cols, px(MOCK_M.col.gap, uM)), height: px(MOCK_M.col.h, uM), borderRadius: px(MOCK_M.col.radius, uM), backgroundColor: p.skeleton }} />
-                ))}
-              </View>
-            )}
+            <PopularCollectionsM cards={popularM} u={uM} inner={inner} viewer={viewer} onPress={onPopular} />
           </View>
         </>
       ) : null}
+
+      <View style={{ marginTop: mGap }}>
+        <ShortcutCardsM p={p} cards={shortcuts} u={uM} inner={inner} />
+      </View>
 
       {upgrade ? (
         <View style={{ marginTop: mGap }}>
           <UpgradeBannerM p={p} u={uM} width={inner} onPress={() => openDigital({ rarities: [...UPGRADE_RARITIES] })} />
         </View>
       ) : null}
-
-      <View style={{ marginTop: mGap }}>
-        <QuickCardsM p={p} cards={quickCards} u={uM} width={inner} />
-      </View>
     </View>
   );
-
   const bottomPad = mobile ? px(MOCK_M.bottom, uM) : px(MOCK.bottom, u);
   const heroBottomY = mobile ? px(MOCK_M.hero.y + MOCK_M.hero.h, uM) : px(MOCK.hero.y + MOCK.hero.h, u);
 
@@ -651,11 +597,6 @@ export default function ShopScreen() {
               <View style={{ marginTop: px(MOCK_M.tabs.y - MOCK_M.title.y - MOCK_M.title.h, uM) }}>
                 <ShopNavigationTabsMobile p={p} u={uM} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
               </View>
-              {tab === 'shop' && rail.length ? (
-                <View style={{ marginTop: px(10, uM), marginHorizontal: -margin }}>
-                  <CategoryRail p={p} entries={rail} pad={margin} />
-                </View>
-              ) : null}
             </View>
           ) : (
           <View style={{ paddingHorizontal: margin }}>

@@ -19,7 +19,7 @@ import { BRAND, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import { MOCK_M, mfont, px } from './mock';
 
 /** Brand pink "⏱ 12:36:59" pill: only for a real future end; ticks every second when ≤ 7 days away, else every minute. */
-export function DealTimerPill({ endsAt, u }: { endsAt: number; u: number }) {
+export function DealTimerPill({ endsAt, u, tone = 'brand' }: { endsAt: number; u: number; /** 'deep': dark pink pill for the phone deals banner (on its pink gradient). */ tone?: 'brand' | 'deep' }) {
   const [now, setNow] = useState(() => Date.now());
   const near = endsAt - now <= 7 * 86_400_000;
   useEffect(() => {
@@ -32,7 +32,7 @@ export function DealTimerPill({ endsAt, u }: { endsAt: number; u: number }) {
   const D = MOCK_M.deals;
   const fs = mfont(D.timer, u);
   return (
-    <View style={[styles.timer, { height: px(D.timerH, u), borderRadius: px(D.timerH / 2, u), paddingHorizontal: px(7, u), gap: px(3, u), marginRight: px(2, u) }]} accessible accessibilityLabel={`Deal ${label} mein khatam`}>
+    <View style={[styles.timer, tone === 'deep' && styles.timerDeep, { height: px(D.timerH, u), borderRadius: px(D.timerH / 2, u), paddingHorizontal: px(7, u), gap: px(3, u), marginRight: px(2, u) }]} accessible accessibilityLabel={`Deal ${label} mein khatam`}>
       <Ionicons name="time" size={fs} color="#FFF" />
       <Text style={[styles.timerText, { fontSize: fs }]}>{label}</Text>
     </View>
@@ -141,6 +141,7 @@ export function DealPager({
 
 const styles = StyleSheet.create({
   timer: { flexDirection: 'row', alignItems: 'center', backgroundColor: BRAND },
+  timerDeep: { backgroundColor: 'rgba(120,8,62,0.6)' },
   timerText: { color: '#FFF', fontFamily: TH.fonts.bold, fontVariant: ['tabular-nums'] },
   dots: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
 });

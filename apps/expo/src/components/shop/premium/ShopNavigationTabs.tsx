@@ -2,10 +2,10 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ShopTab } from '@/src/lib/shopModel';
-import { BRAND_BUTTON, TH, type TophuntPalette } from '@/src/theme/tophunt';
+import { BRAND_BUTTON, SHOP_VIOLET_GRAD, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import { FONT_FLOOR, MOCK, MOCK_M, font, mfont, px } from './mock';
 import { TabGlyph } from './ShopArt';
-import { cardShadow } from './surface';
+import { cardShadow, lavenderShadow, shopBorder } from './surface';
 
 const TABS: { key: ShopTab | 'collection'; label: string; icon: 'bag' | 'layers' | 'cube' | 'grid' }[] = [
   { key: 'shop', label: 'Shop', icon: 'bag' },
@@ -79,9 +79,10 @@ export function ShopNavigationTabs({
 }
 
 /**
- * Phone tab bar (mobile mock: h 26, radius 13): segments sized to their
- * content and sharing the spare width, no dividers; the active one is a
- * brand pink pill at least 64 wide.
+ * Phone tab bar (design mock: full width, h 35 ≈ 40 pt, white track with a
+ * soft shadow): segments share the width by content; the active one is a
+ * violet gradient pill (SHOP_VIOLET_GRAD) with white icon and text, the
+ * others dark text and icons with thin dividers between inactive neighbours.
  */
 export function ShopNavigationTabsMobile({
   p, u, width, tab, onTab, onCollection,
@@ -91,15 +92,18 @@ export function ShopNavigationTabsMobile({
   const h = px(T.h, u);
   const inset = px(T.inset, u);
   const icon = px(T.icon, u);
+  const activeIdx = TABS.findIndex((t) => t.key === tab);
   return (
-    <View style={[styles.track, { width, height: h, borderRadius: h / 2, backgroundColor: p.card, borderColor: p.border }, cardShadow(p)]} accessibilityRole="tablist">
-      {TABS.map((t) => {
-        const on = t.key === tab;
+    <View style={[styles.track, { width, height: h, borderRadius: h / 2, backgroundColor: p.card, borderColor: shopBorder(p) }, lavenderShadow(p)]} accessibilityRole="tablist">
+      {TABS.map((t, i) => {
+        const on = i === activeIdx;
         const isLink = t.key === 'collection';
+        const divider = i > 0 && i !== activeIdx && i - 1 !== activeIdx;
+        const ink = on ? ON_INK : p.text;
         const content = (
           <>
-            <TabGlyph name={t.icon} size={icon} color={on ? ON_INK : p.sub} />
-            <Text style={[on ? styles.labelOn : styles.label, { fontSize: fs }, !on && { color: p.sub }]} numberOfLines={1}>{t.label}</Text>
+            <TabGlyph name={t.icon} size={icon} color={ink} />
+            <Text style={[on ? styles.labelOn : styles.label, { fontSize: fs }, !on && { color: p.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{t.label}</Text>
           </>
         );
         return (
@@ -107,18 +111,19 @@ export function ShopNavigationTabsMobile({
             key={t.key}
             onPress={() => (isLink ? onCollection() : onTab(t.key as ShopTab))}
             activeOpacity={0.85}
-            hitSlop={{ top: 8, bottom: 8 }}
-            style={[styles.segM, on && { minWidth: px(T.activeW, u) }]}
+            hitSlop={{ top: 4, bottom: 4 }}
+            style={styles.segM}
             accessibilityRole={isLink ? 'link' : 'tab'}
             accessibilityState={isLink ? undefined : { selected: on }}
             accessibilityLabel={isLink ? 'My Collection: aapke items kholo' : t.label}
           >
+            {divider ? <View style={[styles.divLine, { top: h * 0.28, bottom: h * 0.28, backgroundColor: shopBorder(p) }]} pointerEvents="none" /> : null}
             {on ? (
               <LinearGradient
-                colors={BRAND_BUTTON}
+                colors={SHOP_VIOLET_GRAD}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={[styles.inner, { margin: inset, borderRadius: (h - inset * 2) / 2, gap: px(4, u), paddingHorizontal: px(6, u) }]}
+                style={[styles.inner, { margin: inset, borderRadius: (h - inset * 2) / 2, gap: px(4, u), paddingHorizontal: px(8, u) }]}
               >
                 {content}
               </LinearGradient>
@@ -137,6 +142,7 @@ const styles = StyleSheet.create({
   seg: { flex: 1, minWidth: 0 },
   segM: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto' },
   divider: { borderLeftWidth: 1 },
+  divLine: { position: 'absolute', left: 0, width: 1 },
   inner: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   label: { fontFamily: TH.fonts.semibold, flexShrink: 1 },
   labelOn: { color: ON_INK, fontFamily: TH.fonts.bold, flexShrink: 1 },

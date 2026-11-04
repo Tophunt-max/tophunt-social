@@ -22,6 +22,42 @@ export const BRAND_BUTTON: [string, string] = ['#FF6B81', '#FF4D67'];
 /** The Explore brand gradient (pink → violet) for hero banners and highlights. */
 export const BRAND_GRAD: [string, string] = ['#FF4D67', '#8B5CF6'];
 
+/**
+ * Phone Shop home accents (design mock): violet for the active tab, "View All"
+ * links and the banners; brand pink stays the primary CTA and the cart badge;
+ * the yellow button is used ONLY by the "Grab Now" and "Upgrade Now" banner
+ * buttons.
+ */
+export const SHOP_VIOLET = '#7C3AED';
+/** Active tab pill, collection / orders cards. */
+export const SHOP_VIOLET_GRAD: [string, string] = ['#7C3AED', '#A855F7'];
+/** "Grab Now" / "Upgrade Now" fill and the dark text on it. */
+export const SHOP_YELLOW_BTN: [string, string] = ['#FFE066', '#FFC857'];
+export const SHOP_YELLOW_INK = '#2A1A00';
+/** Dark navy balance pills of the phone header (both modes). */
+export const SHOP_NAVY = '#1E1B3A';
+/** Soft lavender card border / shadow tint (light mode). */
+export const SHOP_LAVENDER = '#E9E1FB';
+/** Hero slide: deep purple → violet → magenta. */
+export const SHOP_HERO_GRAD: [string, string, string] = ['#2E0A5E', '#6D28D9', '#C026D3'];
+/** "Daily Shop Deals" banner: pink → magenta → violet. */
+export const SHOP_DEALS_GRAD: [string, string, string] = ['#FF4D8D', '#D946EF', '#7C3AED'];
+/** "Upgrade Your Profile" banner: violet → magenta. */
+export const SHOP_UPGRADE_GRAD: [string, string, string] = ['#5B21B6', '#7C3AED', '#C026D3'];
+/** Dark purple / navy stage of the Featured cards (and Trending tiles in dark mode). */
+export const SHOP_DARK_CARD: [string, string, string] = ['#2B1259', '#1C1542', '#110E2A'];
+/** Pink "NEW" tag. */
+export const SHOP_TAG_NEW: [string, string] = ['#FF4D67', '#F43F5E'];
+/** Per-card gradients of the "Popular Collection" grid, in order. */
+export const SHOP_POPULAR_GRADS: [string, string][] = [
+  ['#7C3AED', '#C026D3'],
+  ['#4338CA', '#2563EB'],
+  ['#6B2163', '#9D174D'],
+  ['#DB2777', '#F472B6'],
+  ['#3B0764', '#6D28D9'],
+  ['#1E3A8A', '#7C3AED'],
+];
+
 export const TH = {
   colors: {
     /** Brand pink (buttons, active states, links). */
