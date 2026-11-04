@@ -286,6 +286,10 @@ export default function ShopScreen() {
   const openItem = useCallback((id: string) => router.push(`/shop/item/${encodeURIComponent(id)}` as any), [router]);
   const openProduct = useCallback((id: string) => router.push(`/shop/${encodeURIComponent(id)}` as any), [router]);
   const openCollection = useCallback(() => router.push('/shop/collection' as any), [router]);
+  // "View All" pages (app/shop/categories.tsx, featured.tsx, trending.tsx, deals.tsx, collections/, bundles.tsx).
+  const openCategories = useCallback(() => router.push('/shop/categories' as any), [router]);
+  const openFeatured = useCallback(() => router.push('/shop/featured' as any), [router]);
+  const openTrending = useCallback(() => router.push('/shop/trending' as any), [router]);
   /** Admin slide / deal card target → Digital tab filter, Physical tab or an in-app route. */
   const followNav = useCallback((nav: ShopNav) => {
     if (nav.kind === 'digital') openDigital(nav.filter);
@@ -313,10 +317,10 @@ export default function ShopScreen() {
 
   const onTile = useCallback((t: CategoryTile) => {
     if (t.soon) emitToast(`${t.label} jaldi aa raha hai`, 'info');
-    else if (t.target === 'type' && t.type) openDigital({ type: t.type });
+    else if (t.target === 'type' && t.type) router.push(`/shop/category/${encodeURIComponent(t.type)}` as any);
     else if (t.target === 'gifts') router.push('/wallet/gifts' as any);
-    else if (t.target === 'all') openDigital({});
-  }, [openDigital, router]);
+    else if (t.target === 'all') router.push('/shop/categories' as any);
+  }, [router]);
 
   // Category rail under the tabs: Featured, every item type with live listings
   // (frames, themes, badges, titles, effects…), and Gifts when the catalogue has
@@ -390,7 +394,7 @@ export default function ShopScreen() {
             style={{ marginTop: gapY(heroBottom, MOCK.catHead.y, u) }}
             icon={<BagIcon size={icon} />}
             title="Shop Categories"
-            action={{ label: 'View All', onPress: () => openDigital({}) }}
+            action={{ label: 'View All', onPress: openCategories }}
           />
           <View style={{ marginTop: gapY(MOCK.catHead.y + MOCK.catHead.h, MOCK.catRow1.y, u) }}>
             <CategoryGrid p={p} tiles={tiles} u={u} inner={inner} onPick={onTile} />
@@ -404,7 +408,7 @@ export default function ShopScreen() {
                 style={{ marginTop: gapY(MOCK.catRow2.y + MOCK.catRow2.h, MOCK.featHead.y, u) }}
                 icon={<StarIcon size={icon} />}
                 title="Featured Collection"
-                action={{ label: 'View All', onPress: () => openDigital({ ids: featured.map((i) => i.itemId) }) }}
+                action={{ label: 'View All', onPress: openFeatured }}
               />
               <View style={[styles.row, { gap: featGap, marginTop: gapY(MOCK.featHead.y + MOCK.featHead.h, MOCK.feat.y, u) }]}>
                 {featured.map((i) => <FeatureCard key={i.itemId} p={p} item={i} tag={cardTag(i, now)} u={u} width={featW} viewer={viewer} onOpen={() => openItem(i.itemId)} />)}
@@ -420,7 +424,7 @@ export default function ShopScreen() {
                 style={{ marginTop: gapY(MOCK.feat.y + MOCK.feat.h, MOCK.trendHead.y, u) }}
                 icon={<FlameIcon size={icon} />}
                 title={trending.title}
-                action={{ label: 'View All', onPress: () => openDigital({}) }}
+                action={{ label: 'View All', onPress: openTrending }}
               />
               <View style={[styles.row, { gap: trendGap, marginTop: gapY(MOCK.trendHead.y + MOCK.trendHead.h, MOCK.trend.y, u) }]}>
                 {trending.items.map((i) => <TrendCard key={i.itemId} p={p} item={i} u={u} width={trendW} viewer={viewer} onOpen={() => openItem(i.itemId)} />)}
@@ -495,7 +499,7 @@ export default function ShopScreen() {
       heading={dealsHeading}
       u={uM}
       width={inner}
-      onDeals={() => openDigital({ discounted: true })}
+      onDeals={() => router.push('/shop/deals' as any)}
       onProduct={openProduct}
       onContest={() => router.push('/explore/battles' as any)}
       onNav={followNav}
@@ -517,14 +521,14 @@ export default function ShopScreen() {
         <View style={{ marginHorizontal: -margin, marginTop: mGap }}>{digitalState}</View>
       ) : (
         <>
-          <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap + px(2, uM) }} icon={<PinkBagIcon size={mIcon} />} title="Shop Categories" action={{ label: 'View All', onPress: () => openDigital({}) }} />
+          <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap + px(2, uM) }} icon={<PinkBagIcon size={mIcon} />} title="Shop Categories" action={{ label: 'View All', onPress: openCategories }} />
           <View style={{ marginTop: mHead }}>
             <CategoryGridM p={p} tiles={tilesM} u={uM} inner={inner} onPick={onTile} />
           </View>
 
           {featuredM.length ? (
             <>
-              <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<CrownIcon size={mIcon} />} title="Featured Collection" action={{ label: 'View All', onPress: () => openDigital({ ids: featured.map((i) => i.itemId) }) }} />
+              <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<CrownIcon size={mIcon} />} title="Featured Collection" action={{ label: 'View All', onPress: openFeatured }} />
               <View style={[styles.row, { gap: featGapM, marginTop: mHead }]}>
                 {featuredM.map((i) => (
                   <FeatureCardM key={i.itemId} p={p} item={i} tag={cardTag(i, now)} u={uM} width={cellWidth(inner, MOCK_M.feat.cols, featGapM)} viewer={viewer} onOpen={() => openItem(i.itemId)} />
@@ -535,7 +539,7 @@ export default function ShopScreen() {
 
           {trendingM.items.length ? (
             <>
-              <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<FlameIcon size={mIcon} />} title={trendingM.title} action={{ label: 'View All', onPress: () => openDigital({}) }} />
+              <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<FlameIcon size={mIcon} />} title={trendingM.title} action={{ label: 'View All', onPress: openTrending }} />
               <View style={[styles.row, { gap: trendGapM, marginTop: mHead }]}>
                 {trendingM.items.map((i) => (
                   <TrendCardM key={i.itemId} p={p} item={i} u={uM} width={cellWidth(inner, MOCK_M.trend.cols, trendGapM)} viewer={viewer} onOpen={() => openItem(i.itemId)} />
@@ -569,7 +573,7 @@ export default function ShopScreen() {
             style={{ marginTop: mGap }}
             icon={<StarIcon size={mIcon} />}
             title="Popular Collection"
-            action={{ label: 'View All', onPress: adminCols.length > POPULAR_COLLECTIONS_MAX ? () => router.push('/shop/collections' as any) : () => openDigital({}) }}
+            action={{ label: 'View All', onPress: () => router.push('/shop/collections' as any) }}
           />
           <View style={{ marginTop: mHead }}>
             <AdminCollectionsM cards={adminCols.slice(0, POPULAR_COLLECTIONS_MAX)} u={uM} inner={inner} viewer={viewer} onPress={openAdminCollection} />
@@ -577,7 +581,7 @@ export default function ShopScreen() {
         </>
       ) : !digitalState && colsSettled && popularM.length ? (
         <>
-          <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<StarIcon size={mIcon} />} title="Popular Collection" action={{ label: 'View All', onPress: () => openDigital({}) }} />
+          <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<StarIcon size={mIcon} />} title="Popular Collection" action={{ label: 'View All', onPress: openCategories }} />
           <View style={{ marginTop: mHead }}>
             <PopularCollectionsM cards={popularM} u={uM} inner={inner} viewer={viewer} onPress={onPopular} />
           </View>

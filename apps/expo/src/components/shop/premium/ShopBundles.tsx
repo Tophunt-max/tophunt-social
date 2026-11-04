@@ -191,8 +191,8 @@ export function BundleGrid({
 
 /**
  * The phone home "Shop Bundles" section: gift icon, title, the first bundle's
- * badge as a pill (only when it has one), "View All" with more than 3, then up
- * to 3 cards. Render only when there are bundles.
+ * badge as a pill (only when it has one), "View All" (the all-bundles page,
+ * shown whenever there is a bundle), then up to 3 cards. Render only when there are bundles.
  */
 export function ShopBundlesM({
   p, bundles, u, inner, viewer, onOpen, onAll, style,
@@ -208,7 +208,7 @@ export function ShopBundlesM({
         icon={<GiftIcon size={px(MOCK_M.section.icon, u)} />}
         title="Shop Bundles"
         titleAccessory={first.badge ? <BundleBadge label={first.badge} u={u} style={{ marginLeft: px(2, u) }} /> : undefined}
-        action={bundles.length > HOME_BUNDLES_MAX ? { label: 'View All', onPress: onAll } : undefined}
+        action={{ label: 'View All', onPress: onAll }}
       />
       <View style={{ marginTop: px(MOCK_M.head, u) }}>
         <BundleGrid p={p} bundles={bundles.slice(0, HOME_BUNDLES_MAX)} u={u} width={inner} cols={HOME_BUNDLES_MAX} gap={gap} viewer={viewer} onOpen={onOpen} />
