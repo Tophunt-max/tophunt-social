@@ -34,6 +34,7 @@ const REGISTRY: Record<string, 'primitive' | 'battle' | 'non-battle' | 'profile'
   'app/setting/delete-account.tsx': 'non-battle', // personal data export
   'app/referral/index.tsx': 'non-battle', // Refer & Earn invite link
   'app/earn/index.tsx': 'non-battle', // Rewards Center referral card: invite link
+  'app/shop/item/[id].tsx': 'non-battle', // Shop item detail: item link (text only)
   'src/screens/BlogDetailScreen.tsx': 'non-battle', // blog post link
   'src/components/profile/UserActionsSheet.tsx': 'profile', // another user's profile: photo + link
 };
