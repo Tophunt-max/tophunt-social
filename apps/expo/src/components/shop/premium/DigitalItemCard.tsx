@@ -11,13 +11,14 @@ import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { Ionicons } from '@/src/lib/icons';
 import { timeLeftLabel } from '@/src/lib/shareCaptions';
 import { TYPE_SINGULAR } from '@/src/lib/shopModel';
-import { TH, rarityToken, type TophuntPalette } from '@/src/theme/tophunt';
+import { BRAND, BRAND_BUTTON, TH, rarityToken, type TophuntPalette } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
 import { DiscountTag } from './DiscountTag';
 import { ProductPreview } from './ProductPreview';
 import { RarityBadge } from './RarityBadge';
 import { WishlistHeart } from './WishlistHeart';
+import { cardShadow } from './surface';
 
 export const DigitalItemCard = React.memo(function DigitalItemCard({
   item, width, p, viewer, busy, short, onOpen, onBuy,
@@ -43,8 +44,9 @@ export const DigitalItemCard = React.memo(function DigitalItemCard({
     <View
       style={[
         styles.card,
+        // Flat card: the rarity tint stays on the 1 px border (item semantics), no coloured glow.
         { width, backgroundColor: p.card, borderColor: t.glow ? `${t.color}${p.isDark ? '66' : '55'}` : p.border },
-        t.glow && { shadowColor: t.color, shadowOpacity: p.isDark ? 0.35 : 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
+        cardShadow(p),
       ]}
     >
       <Pressable
@@ -66,7 +68,7 @@ export const DigitalItemCard = React.memo(function DigitalItemCard({
             </View>
           ) : null}
           {left ? (
-            <View style={[styles.chip, styles.bottomLeft, { backgroundColor: 'rgba(236,72,153,0.92)' }]} pointerEvents="none">
+            <View style={[styles.chip, styles.bottomLeft, { backgroundColor: BRAND }]} pointerEvents="none">
               <Ionicons name="time" size={10} color="#FFF" />
               <Text style={styles.chipText}>{left}</Text>
             </View>
@@ -105,7 +107,7 @@ export const DigitalItemCard = React.memo(function DigitalItemCard({
             accessibilityLabel={short ? `${item.name}: DP coin kam hai. Details dekho` : `${item.name} kharido, ${item.priceCoins} DP coin`}
           >
             <LinearGradient
-              colors={short ? [p.cardAlt, p.cardAlt] : [TH.colors.royal, TH.colors.primary]}
+              colors={short ? [p.cardAlt, p.cardAlt] : BRAND_BUTTON}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
               style={[styles.buy, busy && { opacity: 0.6 }]}

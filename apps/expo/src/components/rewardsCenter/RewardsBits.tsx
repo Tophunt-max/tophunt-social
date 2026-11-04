@@ -22,6 +22,7 @@ import { AppImage } from '@/src/components/ui/AppImage';
 import { useEarningAssets } from '@/src/services/appSettings';
 import { safeArtUrl } from '@/src/lib/rewardsCenter';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
+import { BRAND, BRAND_BUTTON, BRAND_GRAD } from '@/src/theme/tophuntTokens';
 
 export interface RewardsPalette {
   isDark: boolean;
@@ -29,77 +30,92 @@ export interface RewardsPalette {
   bg2: string;
   card: string;
   cardHi: string;
+  /** Brand pink (kept as `border` for older callers: glow colour of a card). */
   border: string;
+  /** Card / tile border. */
   borderSoft: string;
+  /** Highlighted card border (a reward is ready): brand pink. */
   magenta: string;
   text: string;
   sub: string;
   muted: string;
-  /** Gold accent text (amber on light so it reads on white). */
+  /** DP coin gold. Currency only, never a button. */
   gold: string;
   goldDeep: string;
+  /** Diamond cyan. Currency only, never a button. */
   cyan: string;
   green: string;
   red: string;
   track: string;
-  /** Translucent purple fill for tiles, day cells and chips on a card. */
+  /** Neutral chip fill for tiles, day cells and secondary buttons. */
   tint: string;
   /** Recessed fill for inputs (code box, XP stepper). */
   inset: string;
-  /** XP accent (bars, amounts). */
+  /** XP accent. */
   xp: string;
-  /** Strength of the coloured card glow (iOS / web shadow opacity). */
+  /** Card shadow opacity (light mode only; dark cards are flat). */
   glow: number;
+  /** The app brand pink: buttons, links, active and selected states. */
+  brand: string;
+  /** Translucent brand fill behind brand text (pills, today's cell). */
+  brandSoft: string;
 }
 
-/** Dark neon palette of the design reference (unchanged values). */
+/**
+ * Dark palette on the app's dark surfaces (constants/theme.ts, Explore):
+ * neutral cards, brand pink for every action.
+ */
 export const RC_DARK: RewardsPalette = {
   isDark: true,
-  bg: '#0E0420',
-  bg2: '#1A0838',
-  card: '#1C0B3A',
-  cardHi: '#2A1056',
-  border: '#7C3AED',
-  borderSoft: 'rgba(168,85,247,0.45)',
-  magenta: '#E040FB',
+  bg: '#0F0F13',
+  bg2: '#0F0F13',
+  card: '#16171E',
+  cardHi: '#16171E',
+  border: BRAND,
+  borderSoft: '#23262F',
+  magenta: BRAND,
   text: '#FFFFFF',
-  sub: '#C4B5FD',
-  muted: '#9A8CC2',
-  gold: '#FFD54A',
+  sub: '#8B8F9A',
+  muted: '#6E727D',
+  gold: '#FFC857',
   goldDeep: '#F59E0B',
-  cyan: '#38E1FF',
-  green: '#34D399',
-  red: '#FF5C7A',
-  track: 'rgba(255,255,255,0.12)',
-  tint: 'rgba(124,58,237,0.18)',
-  inset: 'rgba(0,0,0,0.25)',
-  xp: '#D8B4FE',
-  glow: 0.55,
+  cyan: '#22D3EE',
+  green: '#22C55E',
+  red: '#F43F5E',
+  track: 'rgba(255,255,255,0.08)',
+  tint: '#1B1D26',
+  inset: '#1B1D26',
+  xp: '#A78BFA',
+  glow: 0,
+  brand: BRAND,
+  brandSoft: 'rgba(255,77,103,0.14)',
 };
 
-/** Light palette on the TopHunt light surfaces (src/theme/tophuntTokens.ts TH_LIGHT). */
+/** Light palette on the app's light surfaces. */
 export const RC_LIGHT: RewardsPalette = {
   isDark: false,
-  bg: '#F6F5FF',
-  bg2: '#EEE8FF',
+  bg: '#F9F9FB',
+  bg2: '#F9F9FB',
   card: '#FFFFFF',
-  cardHi: '#FBF9FF',
-  border: '#8B5CF6',
-  borderSoft: 'rgba(139,92,246,0.28)',
-  magenta: '#C026D3',
-  text: '#1B1530',
-  sub: '#6B6890',
-  muted: '#8A86A8',
+  cardHi: '#FFFFFF',
+  border: BRAND,
+  borderSoft: '#EEEEF2',
+  magenta: BRAND,
+  text: '#121212',
+  sub: '#7A7A80',
+  muted: '#9A9AA0',
   gold: '#B45309',
   goldDeep: '#F59E0B',
   cyan: '#0E7490',
-  green: '#059669',
+  green: '#16A34A',
   red: '#E11D48',
-  track: 'rgba(109,40,217,0.12)',
-  tint: 'rgba(139,92,246,0.08)',
-  inset: 'rgba(109,40,217,0.06)',
+  track: '#ECEDF1',
+  tint: '#F1F2F6',
+  inset: '#F1F2F6',
   xp: '#7C3AED',
-  glow: 0.16,
+  glow: 0.05,
+  brand: BRAND,
+  brandSoft: 'rgba(255,77,103,0.10)',
 };
 
 export const rewardsPalette = (isDark: boolean): RewardsPalette => (isDark ? RC_DARK : RC_LIGHT);
@@ -110,8 +126,9 @@ export const RC = RC_DARK;
 export const RewardsThemeContext = createContext<RewardsPalette>(RC_DARK);
 export const useRC = () => useContext(RewardsThemeContext);
 
-export const GOLD_GRAD: [string, string] = ['#FFE680', '#F5B300'];
-export const PURPLE_GRAD: [string, string] = ['#A855F7', '#6D28D9'];
+/** Primary button: the app brand pink (same as the Shop and Explore). */
+export const GOLD_GRAD: [string, string] = BRAND_BUTTON;
+export const PURPLE_GRAD: [string, string] = BRAND_GRAD;
 
 /**
  * One Rewards Center artwork slot. Draws the admin's uploaded WebP / PNG for
@@ -167,11 +184,12 @@ function BundledArt({ name, size, style }: { name: Exclude<EarningArtKey, Curren
   );
 }
 
-export function NeonCard({ children, style, glow, highlight }: { children: ReactNode; style?: StyleProp<ViewStyle>; glow?: string; highlight?: boolean }) {
+/** `glow` is accepted for older callers and ignored (cards are flat now). */
+export function NeonCard({ children, style, highlight }: { children: ReactNode; style?: StyleProp<ViewStyle>; glow?: string; highlight?: boolean }) {
   const RC = useRC();
   return (
-    <View style={[styles.neonOuter, { shadowColor: glow ?? RC.border, shadowOpacity: RC.glow, borderColor: highlight ? RC.magenta : RC.borderSoft, elevation: RC.isDark ? 6 : 2 }, style]}>
-      <LinearGradient colors={[RC.cardHi, RC.card]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFill} />
+    // Flat card like the rest of the app: 1 px border (brand pink when highlighted), soft shadow in light mode only.
+    <View style={[styles.neonOuter, { backgroundColor: RC.card, shadowColor: '#000', shadowOpacity: RC.glow, borderColor: highlight ? RC.brand : RC.borderSoft, elevation: RC.isDark ? 0 : 1 }, style]}>
       {children}
     </View>
   );
@@ -188,8 +206,8 @@ export function SectionTitle({ art, title, sub, action, onAction }: { art: Earni
       </View>
       {action && onAction ? (
         <Pressable onPress={onAction} hitSlop={8} accessibilityRole="button" accessibilityLabel={`${action}: ${title}`} style={styles.viewAll}>
-          <Text style={[styles.viewAllText, { color: RC.cyan }]}>{action}</Text>
-          <ArrowIcon direction="right" size={13} color={RC.cyan} />
+          <Text style={[styles.viewAllText, { color: RC.brand }]}>{action}</Text>
+          <ArrowIcon direction="right" size={13} color={RC.brand} />
         </Pressable>
       ) : null}
     </View>
@@ -234,16 +252,32 @@ export function PressScale({ children, onPress, disabled, style, label }: { chil
   );
 }
 
-export function GoldButton({ label, onPress, busy, disabled, icon, small, grad = GOLD_GRAD, textColor = '#3B1A00' }: {
-  label: string; onPress: () => void; busy?: boolean; disabled?: boolean; icon?: EarningArtKey; small?: boolean; grad?: [string, string]; textColor?: string;
+/**
+ * The Rewards Center button, in the app's brand pink.
+ * - primary (default): pink gradient, white text.
+ * - secondary: neutral chip with pink text and border ("Go", "Open").
+ * - onBrand: white pill with pink text, for a button sitting on a pink banner.
+ * `grad` / `textColor` still override the primary look for older callers.
+ */
+export function GoldButton({ label, onPress, busy, disabled, icon, small, grad, textColor, variant = 'primary' }: {
+  label: string; onPress: () => void; busy?: boolean; disabled?: boolean; icon?: EarningArtKey; small?: boolean; grad?: [string, string]; textColor?: string; variant?: 'primary' | 'secondary' | 'onBrand';
 }) {
+  const RC = useRC();
+  const flat = variant !== 'primary';
+  const fill: [string, string] = variant === 'secondary' ? [RC.brandSoft, RC.brandSoft] : variant === 'onBrand' ? ['#FFFFFF', '#FFFFFF'] : grad ?? GOLD_GRAD;
+  const ink = textColor ?? (flat ? RC.brand : '#FFFFFF');
   return (
     <PressScale onPress={onPress} disabled={disabled || busy} label={label}>
-      <LinearGradient colors={grad} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={[styles.gold, small && styles.goldSmall]}>
-        {busy ? <ActivityIndicator color={textColor} size="small" /> : (
+      <LinearGradient
+        colors={fill}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={[styles.gold, small && styles.goldSmall, variant === 'secondary' && { borderWidth: 1, borderColor: RC.brand }]}
+      >
+        {busy ? <ActivityIndicator color={ink} size="small" /> : (
           <>
             {icon ? <Art name={icon} size={small ? 16 : 22} /> : null}
-            <Text style={[styles.goldText, small && styles.goldTextSmall, { color: textColor }]} numberOfLines={1}>{label}</Text>
+            <Text style={[styles.goldText, small && styles.goldTextSmall, { color: ink }]} numberOfLines={1}>{label}</Text>
           </>
         )}
       </LinearGradient>
@@ -252,7 +286,8 @@ export function GoldButton({ label, onPress, busy, disabled, icon, small, grad =
 }
 
 /** Progress bar. The fill eases to its value (instant under reduced motion). */
-export function NeonBar({ value, color, height = 7 }: { value: number; color?: string; height?: number }) {
+/** Progress bar: brand pink by default, `grad` for a two-colour fill, `color` for a solid one. */
+export function NeonBar({ value, color, grad, height = 7 }: { value: number; color?: string; grad?: [string, string]; height?: number }) {
   const RC = useRC();
   const reduce = useReducedMotion();
   const pct = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
@@ -265,7 +300,7 @@ export function NeonBar({ value, color, height = 7 }: { value: number; color?: s
   return (
     <View style={[styles.track, { backgroundColor: RC.track, height, borderRadius: height / 2 }]} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: Math.round(pct * 100) }}>
       <Animated.View style={[{ height, borderRadius: height / 2, overflow: 'hidden' }, fill]}>
-        <LinearGradient colors={[color ?? RC.green, '#A3E635']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={grad ?? (color ? [color, color] : BRAND_BUTTON)} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
       </Animated.View>
     </View>
   );
@@ -276,7 +311,7 @@ export function DiamondAmount({ amount, size = 14, color, prefix = '+' }: { amou
   return (
     <View style={styles.amt} accessible accessibilityLabel={`${prefix}${amount} Diamonds`}>
       <Art name="diamond" size={size + 4} />
-      <Text style={[styles.amtText, { fontSize: size, color: color ?? RC.cyan }]}>{prefix}{amount.toLocaleString()}</Text>
+      <Text style={[styles.amtText, { fontSize: size, color: color ?? RC.text }]}>{prefix}{amount.toLocaleString()}</Text>
     </View>
   );
 }
@@ -288,7 +323,7 @@ export function CoinAmount({ amount, size = 14, color, prefix = '+', label }: { 
   return (
     <View style={styles.amt} accessible accessibilityLabel={label ?? `${text} DP coin`}>
       <Art name="dpCoin" size={size + 4} />
-      <Text style={[styles.amtText, { fontSize: size, color: color ?? RC.gold }]}>{text}</Text>
+      <Text style={[styles.amtText, { fontSize: size, color: color ?? RC.text }]}>{text}</Text>
     </View>
   );
 }
@@ -299,7 +334,7 @@ export function XpAmount({ amount, size = 13, label }: { amount?: number; size?:
   return (
     <View style={styles.amt} accessible accessibilityLabel={text}>
       <Art name="xp" size={size + 4} />
-      <Text style={[styles.amtText, { fontSize: size, color: RC.xp }]}>{text}</Text>
+      <Text style={[styles.amtText, { fontSize: size, color: RC.text }]}>{text}</Text>
     </View>
   );
 }
@@ -336,7 +371,7 @@ export function StateNote({ text, action, onAction }: { text: string; action?: s
       <Text style={[styles.noteText, { color: RC.sub }]}>{text}</Text>
       {action && onAction ? (
         <Pressable onPress={onAction} hitSlop={8} accessibilityRole="button">
-          <Text style={[styles.noteAction, { color: RC.gold }]}>{action}</Text>
+          <Text style={[styles.noteAction, { color: RC.brand }]}>{action}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -364,15 +399,15 @@ export function SkeletonRows({ rows = 3, height = 44 }: { rows?: number; height?
 const styles = StyleSheet.create({
   diamondGlow: { shadowColor: '#22D3EE', shadowOpacity: 0.9, shadowRadius: 10, shadowOffset: { width: 0, height: 0 } },
   neonOuter: {
-    borderRadius: 20, borderWidth: 1.5, overflow: 'hidden', padding: 14,
-    shadowRadius: 14, shadowOffset: { width: 0, height: 0 },
+    borderRadius: 20, borderWidth: 1, overflow: 'hidden', padding: 14,
+    shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
   },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   title: { fontFamily: 'Urbanist-Bold', fontSize: 18 },
   sub: { fontFamily: 'Urbanist-Medium', fontSize: 12, marginTop: 1 },
   viewAll: { flexDirection: 'row', alignItems: 'center', gap: 3, minHeight: 32 },
   viewAllText: { fontFamily: 'Urbanist-Bold', fontSize: 12.5 },
-  gold: { minHeight: 46, borderRadius: 23, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1.5, borderColor: '#FFF2B3' },
+  gold: { minHeight: 46, borderRadius: 23, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   goldSmall: { minHeight: 34, borderRadius: 17, paddingHorizontal: 14 },
   goldText: { fontFamily: 'Urbanist-Bold', fontSize: 16 },
   goldTextSmall: { fontSize: 13 },

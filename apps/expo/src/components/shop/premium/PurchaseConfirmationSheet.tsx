@@ -15,7 +15,7 @@ import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
 import { Ionicons } from '@/src/lib/icons';
 import { balanceAfter, isShort, TYPE_SINGULAR, type PurchaseErrorView } from '@/src/lib/shopModel';
-import { TH, type TophuntPalette } from '@/src/theme/tophunt';
+import { BRAND, BRAND_BUTTON, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
 import { ProductPreview } from './ProductPreview';
@@ -60,12 +60,12 @@ export function PurchaseConfirmationSheet({
         <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityRole="button" accessibilityLabel="Band karo" disabled={busy} />
         <Animated.View
           entering={reduce ? undefined : FadeInUp.springify().damping(18)}
-          style={[styles.sheet, { backgroundColor: p.card, borderColor: p.isDark ? '#3A2D6B' : p.border, paddingBottom: Math.max(16, insets.bottom + 8) }]}
+          style={[styles.sheet, { backgroundColor: p.card, borderColor: p.border, paddingBottom: Math.max(16, insets.bottom + 8) }]}
           accessibilityViewIsModal
         >
           <View style={[styles.handle, { backgroundColor: p.border }]} />
           <View style={styles.top}>
-            <Text style={[styles.kicker, { color: p.isDark ? TH.colors.gold : TH.colors.royal }]}>
+            <Text style={[styles.kicker, { color: BRAND }]}>
               {phase === 'success' ? 'PURCHASE COMPLETE' : 'CONFIRM PURCHASE'}
             </Text>
             <TouchableOpacity onPress={close} disabled={busy} style={[styles.closeBtn, { backgroundColor: p.cardAlt, opacity: busy ? 0.4 : 1 }]} accessibilityRole="button" accessibilityLabel="Band karo">
@@ -182,7 +182,7 @@ function Actions({
           accessibilityLabel={busy ? 'Purchase ho raha hai' : primary.label}
         >
           <LinearGradient
-            colors={kind === 'insufficient' || (!error && short) ? TH.gradients.gold : [TH.colors.royal, TH.colors.primary, TH.colors.electric]}
+            colors={BRAND_BUTTON}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={[styles.primary, busy && { opacity: 0.75 }]}
@@ -194,8 +194,8 @@ function Actions({
               </>
             ) : (
               <>
-                <Ionicons name={primary.icon} size={16} color={kind === 'insufficient' || (!error && short) ? '#2A1A00' : '#FFF'} />
-                <Text style={[styles.primaryText, (kind === 'insufficient' || (!error && short)) && { color: '#2A1A00' }]}>{primary.label}</Text>
+                <Ionicons name={primary.icon} size={16} color="#FFF" />
+                <Text style={styles.primaryText}>{primary.label}</Text>
               </>
             )}
           </LinearGradient>

@@ -68,6 +68,7 @@ import {
   SkeletonRows,
   StateNote,
   XpAmount,
+  PURPLE_GRAD,
   rewardsPalette,
   useRC,
   type RewardsPalette,
@@ -335,7 +336,7 @@ export default function RewardsCenterScreen() {
         ref={scrollRef}
         style={{ flex: 1 }}
         contentContainerStyle={{ width: contentW, alignSelf: 'center', paddingHorizontal: PAD, paddingBottom: 28, gap: GAP }}
-        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refreshAll} tintColor={RC.gold} colors={[RC.border]} />}
+        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refreshAll} tintColor={RC.brand} colors={[RC.brand]} />}
       >
         {/* A. Header */}
         <View style={styles.header}>
@@ -350,7 +351,7 @@ export default function RewardsCenterScreen() {
             accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
             style={styles.bell}
           >
-            <Ionicons name="notifications" size={22} color={RC.gold} />
+            <Ionicons name="notifications" size={22} color={RC.text} />
             {unread > 0 ? <View style={styles.bellBadge}><Text style={styles.bellBadgeText}>{unread > 9 ? '9+' : unread}</Text></View> : null}
           </Pressable>
         </View>
@@ -386,7 +387,7 @@ export default function RewardsCenterScreen() {
                   <Text style={styles.xpValue} numberOfLines={1}>
                     {formatXp(level.xp)}{level.nextLevelXp ? <Text style={styles.xpOf}> / {formatXp(level.nextLevelXp)}</Text> : null}
                   </Text>
-                  <NeonBar value={level.progress} color="#A855F7" height={6} />
+                  <NeonBar value={level.progress} grad={PURPLE_GRAD} height={6} />
                   <Text style={styles.xpNext} numberOfLines={1}>{level.isMaxLevel ? 'Max level' : `${formatXp(level.xpToNextLevel ?? 0)} XP to Lv ${level.level + 1}`}</Text>
                 </>
               ) : prog.isLoading ? <ActivityIndicator color={RC.sub} size="small" /> : <Text style={styles.xpNext}>—</Text>}
@@ -463,7 +464,7 @@ export default function RewardsCenterScreen() {
                 </View>
                 <View style={styles.weekRow}>
                   <View style={{ flex: 1, gap: 4 }}>
-                    <NeonBar value={week.length ? weekDone / week.length : 0} color={RC.goldDeep} height={6} />
+                    <NeonBar value={week.length ? weekDone / week.length : 0} height={6} />
                     <Text style={styles.missionProg}>{weekDone}/{week.length} din is hafte</Text>
                   </View>
                   {nextSlot ? (
@@ -593,7 +594,7 @@ export default function RewardsCenterScreen() {
               a11y={contestCfg.enabled && contestCfg.participation > 0 ? `${contestCfg.participation} Diamonds` : 'XP'}
               onPress={() => router.push('/explore/battles' as any)}
             />
-            <RewardTile art="winnerCrown" label="Winner" value={<CoinAmount label="DP Coin" size={12} />} a11y="DP coin" gold onPress={() => router.push('/explore/battles' as any)} />
+            <RewardTile art="winnerCrown" label="Winner" value={<CoinAmount label="DP Coin" size={12} />} a11y="DP coin" highlight onPress={() => router.push('/explore/battles' as any)} />
             <RewardTile
               art="runnerUp"
               label="Runners-up"
@@ -660,7 +661,7 @@ export default function RewardsCenterScreen() {
                 <Text style={styles.cardSubSm}>Invite Friends & Earn</Text>
               </View>
             </View>
-            {referrals.isLoading ? <ActivityIndicator color={RC.gold} /> : !ref?.program?.enabled ? (
+            {referrals.isLoading ? <ActivityIndicator color={RC.brand} /> : !ref?.program?.enabled ? (
               <StateNote text="Referral program abhi band hai." />
             ) : (
               <View style={{ gap: 8 }}>
@@ -681,7 +682,7 @@ export default function RewardsCenterScreen() {
                 <GoldButton small label="Invite Now" onPress={() => void invite()} />
                 <Pressable onPress={() => router.push('/referral' as any)} hitSlop={6} accessibilityRole="button" accessibilityLabel="Referral history" style={styles.refLink}>
                   <Text style={styles.refLinkText}>History</Text>
-                  <ArrowIcon direction="right" size={12} color={RC.cyan} />
+                  <ArrowIcon direction="right" size={12} color={RC.brand} />
                 </Pressable>
               </View>
             )}
@@ -709,7 +710,7 @@ export default function RewardsCenterScreen() {
           <SectionTitle art="specialEvent" title="Special Events" sub="Limited Time Earning Events" action="View All" onAction={() => router.push('/earn/events' as any)} />
           {event ? (
             <PressScale onPress={() => router.push({ pathname: '/earn/events', params: { focus: event.id } } as any)} label={`${event.title}, ${event.phase}. Join now`}>
-              <LinearGradient colors={['#7C3AED', '#C026D3', '#DB2777']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.event}>
+              <LinearGradient colors={PURPLE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.event}>
                 <View style={styles.eventArt}>
                   <Art name="eventGiftBox" size={74} />
                 </View>
@@ -724,14 +725,14 @@ export default function RewardsCenterScreen() {
                     <Text style={styles.eventMeta}>· {event.phase === 'scheduled' ? `${countdown(event.startsAt)} me shuru` : `${countdown(event.endsAt)} left`}</Text>
                   </View>
                   <View style={{ alignSelf: 'flex-start', marginTop: 4 }}>
-                    <GoldButton small label={event.joined ? 'Open' : 'Join Now'} onPress={() => router.push({ pathname: '/earn/events', params: { focus: event.id } } as any)} />
+                    <GoldButton small variant="onBrand" label={event.joined ? 'Open' : 'Join Now'} onPress={() => router.push({ pathname: '/earn/events', params: { focus: event.id } } as any)} />
                   </View>
                 </View>
               </LinearGradient>
             </PressScale>
           ) : season ? (
             <PressScale onPress={() => router.push('/rewards/leaderboard' as any)} label={`${season.name}, live. Join now`}>
-              <LinearGradient colors={['#7C3AED', '#C026D3', '#DB2777']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.event}>
+              <LinearGradient colors={PURPLE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.event}>
                 <View style={styles.eventArt}>
                   <Art name="eventGiftBox" size={74} />
                 </View>
@@ -743,7 +744,7 @@ export default function RewardsCenterScreen() {
                   <Text style={styles.eventDesc} numberOfLines={2}>Season XP kamao, leaderboard par top aao aur season rewards jeeto.</Text>
                   <Text style={styles.eventMeta}>Aapke {formatXp(season.xp)} XP · {countdown(season.endsAt)} left</Text>
                   <View style={{ alignSelf: 'flex-start', marginTop: 4 }}>
-                    <GoldButton small label="Join Now" onPress={() => router.push('/rewards/leaderboard' as any)} />
+                    <GoldButton small variant="onBrand" label="Join Now" onPress={() => router.push('/rewards/leaderboard' as any)} />
                   </View>
                 </View>
               </LinearGradient>
@@ -850,7 +851,7 @@ function DayCell({ slot, last, giftDay }: { slot: DailySlot; last: boolean; gift
           <Art name={ready ? 'diamondGlow' : 'diamond'} size={ready ? 32 : 24} style={!ready && { opacity: 0.5 }} />
         )}
       </View>
-      <Text style={[styles.dayLabel, ready && { color: RC.gold }]}>Day {slot.day}</Text>
+      <Text style={[styles.dayLabel, ready && { color: RC.brand }]}>Day {slot.day}</Text>
       <Text style={styles.dayAmt}>+{slot.amount}</Text>
     </View>
   );
@@ -876,8 +877,7 @@ function MissionRow({ art, title, progress, target, reward, state, busy, onPress
             small
             label={state === 'claim' ? 'Claim' : 'Go'}
             busy={busy}
-            grad={state === 'claim' ? ['#FFE680', '#F5B300'] : ['#A855F7', '#6D28D9']}
-            textColor={state === 'claim' ? '#3B1A00' : '#FFFFFF'}
+            variant={state === 'claim' ? 'primary' : 'secondary'}
             onPress={onPress}
           />
         )}
@@ -886,11 +886,11 @@ function MissionRow({ art, title, progress, target, reward, state, busy, onPress
   );
 }
 
-function RewardTile({ art, label, value, a11y, gold, onPress }: { art: EarningArtKey; label: string; value: React.ReactNode; a11y: string; gold?: boolean; onPress: () => void }) {
+function RewardTile({ art, label, value, a11y, highlight, onPress }: { art: EarningArtKey; label: string; value: React.ReactNode; a11y: string; highlight?: boolean; onPress: () => void }) {
   const RC = useRC();
   const styles = useStyles();
   return (
-    <PressScale onPress={onPress} style={[styles.rewardTile, gold && { borderColor: RC.gold }]} label={`${label}: ${a11y}`}>
+    <PressScale onPress={onPress} style={[styles.rewardTile, highlight && { borderColor: RC.brand }]} label={`${label}: ${a11y}`}>
       <Art name={art} size={40} />
       <Text style={styles.rewardLabel} numberOfLines={1}>{label}</Text>
       {value}
@@ -931,8 +931,8 @@ function LevelTile({ entry, current, busy, canClaim, onClaim, onOpen }: {
   const status = state === 'claimed' ? 'Claimed' : state === 'claimable' ? 'Ready' : reached ? 'Unlocked' : `${Math.max(0, entry.level - current)} level door`;
   const items = entry.items.length;
   return (
-    <PressScale onPress={claimable ? onClaim : onOpen} disabled={busy} style={[styles.levelTile, claimable && { borderColor: RC.gold }, state === 'claimed' && { opacity: 0.7 }]} label={`Level ${entry.level}: ${entry.title}. ${status}`}>
-      <Text style={[styles.levelTileLv, reached && { color: RC.gold }]}>Lv {entry.level}</Text>
+    <PressScale onPress={claimable ? onClaim : onOpen} disabled={busy} style={[styles.levelTile, claimable && { borderColor: RC.brand }, state === 'claimed' && { opacity: 0.7 }]} label={`Level ${entry.level}: ${entry.title}. ${status}`}>
+      <Text style={[styles.levelTileLv, reached && { color: RC.brand }]}>Lv {entry.level}</Text>
       <View>
         <Art name={state === 'claimed' ? 'missionComplete' : entry.coins > 0 ? 'levelUp' : 'giftBox'} size={40} style={!reached && { opacity: 0.65 }} />
         {!reached ? <View style={styles.lock}><Ionicons name="lock-closed" size={10} color="#FFF" /></View> : null}
@@ -992,7 +992,7 @@ function XpConvertBody({ status, loading, onDone, onFail }: { status: any; loadi
   const convert = useConvertXp();
   const [n, setN] = useState(1);
   const requestId = useRef<string | null>(null);
-  if (loading) return <ActivityIndicator color={RC.gold} />;
+  if (loading) return <ActivityIndicator color={RC.brand} />;
   if (!status) return <StateNote text="XP convert load nahi hua." />;
   const rate = Number(status.xpPerDiamond) || 0;
   const max = Number(status.availableDiamonds) || 0;
@@ -1039,11 +1039,11 @@ function makeStyles(RC: RewardsPalette) {
     screen: { flex: 1, backgroundColor: RC.bg },
     header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 6 },
     brand: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 20 },
-    bell: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: RC.tint, borderWidth: 1, borderColor: RC.borderSoft },
+    bell: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: RC.tint },
     bellBadge: { position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: RC.red, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
     bellBadgeText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 10 },
     hero: { alignItems: 'center', gap: 2 },
-    heroTitle: { color: RC.gold, fontFamily: 'Urbanist-Bold', fontSize: 30, fontStyle: 'italic', textShadowColor: RC.isDark ? RC.magenta : 'rgba(192,38,211,0.25)', textShadowRadius: RC.isDark ? 12 : 6 },
+    heroTitle: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 28 },
     heroSub: { color: RC.sub, fontFamily: 'Urbanist-SemiBold', fontSize: 13 },
     balances: { flexDirection: 'row', alignItems: 'stretch', padding: 0 },
     balanceHalf: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, minHeight: 92 },
@@ -1055,7 +1055,7 @@ function makeStyles(RC: RewardsPalette) {
     xpNext: { color: RC.muted, fontFamily: 'Urbanist-Medium', fontSize: 10.5 },
     levelBadge: { width: 50, alignItems: 'center', justifyContent: 'center' },
     levelNum: { position: 'absolute', top: 18, color: '#3B1A00', fontFamily: 'Urbanist-Bold', fontSize: 14 },
-    levelUp: { color: RC.gold, fontFamily: 'Urbanist-Bold', fontSize: 8, letterSpacing: 0.6 },
+    levelUp: { color: RC.brand, fontFamily: 'Urbanist-Bold', fontSize: 8, letterSpacing: 0.6 },
     shortcuts: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' },
     shortcut: { width: 64, minHeight: 74, alignItems: 'center', justifyContent: 'center', gap: 4, borderRadius: 16, borderWidth: 1, borderColor: RC.borderSoft, backgroundColor: RC.card, paddingHorizontal: 2, flexGrow: 1 },
     shortcutText: { color: RC.text, fontFamily: 'Urbanist-SemiBold', fontSize: 10.5 },
@@ -1064,19 +1064,19 @@ function makeStyles(RC: RewardsPalette) {
     cardSub: { color: RC.sub, fontFamily: 'Urbanist-Medium', fontSize: 12 },
     cardTitleSm: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 15 },
     cardSubSm: { color: RC.sub, fontFamily: 'Urbanist-Medium', fontSize: 11, textAlign: 'center' },
-    streakPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(245,158,11,0.18)', borderWidth: 1, borderColor: RC.goldDeep, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
-    streakPillText: { color: RC.gold, fontFamily: 'Urbanist-Bold', fontSize: 12.5 },
+    streakPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: RC.brandSoft, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
+    streakPillText: { color: RC.brand, fontFamily: 'Urbanist-Bold', fontSize: 12.5 },
     days: { flexDirection: 'row', justifyContent: 'space-between', gap: 4, marginBottom: 12 },
     day: { flex: 1, alignItems: 'center', gap: 3 },
     dayBox: { width: '100%', aspectRatio: 1, maxWidth: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: RC.tint, borderWidth: 1, borderColor: RC.borderSoft },
-    dayReady: { borderColor: RC.goldDeep, borderWidth: 2, backgroundColor: 'rgba(255,213,74,0.16)', shadowColor: RC.goldDeep, shadowOpacity: RC.isDark ? 0.7 : 0.35, shadowRadius: 10, elevation: 6 },
+    dayReady: { borderColor: RC.brand, borderWidth: 2, backgroundColor: RC.brandSoft },
     dayClaimed: { borderColor: 'transparent', backgroundColor: 'transparent' },
     dayLabel: { color: RC.sub, fontFamily: 'Urbanist-SemiBold', fontSize: 10.5 },
-    dayAmt: { color: RC.cyan, fontFamily: 'Urbanist-Bold', fontSize: 10.5 },
+    dayAmt: { color: RC.sub, fontFamily: 'Urbanist-Bold', fontSize: 10.5 },
     weekRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
     nextReward: { alignItems: 'flex-end', gap: 1 },
     nextLabel: { color: RC.muted, fontFamily: 'Urbanist-SemiBold', fontSize: 10.5 },
-    doneRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', paddingVertical: 10, borderRadius: 16, backgroundColor: 'rgba(52,211,153,0.12)' },
+    doneRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', paddingVertical: 10, borderRadius: 16, backgroundColor: RC.tint },
     doneText: { color: RC.green, fontFamily: 'Urbanist-Bold', fontSize: 13 },
     mission: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     missionTitle: { color: RC.text, fontFamily: 'Urbanist-SemiBold', fontSize: 14 },
@@ -1085,14 +1085,14 @@ function makeStyles(RC: RewardsPalette) {
     rewardGrid: { flexDirection: 'row', gap: 8 },
     rewardTile: { flex: 1, minWidth: 0, alignItems: 'center', gap: 3, paddingVertical: 10, paddingHorizontal: 4, borderRadius: 16, borderWidth: 1, borderColor: RC.borderSoft, backgroundColor: RC.tint },
     rewardLabel: { color: RC.text, fontFamily: 'Urbanist-SemiBold', fontSize: 11 },
-    rewardValue: { color: RC.cyan, fontFamily: 'Urbanist-Bold', fontSize: 12 },
+    rewardValue: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 12 },
     levelTile: { width: 104, alignItems: 'center', gap: 4, paddingVertical: 10, paddingHorizontal: 6, borderRadius: 16, borderWidth: 1, borderColor: RC.borderSoft, backgroundColor: RC.tint, minHeight: 150 },
     levelTileLv: { color: RC.sub, fontFamily: 'Urbanist-Bold', fontSize: 13 },
     levelTileItems: { color: RC.text, fontFamily: 'Urbanist-SemiBold', fontSize: 11, maxWidth: '100%' },
     levelTileState: { color: RC.muted, fontFamily: 'Urbanist-Bold', fontSize: 11, marginTop: 'auto' },
     footnote: { color: RC.muted, fontFamily: 'Urbanist-Medium', fontSize: 11, marginTop: 10, textAlign: 'center' },
-    limitPill: { borderRadius: 12, borderWidth: 1, borderColor: RC.goldDeep, paddingHorizontal: 9, paddingVertical: 4, backgroundColor: 'rgba(255,213,74,0.12)' },
-    limitText: { color: RC.gold, fontFamily: 'Urbanist-Bold', fontSize: 11 },
+    limitPill: { borderRadius: 12, paddingHorizontal: 9, paddingVertical: 4, backgroundColor: RC.brandSoft },
+    limitText: { color: RC.brand, fontFamily: 'Urbanist-Bold', fontSize: 11 },
     watchBody: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     watchEarnUpTo: { color: RC.sub, fontFamily: 'Urbanist-SemiBold', fontSize: 12 },
     pair: { flexDirection: 'row', gap: 10 },
@@ -1104,7 +1104,7 @@ function makeStyles(RC: RewardsPalette) {
     refStatValue: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 13 },
     refStatLabel: { color: RC.muted, fontFamily: 'Urbanist-Medium', fontSize: 10 },
     refLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, minHeight: 28 },
-    refLinkText: { color: RC.cyan, fontFamily: 'Urbanist-Bold', fontSize: 12 },
+    refLinkText: { color: RC.brand, fontFamily: 'Urbanist-Bold', fontSize: 12 },
     rateRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
     rate: { color: RC.sub, fontFamily: 'Urbanist-SemiBold', fontSize: 11.5, textAlign: 'center' },
     convertRow: { flexDirection: 'row', justifyContent: 'center' },
@@ -1112,18 +1112,18 @@ function makeStyles(RC: RewardsPalette) {
     step: { width: 34, height: 38, alignItems: 'center', justifyContent: 'center' },
     stepText: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 18 },
     stepValue: { flex: 1, textAlign: 'center', color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 13 },
-    event: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 16, padding: 12, borderWidth: 1.5, borderColor: '#F0ABFC' },
+    event: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 16, padding: 12 },
     eventArt: { width: 80, alignItems: 'center' },
     eventTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    // On the event gradient in both themes, so the gold stays the bright one.
-    eventTitle: { color: '#FFD54A', fontFamily: 'Urbanist-Bold', fontSize: 17, flexShrink: 1, fontStyle: 'italic' },
-    eventDesc: { color: '#FCE7F3', fontFamily: 'Urbanist-Medium', fontSize: 12 },
+    // White on the brand gradient in both themes.
+    eventTitle: { color: '#FFFFFF', fontFamily: 'Urbanist-Bold', fontSize: 17, flexShrink: 1 },
+    eventDesc: { color: 'rgba(255,255,255,0.88)', fontFamily: 'Urbanist-Medium', fontSize: 12 },
     eventMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
     eventMeta: { color: '#FFFFFF', fontFamily: 'Urbanist-Bold', fontSize: 11.5 },
-    live: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EF4444', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+    live: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.28)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
     liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF' },
     liveText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 10 },
-    lock: { position: 'absolute', right: -2, bottom: -2, width: 16, height: 16, borderRadius: 8, backgroundColor: '#4C1D95', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: RC.borderSoft },
+    lock: { position: 'absolute', right: -2, bottom: -2, width: 16, height: 16, borderRadius: 8, backgroundColor: RC.isDark ? '#2A2D38' : '#7A7A80', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: RC.borderSoft },
     tileCard: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
     recentIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: RC.tint },
     sheetBack: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: 24 },

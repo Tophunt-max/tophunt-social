@@ -10,6 +10,7 @@ import { emitToast } from '@/src/lib/toastBridge';
 import { BRAND, BRAND_GRAD, GOLD, PAD, useExplorePalette } from '@/src/components/explore/theme';
 import { CoinMeter, DANGER, GhostButton, GradientButton, PricePill, ShopCard, ShopHeader, Stepper } from '@/src/components/shop/ShopBits';
 import { VOTE_GRAD } from '@/src/components/shop/DigitalItemCard';
+import { BRAND_BUTTON } from '@/src/theme/tophunt';
 import { DiscountTag } from '@/src/components/shop/premium/DiscountTag';
 import { discountOf } from '@/src/lib/shopModel';
 import { useAuth } from '@/src/hooks/useAuth';
@@ -180,7 +181,7 @@ export default function ProductScreen() {
                       activeOpacity={0.85}
                     >
                       {on ? (
-                        <LinearGradient colors={BRAND_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.chip}>
+                        <LinearGradient colors={BRAND_BUTTON} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.chip}>
                           <Ionicons name="checkmark" size={13} color="#FFF" />
                           <Text style={[styles.chipText, { color: '#FFF' }]}>{label}</Text>
                         </LinearGradient>

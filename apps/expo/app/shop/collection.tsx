@@ -16,6 +16,7 @@ import { Ionicons } from '@/src/lib/icons';
 import { useAuth } from '@/src/hooks/useAuth';
 import { PremiumCollection } from '@/src/components/shop/collection/PremiumCollection';
 import { XpCollection } from '@/src/components/shop/collection/XpCollection';
+import { BRAND } from '@/src/theme/tophunt';
 
 type CollectionTab = 'premium' | 'xp';
 
@@ -23,14 +24,14 @@ const BG = '#07111F';
 const BORDER = '#1E3A5F';
 const TEXT = '#F8FAFC';
 const MUTED = '#94A3B8';
-const PINK = '#FF4D86';
-const CYAN = '#22D3EE';
+/** Active tab: the app brand pink (constants/theme.ts Colors.primary). */
+const ACTIVE = BRAND;
 
 export const parseCollectionTab = (v: unknown): CollectionTab => ((Array.isArray(v) ? v[0] : v) === 'xp' ? 'xp' : 'premium');
 
 const TABS: { key: CollectionTab; label: string; sub: string; icon: string; color: string }[] = [
-  { key: 'premium', label: 'My Premium Collection', sub: 'DP coin', icon: 'diamond', color: PINK },
-  { key: 'xp', label: 'XP Collection', sub: 'Level 1-100', icon: 'star', color: CYAN },
+  { key: 'premium', label: 'My Premium Collection', sub: 'DP coin', icon: 'diamond', color: ACTIVE },
+  { key: 'xp', label: 'XP Collection', sub: 'Level 1-100', icon: 'star', color: ACTIVE },
 ];
 
 export default function MyCollectionScreen() {

@@ -520,8 +520,8 @@ export function ClockIcon({ size }: IconProps) {
   );
 }
 
-/** Line cube (placeholder product frames). */
-export function CubeLine({ size, color = '#8B7FB8' }: IconProps) {
+/** Line cube (placeholder product frames). The default neutral grey reads on light and dark cards. */
+export function CubeLine({ size, color = TH.colors.sub }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
       <Path d="M12 2.5 L20.5 7 V17 L12 21.5 L3.5 17 V7 Z M3.5 7 L12 11.5 L20.5 7 M12 11.5 V21.5" fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />

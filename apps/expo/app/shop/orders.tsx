@@ -94,7 +94,7 @@ const styles = StyleSheet.create({
   rowWrap: { flexDirection: 'row' },
   accent: { width: 4 },
   rowInner: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 },
-  units: { position: 'absolute', right: -6, bottom: -6, backgroundColor: '#8B5CF6', borderRadius: 10, minWidth: 22, height: 20, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
+  units: { position: 'absolute', right: -6, bottom: -6, backgroundColor: BRAND, borderRadius: 10, minWidth: 22, height: 20, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
   unitsText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 10 },
   name: { fontFamily: 'Urbanist-Bold', fontSize: 14.5 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 4 },

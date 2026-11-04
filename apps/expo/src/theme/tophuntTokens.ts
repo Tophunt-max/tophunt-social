@@ -10,45 +10,61 @@
  * screens ask for 'Urbanist-Black', which is not loaded and falls back.)
  */
 
+/**
+ * The app brand (constants/theme.ts Colors.primary, Explore BRAND): the pink
+ * every other screen uses for buttons, active tabs, links and the + button.
+ * Shop and Earn use the same pink so they look like the rest of TopHunt.
+ */
+export const BRAND = '#FF4D67';
+export const BRAND_DEEP = '#E8364F';
+/** Primary button fill (light top → brand). */
+export const BRAND_BUTTON: [string, string] = ['#FF6B81', '#FF4D67'];
+/** The Explore brand gradient (pink → violet) for hero banners and highlights. */
+export const BRAND_GRAD: [string, string] = ['#FF4D67', '#8B5CF6'];
+
 export const TH = {
   colors: {
-    primary: '#8B5CF6',
-    royal: '#6D28D9',
-    /** Neon store background (reference layout): #0B0620 → #120A2E. */
-    deep: '#0B0620',
-    deep2: '#120A2E',
-    card: '#1A0F3D',
-    /** Purple glow border on dark cards. */
-    neonBorder: 'rgba(168,85,247,0.45)',
-    neon: '#A855F7',
-    lilac: '#C4B5FD',
+    /** Brand pink (buttons, active states, links). */
+    primary: BRAND,
+    /** Deeper brand pink (gradient ends, pressed / link on light). */
+    royal: BRAND_DEEP,
+    /** Page background (dark): the app's dark background. */
+    deep: '#0F0F13',
+    deep2: '#16171E',
+    card: '#16171E',
+    /** Card border (dark). */
+    neonBorder: '#23262F',
+    neon: BRAND,
+    lilac: '#FFB3C0',
+    /** DP coin / Legendary gold. Currency and rarity only, never a button. */
     gold: '#FFC857',
     goldDeep: '#F59E0B',
-    electric: '#38BDF8',
+    electric: '#8B5CF6',
+    /** Diamond currency cyan. Currency only, never a button. */
     diamond: '#22D3EE',
     success: '#22C55E',
     danger: '#F43F5E',
-    pink: '#EC4899',
-    sub: '#A5A5C5',
+    pink: BRAND,
+    sub: '#8B8F9A',
     white: '#FFFFFF',
   },
   gradients: {
-    hero: ['#6D28D9', '#8B5CF6', '#38BDF8'] as [string, string, string],
+    hero: ['#FF4D67', '#C2417F', '#8B5CF6'] as [string, string, string],
     gold: ['#FFC857', '#F59E0B'] as [string, string],
     diamond: ['#22D3EE', '#38BDF8'] as [string, string],
-    pink: ['#EC4899', '#8B5CF6'] as [string, string],
+    pink: BRAND_GRAD,
     /** Page background (dark mode). */
-    neonBg: ['#0B0620', '#120A2E'] as [string, string],
-    /** Active tab pill: light purple. */
-    tabOn: ['#C4B5FD', '#A855F7'] as [string, string],
-    /** Yellow CTA. */
-    cta: ['#FFE066', '#FFC857'] as [string, string],
-    /** Hero banner (purple / magenta). */
-    banner: ['#2A0B5E', '#4C1D95', '#831843'] as [string, string, string],
-    /** Gold title text fill (used as a solid fallback where gradients are not drawn on text). */
+    neonBg: ['#0F0F13', '#0F0F13'] as [string, string],
+    /** Active tab pill: brand pink. */
+    tabOn: BRAND_BUTTON,
+    /** Primary call to action: brand pink. */
+    cta: BRAND_BUTTON,
+    /** Hero banner (dark, brand-tinted). */
+    banner: ['#1B1D26', '#3A1A2A', '#4A1832'] as [string, string, string],
+    /** Title text fill solid fallback. */
     goldText: ['#FFE8A3', '#FFC857', '#F59E0B'] as [string, string, string],
     /** Dark preview stage behind item artwork (both modes: items are designed on dark). */
-    stage: ['#1A1440', '#14142B', '#0D0D22'] as [string, string, string],
+    stage: ['#22232E', '#181920', '#101117'] as [string, string, string],
   },
   radii: { xs: 8, sm: 12, md: 16, lg: 20, xl: 24, xxl: 28, pill: 999 },
   spacing: { xxs: 4, xs: 6, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 },
@@ -87,31 +103,31 @@ export const TH_DARK: TophuntSurfaces = {
   isDark: true,
   bg: TH.colors.deep,
   card: TH.colors.card,
-  cardAlt: '#241452',
-  border: '#2E1D5E',
+  cardAlt: '#1B1D26',
+  border: '#23262F',
   text: '#FFFFFF',
-  sub: '#B9AEDC',
-  glass: 'rgba(255,255,255,0.08)',
-  skeleton: '#251653',
+  sub: '#8B8F9A',
+  glass: 'rgba(255,255,255,0.06)',
+  skeleton: '#22252E',
   bgGradient: TH.gradients.neonBg,
-  glowBorder: TH.colors.neonBorder,
-  glowShadow: TH.colors.neon,
+  glowBorder: '#23262F',
+  glowShadow: '#000000',
   gold: TH.colors.gold,
 };
 
 export const TH_LIGHT: TophuntSurfaces = {
   isDark: false,
-  bg: '#F6F5FF',
+  bg: '#F9F9FB',
   card: '#FFFFFF',
-  cardAlt: '#EFEDFF',
-  border: '#E4E1F7',
-  text: '#1B1530',
-  sub: '#6B6890',
-  glass: 'rgba(109,40,217,0.07)',
-  skeleton: '#E9E6FA',
-  bgGradient: ['#F6F5FF', '#EEE8FF'],
-  glowBorder: 'rgba(139,92,246,0.35)',
-  glowShadow: '#8B5CF6',
+  cardAlt: '#F1F2F6',
+  border: '#EEEEF2',
+  text: '#121212',
+  sub: '#7A7A80',
+  glass: 'rgba(18,18,18,0.05)',
+  skeleton: '#ECEDF1',
+  bgGradient: ['#F9F9FB', '#F9F9FB'],
+  glowBorder: '#EEEEF2',
+  glowShadow: '#000000',
   gold: '#B45309',
 };
 
