@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """
-Generates the Rewards Center artwork in apps/expo/assets/earning/ (SVG, 64x64
-art box) and the claim-burst Lottie animation. One script so every piece
-shares the same palette, gloss and outline treatment. Re-run after editing:
+Generates the Rewards Center artwork SOURCES in apps/expo/design/earning/
+(SVG, 64x64 art box) and the claim-burst Lottie animation in
+apps/expo/assets/earning/animations/. One script so every piece shares the
+same palette, gloss and outline treatment.
+
+The app does not ship these SVGs: scripts/gen-earning-webp.mjs renders each
+one to the WebP the app bundles (apps/expo/assets/earning/**.webp), adding the
+raster-only finish (soft glow, drop shadow, sheen). Re-run both after editing:
 
     python3 apps/expo/scripts/gen-earning-assets.py
+    node apps/expo/scripts/gen-earning-webp.mjs
 
 Gradient ids are prefixed per file, so several different SVGs inlined on one
 web page never resolve each other's gradients.
@@ -12,7 +18,8 @@ web page never resolve each other's gradients.
 import json
 import os
 
-ROOT = os.path.join(os.path.dirname(__file__), "..", "assets", "earning")
+ROOT = os.path.join(os.path.dirname(__file__), "..", "design", "earning")
+ANIM_ROOT = os.path.join(os.path.dirname(__file__), "..", "assets", "earning")
 
 GOLD = ("#FFF3A6", "#FFD54A", "#F59E0B")
 PURPLE = ("#E9D5FF", "#A855F7", "#5B21B6")
@@ -354,11 +361,11 @@ def main():
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, "w") as f:
             f.write(content + "\n")
-    anim = os.path.join(ROOT, "animations")
+    anim = os.path.join(ANIM_ROOT, "animations")
     os.makedirs(anim, exist_ok=True)
     with open(os.path.join(anim, "diamond-claim.json"), "w") as f:
         json.dump(lottie_burst(), f, separators=(",", ":"))
-    print(f"wrote {len(ART)} svg + 1 lottie to {os.path.relpath(ROOT)}")
+    print(f"wrote {len(ART)} svg to {os.path.relpath(ROOT)} + 1 lottie to {os.path.relpath(anim)}")
 
 
 if __name__ == "__main__":

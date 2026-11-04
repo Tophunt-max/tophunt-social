@@ -65,7 +65,9 @@ export interface EarningAnalytics {
   events: { id: string; title: string; claims: number; users: number; participants: number; diamonds: number }[];
   topEarners: { rank: number; uid: string; username: string | null; fullName: string | null; diamonds: number }[];
 }
-export interface EarningAssetRow { key: string; file: string; group: string; url: string | null }
+export interface EarningAssetRow { key: string; file: string; group: string; url: string | null; changedBy: string | null; changedAt: number | null }
+export interface EarningAssetRules { minSide: number; maxSide: number; square: boolean; alpha: boolean }
+export interface EarningAssetHistoryRow { id: string; action: string; url: string | null; by: string | null; at: number }
 export interface EarningAuditRow {
   id: string;
   adminUid: string | null;
@@ -1011,7 +1013,8 @@ export const api = {
     eventParticipants: (id: string) => get<any[]>(`/admin/earning/events/${encodeURIComponent(id)}/participants`),
     analytics: (days: number) => get<EarningAnalytics>(`/admin/earning/analytics?days=${days}`),
     exportCsv: (kind: "daily" | "ledger", days: number) => downloadFile(`/admin/earning/export?kind=${kind}&days=${days}`, `tophunt-earning-${kind}.csv`),
-    assets: () => get<{ maxBytes: number; types: string[]; assets: EarningAssetRow[] }>("/admin/earning/assets"),
+    assets: () => get<{ maxBytes: number; types: string[]; rules: EarningAssetRules; assets: EarningAssetRow[] }>("/admin/earning/assets"),
+    assetHistory: (key: string) => get<EarningAssetHistoryRow[]>(`/admin/earning/assets/${encodeURIComponent(key)}/history`),
     saveAsset: (key: string, url: string | null) => put<{ success: boolean; key: string; url: string | null }>(`/admin/earning/assets/${encodeURIComponent(key)}`, { url }),
     uploadAsset: uploadEarningAsset,
     audit: (before?: string | null) => get<{ items: EarningAuditRow[]; nextCursor: string | null }>(`/admin/earning/audit?limit=50${before ? `&before=${encodeURIComponent(before)}` : ""}`),

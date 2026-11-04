@@ -10,6 +10,7 @@ import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSprin
 import LottieView from 'lottie-react-native';
 import { EARNING_ANIMATIONS, EARNING_ART, type EarningArtKey } from '@/assets/earning';
 import { SparkleBurst } from '@/src/components/gamification/SparkleBurst';
+import { Image } from 'expo-image';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { useEarningAssets } from '@/src/services/appSettings';
 import { safeArtUrl } from '@/src/lib/rewardsCenter';
@@ -39,19 +40,32 @@ export const PURPLE_GRAD: [string, string] = ['#A855F7', '#6D28D9'];
 
 /**
  * One Rewards Center artwork slot. Draws the admin's uploaded WebP / PNG for
- * this key when there is one (appConfig.earningAssets), else the built-in SVG;
- * an image that fails to load falls back to the SVG too.
+ * this key when there is one (appConfig.earningAssets), else the bundled
+ * WebP. While an upload loads, the bundled art is the placeholder, and if it
+ * fails to load the slot stays on the bundled art. Uploads are fetched as a
+ * resized variant for the slot (AppImage `displayWidth`), never full size.
  */
 export function Art({ name, size, style }: { name: EarningArtKey; size: number; style?: StyleProp<ViewStyle> }) {
   const url = safeArtUrl(useEarningAssets()?.[name]);
   const [failed, setFailed] = useState<string | null>(null);
-  const C = EARNING_ART[name];
+  const bundled = EARNING_ART[name];
+  const box = { width: size, height: size };
   return (
-    <View style={[{ width: size, height: size }, style]} pointerEvents="none">
+    <View style={[box, style]} pointerEvents="none">
       {url && failed !== url ? (
-        <AppImage source={{ uri: url }} style={{ width: size, height: size }} contentFit="contain" transition={0} onError={() => setFailed(url)} />
+        <AppImage
+          source={{ uri: url }}
+          displayWidth={size}
+          placeholder={bundled}
+          placeholderContentFit="contain"
+          style={box}
+          contentFit="contain"
+          transition={120}
+          onError={() => setFailed(url)}
+          accessible={false}
+        />
       ) : (
-        <C width={size} height={size} />
+        <Image source={bundled} style={box} contentFit="contain" transition={0} cachePolicy="memory" accessible={false} />
       )}
     </View>
   );

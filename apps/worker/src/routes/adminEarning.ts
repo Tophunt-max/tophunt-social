@@ -15,7 +15,16 @@ import { getProgression } from "../lib/progression";
 import { appConfigChannels, publicAppConfig } from "../lib/appControl";
 import { publishMany } from "../lib/publish";
 import { edgePurgeUrl } from "../lib/edgeCache";
-import { EARNING_ART_FILES, EARNING_ART_KEYS, isEarningAssetUrl, sanitizeEarningAssets } from "../lib/earningAssets";
+import {
+  EARNING_ART_FILES,
+  EARNING_ART_KEYS,
+  EARNING_ASSET_MAX_BYTES,
+  EARNING_ASSET_MAX_SIDE,
+  EARNING_ASSET_MIME_TYPES,
+  EARNING_ASSET_MIN_SIDE,
+  isEarningAssetUrl,
+  sanitizeEarningAssets,
+} from "../lib/earningAssets";
 import { earningAnalytics, earningDailyCsv, earningLedgerCsv, earningWindow } from "../lib/earningAnalytics";
 
 type Audit = (c: any, action: string, targetType: string, targetId: string | null, detail?: Record<string, unknown>) => Promise<void>;
@@ -79,10 +88,25 @@ export function registerEarningRoutes(adminRoute: App, requireFullAdmin: (c: any
     requireFullAdmin(c);
     const cfg = (await getAppConfig(c.env)) || {};
     const current = sanitizeEarningAssets(cfg.earningAssets, c.env.R2_PUBLIC_BASE_URL);
+    // Who last changed each key, from the audit trail (newest first).
+    const recent = await c.env.DB.prepare(
+      `SELECT target_id, admin_email, admin_uid, created_at FROM admin_audit_log
+        WHERE action IN ('earning.asset.update', 'earning.asset.reset') ORDER BY created_at DESC LIMIT 500`,
+    ).all<any>();
+    const last = new Map<string, { by: string | null; at: number }>();
+    for (const r of recent.results ?? []) if (!last.has(r.target_id)) last.set(r.target_id, { by: r.admin_email || r.admin_uid || null, at: Number(r.created_at) });
     return c.json({
-      maxBytes: 1024 * 1024,
-      types: ["image/webp", "image/png"],
-      assets: EARNING_ART_FILES.map(([key, file]) => ({ key, file, group: file.split("/")[0], url: current[key] ?? null })),
+      maxBytes: EARNING_ASSET_MAX_BYTES,
+      types: EARNING_ASSET_MIME_TYPES,
+      rules: { minSide: EARNING_ASSET_MIN_SIDE, maxSide: EARNING_ASSET_MAX_SIDE, square: true, alpha: true },
+      assets: EARNING_ART_FILES.map(([key, file]) => ({
+        key,
+        file,
+        group: file.split("/")[0],
+        url: current[key] ?? null,
+        changedBy: last.get(key)?.by ?? null,
+        changedAt: last.get(key)?.at ?? null,
+      })),
     });
   });
 
@@ -95,6 +119,13 @@ export function registerEarningRoutes(adminRoute: App, requireFullAdmin: (c: any
     const url = b?.url ?? null;
     if (url !== null && !isEarningAssetUrl(url, c.env.R2_PUBLIC_BASE_URL)) {
       throw httpsError("invalid-argument", "Upload the image first (WebP or PNG); only our own earning-assets uploads can be used.");
+    }
+    if (url !== null) {
+      // The object must really be there (an upload that failed half-way, or a
+      // pasted URL of something since removed, would show a broken slot).
+      const objectKey = url.slice(String(c.env.R2_PUBLIC_BASE_URL).replace(/\/+$/, "").length + 1);
+      const head = await c.env.MEDIA.head(objectKey).catch(() => null);
+      if (!head) throw httpsError("invalid-argument", "That upload was not found in storage. Upload the image again.");
     }
     const existing = structuredClone((await getAppConfig(c.env)) || {});
     const before = sanitizeEarningAssets(existing.earningAssets, c.env.R2_PUBLIC_BASE_URL);
@@ -113,6 +144,30 @@ export function registerEarningRoutes(adminRoute: App, requireFullAdmin: (c: any
     c.executionCtx.waitUntil(publishMany(c.env, appConfigChannels(), { type: "config", config: pushed }));
     await logAudit(c, url ? "earning.asset.update" : "earning.asset.reset", "earning_asset", key, { before: before[key] ?? null, after: url });
     return c.json({ success: true, key, url, version: merged._version });
+  });
+
+  /** Previous artwork for one key (from the audit trail), so an admin can restore an earlier upload. */
+  adminRoute.get("/earning/assets/:key/history", async (c) => {
+    requireFullAdmin(c);
+    const key = c.req.param("key");
+    if (!EARNING_ART_KEYS.has(key)) throw httpsError("invalid-argument", "Unknown artwork key.");
+    const rows = await c.env.DB.prepare(
+      `SELECT id, action, admin_email, admin_uid, detail, created_at FROM admin_audit_log
+        WHERE action IN ('earning.asset.update', 'earning.asset.reset') AND target_id = ?
+        ORDER BY created_at DESC, id DESC LIMIT 30`,
+    ).bind(key).all<any>();
+    return c.json(
+      (rows.results ?? []).map((r) => {
+        let d: any = {};
+        try {
+          d = typeof r.detail === "string" ? JSON.parse(r.detail) : r.detail || {};
+        } catch {
+          d = {};
+        }
+        const url = isEarningAssetUrl(d?.after, c.env.R2_PUBLIC_BASE_URL) ? d.after : null;
+        return { id: r.id, action: r.action, url, by: r.admin_email || r.admin_uid || null, at: Number(r.created_at) };
+      }),
+    );
   });
 
   // ---- audit trail: ?limit=&before=<createdAt ms>:<id> ----

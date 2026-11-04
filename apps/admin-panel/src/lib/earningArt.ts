@@ -1,14 +1,15 @@
 /**
- * Built-in Rewards Center artwork (apps/expo/assets/earning, SVG), so the
- * Assets page can show the default next to an uploaded override. Keyed by the
- * file path the Worker reports per key (worker lib/earningAssets.ts).
+ * Bundled Rewards Center artwork (apps/expo/assets/earning, transparent WebP),
+ * so the Assets page shows exactly what the app draws by default next to an
+ * uploaded override. Keyed by the file path the Worker reports per key
+ * (worker lib/earningAssets.ts).
  */
-const files = import.meta.glob("../../../expo/assets/earning/**/*.svg", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
+const files = import.meta.glob("../../../expo/assets/earning/**/*.webp", { eager: true, query: "?url", import: "default" }) as Record<string, string>;
 
 const byFile: Record<string, string> = {};
 for (const [path, url] of Object.entries(files)) byFile[path.replace(/^.*\/assets\/earning\//, "")] = url;
 
-/** URL of the default SVG for a registry file such as `currencies/diamond.svg`, or null. */
+/** URL of the bundled WebP for a registry file such as `currencies/diamond.webp`, or null. */
 export const defaultEarningArt = (file: string): string | null => byFile[file] ?? null;
 
 /** Friendly names for the earning ledger types on the dashboard. */
