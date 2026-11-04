@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { History, RotateCcw, Upload } from "lucide-react";
 import { api, describeError, type EarningAssetRow, type EarningAssetRules } from "@/lib/api";
@@ -44,7 +44,8 @@ const CARD_BG = "linear-gradient(160deg, #2A1056, #1C0B3A)";
 
 interface Checked {
   file: File;
-  preview: string;
+  /** The decoded picked image. Previews are drawn from it onto canvases, never via an <img src>. */
+  image: ImageBitmap;
   width: number;
   height: number;
   transparent: boolean;
@@ -54,16 +55,16 @@ interface Checked {
 async function checkFile(file: File, rules: EarningAssetRules): Promise<Checked> {
   if (!TYPES.includes(file.type)) throw new Error("WebP ya PNG image chuno.");
   if (file.size > MAX_BYTES) throw new Error(`Image 1 MB se chhoti honi chahiye (ye ${(file.size / 1024 / 1024).toFixed(2)} MB hai).`);
-  const preview = URL.createObjectURL(file);
+  // Decoded straight from the File bytes (no object URL, nothing is put into the DOM as markup).
+  let img: ImageBitmap;
   try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const i = new Image();
-      i.onload = () => resolve(i);
-      i.onerror = () => reject(new Error("Image khul nahi payi. File kharab ho sakti hai."));
-      i.src = preview;
-    });
-    const w = img.naturalWidth;
-    const h = img.naturalHeight;
+    img = await createImageBitmap(file);
+  } catch {
+    throw new Error("Image khul nahi payi. File kharab ho sakti hai.");
+  }
+  try {
+    const w = img.width;
+    const h = img.height;
     if (Math.abs(w - h) > Math.max(w, h) * 0.02) throw new Error(`Image square honi chahiye (ye ${w}x${h} hai).`);
     if (Math.min(w, h) < rules.minSide) throw new Error(`Kam se kam ${rules.minSide}x${rules.minSide} px chahiye (ye ${w}x${h} hai).`);
     if (Math.max(w, h) > rules.maxSide) throw new Error(`Zyada se zyada ${rules.maxSide}x${rules.maxSide} px (ye ${w}x${h} hai).`);
@@ -80,9 +81,9 @@ async function checkFile(file: File, rules: EarningAssetRules): Promise<Checked>
       for (let i = 3; i < data.length; i += 4) if (data[i] < 250) { transparent = true; break; }
     }
     if (rules.alpha && !transparent) throw new Error("Background transparent hona chahiye (WebP/PNG alpha ke saath export karo).");
-    return { file, preview, width: w, height: h, transparent };
+    return { file, image: img, width: w, height: h, transparent };
   } catch (e) {
-    URL.revokeObjectURL(preview);
+    img.close();
     throw e;
   }
 }
@@ -92,6 +93,35 @@ function Thumb({ src, size, label }: { src: string | null; size: number; label?:
     <div className="flex flex-col items-center gap-1">
       <div className="rounded-xl flex items-center justify-center" style={{ background: CARD_BG, width: size + 16, height: size + 16 }}>
         {src ? <img src={src} alt="" style={{ width: size, height: size }} className="object-contain" /> : <span className="text-[10px] text-white/50">—</span>}
+      </div>
+      {label ? <span className="text-[10px] text-muted-foreground">{label}</span> : null}
+    </div>
+  );
+}
+
+/** Draws a decoded image into a square canvas at `size` CSS px (sharp on high-DPI screens). */
+function CanvasImage({ image, size, className }: { image: ImageBitmap; size: number; className?: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    c.width = Math.round(size * dpr);
+    c.height = Math.round(size * dpr);
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, 0, 0, c.width, c.height);
+  }, [image, size]);
+  return <canvas ref={ref} style={{ width: size, height: size }} className={className} />;
+}
+
+function CanvasThumb({ image, size, label }: { image: ImageBitmap; size: number; label?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="rounded-xl flex items-center justify-center" style={{ background: CARD_BG, width: size + 16, height: size + 16 }}>
+        <CanvasImage image={image} size={size} />
       </div>
       {label ? <span className="text-[10px] text-muted-foreground">{label}</span> : null}
     </div>
@@ -128,7 +158,7 @@ function PreviewDialog({ row, checked, live, onClose, onPublished }: { row: Earn
         <div>
           <p className="text-xs font-semibold mb-2">New (app sizes)</p>
           <div className="flex items-end gap-4 flex-wrap">
-            {PREVIEW_SIZES.map((s) => <Thumb key={s} src={checked.preview} size={s} label={`${s} pt`} />)}
+            {PREVIEW_SIZES.map((s) => <CanvasThumb key={s} image={checked.image} size={s} label={`${s} pt`} />)}
           </div>
         </div>
         <div>
@@ -138,7 +168,7 @@ function PreviewDialog({ row, checked, live, onClose, onPublished }: { row: Earn
           </div>
         </div>
         <div className="flex items-center gap-3 p-3 rounded-xl bg-white border border-border">
-          <img src={checked.preview} alt="" className="w-12 h-12 object-contain" />
+          <CanvasImage image={checked.image} size={48} />
           <span className="text-xs text-muted-foreground">On a light background, to check the edges are clean.</span>
         </div>
         <div className="flex justify-end gap-2">
@@ -220,7 +250,7 @@ function Slot({ row, rules, onSaved }: { row: EarningAssetRow; rules: EarningAss
     }
   };
   const closePreview = () => {
-    if (checked) URL.revokeObjectURL(checked.preview);
+    checked?.image.close();
     setChecked(null);
   };
 
