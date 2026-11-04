@@ -100,7 +100,9 @@ describe('artwork URL rules', () => {
     expect(isEarningAssetUrl('https://cdn.test/earning-assets/2026/11/../../avatars/x.webp', 'https://cdn.test')).toBe(false);
     expect(isEarningAssetUrl(ASSET + '?x=1', 'https://cdn.test')).toBe(false);
     expect(isEarningAssetUrl(ASSET.replace('https', 'http'), 'http://cdn.test')).toBe(false);
-    expect(sanitizeEarningAssets({ diamond: ASSET, notAKey: ASSET, xp: 'javascript:alert(1)' })).toEqual({ diamond: ASSET });
+    expect(sanitizeEarningAssets({ giftBox: ASSET, notAKey: ASSET, streakFire: 'javascript:alert(1)' })).toEqual({ giftBox: ASSET });
+    // Currency icons are not replaceable: an old stored override is dropped.
+    expect(sanitizeEarningAssets({ diamond: ASSET, xp: ASSET, dpCoin: ASSET, diamondGlow: ASSET })).toEqual({});
   });
 
   it('reads PNG / WebP headers and applies the artwork rules', () => {
@@ -123,13 +125,14 @@ describe('artwork URL rules', () => {
   });
 
   it('knows every Rewards Center artwork key', () => {
-    expect(EARNING_ART_FILES.length).toBe(48);
-    expect(new Set(EARNING_ART_FILES.map(([k]) => k)).size).toBe(48);
+    expect(EARNING_ART_FILES.length).toBe(44);
+    expect(new Set(EARNING_ART_FILES.map(([k]) => k)).size).toBe(44);
+    for (const k of ['diamond', 'diamondGlow', 'xp', 'dpCoin']) expect(EARNING_ART_FILES.some(([key]) => key === k), k).toBe(false);
   });
 
   it('upload and save are sensitive routes', () => {
     expect(isSensitiveAdminRoute('POST', '/media/earning-asset')).toBe(true);
-    expect(isSensitiveAdminRoute('PUT', '/earning/assets/diamond')).toBe(true);
+    expect(isSensitiveAdminRoute('PUT', '/earning/assets/giftBox')).toBe(true);
     expect(isSensitiveAdminRoute('GET', '/earning/analytics')).toBe(false);
   });
 });
@@ -164,32 +167,33 @@ describe('artwork overrides', () => {
   it('set and reset reach the public app config; the full settings save leaves them alone', async () => {
     const env = await setup();
     expect((await admin(env, 'PUT', '/earning/assets/notAKey', { url: ASSET })).status).toBe(400);
-    expect((await admin(env, 'PUT', '/earning/assets/diamond', { url: 'https://evil.test/x.webp' })).status).toBe(400);
-    expect((await admin(env, 'PUT', '/earning/assets/diamond', { url: ASSET }, 'mod:moderator')).status).toBe(403);
+    expect((await admin(env, 'PUT', '/earning/assets/diamond', { url: ASSET })).status).toBe(400);
+    expect((await admin(env, 'PUT', '/earning/assets/giftBox', { url: 'https://evil.test/x.webp' })).status).toBe(400);
+    expect((await admin(env, 'PUT', '/earning/assets/giftBox', { url: ASSET }, 'mod:moderator')).status).toBe(403);
 
     // Not in storage yet: refused.
-    expect((await admin(env, 'PUT', '/earning/assets/diamond', { url: ASSET })).body.error.message).toContain('not found');
+    expect((await admin(env, 'PUT', '/earning/assets/giftBox', { url: ASSET })).body.error.message).toContain('not found');
     await env.MEDIA.put(ASSET.replace('https://cdn.test/', ''), new Uint8Array([1]));
-    const set = await admin(env, 'PUT', '/earning/assets/diamond', { url: ASSET });
+    const set = await admin(env, 'PUT', '/earning/assets/giftBox', { url: ASSET });
     expect(set.status).toBe(200);
     const list = await admin(env, 'GET', '/earning/assets');
-    expect(list.body.assets.find((a: any) => a.key === 'diamond')).toMatchObject({ url: ASSET, file: 'currencies/diamond.webp', group: 'currencies', changedBy: expect.anything() });
+    expect(list.body.assets.find((a: any) => a.key === 'giftBox')).toMatchObject({ url: ASSET, file: 'streak/gift-box.webp', group: 'streak', changedBy: expect.anything() });
     expect(list.body.rules).toEqual({ minSide: 128, maxSide: 2048, square: true, alpha: true });
-    expect(list.body.assets.find((a: any) => a.key === 'xp').url).toBeNull();
+    expect(list.body.assets.find((a: any) => a.key === 'streakFire').url).toBeNull();
 
     const pub = await app.request('/read/app-config', {}, env, fakeCtx());
-    expect(((await pub.json()) as any).earningAssets).toEqual({ diamond: ASSET });
+    expect(((await pub.json()) as any).earningAssets).toEqual({ giftBox: ASSET });
 
     // A full App Settings save with a stale copy can't remove or inject artwork.
     const save = await admin(env, 'POST', '/app-settings', { supportEmail: 'new@test', earningAssets: { xp: 'https://evil.test/x.webp' } });
     expect(save.status).toBe(200);
-    expect((await admin(env, 'GET', '/earning/assets')).body.assets.filter((a: any) => a.url).map((a: any) => a.key)).toEqual(['diamond']);
+    expect((await admin(env, 'GET', '/earning/assets')).body.assets.filter((a: any) => a.url).map((a: any) => a.key)).toEqual(['giftBox']);
 
-    expect((await admin(env, 'PUT', '/earning/assets/diamond', { url: null })).status).toBe(200);
+    expect((await admin(env, 'PUT', '/earning/assets/giftBox', { url: null })).status).toBe(200);
     const pub2 = await app.request('/read/app-config?_=2', {}, env, fakeCtx());
     expect(((await pub2.json()) as any).earningAssets).toEqual({});
 
-    const hist = await admin(env, 'GET', '/earning/assets/diamond/history');
+    const hist = await admin(env, 'GET', '/earning/assets/giftBox/history');
     expect(hist.body.map((h: any) => [h.action, h.url])).toEqual([['earning.asset.reset', null], ['earning.asset.update', ASSET]]);
     expect((await admin(env, 'GET', '/earning/assets/nope/history')).status).toBe(400);
     const audit = await admin(env, 'GET', '/earning/audit');

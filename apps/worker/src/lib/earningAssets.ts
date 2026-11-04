@@ -14,13 +14,11 @@ import { EARNING_ASSET_PREFIX } from "./mediaCategories";
 
 /**
  * [key, bundled WebP under apps/expo/assets/earning]. Must match the app
- * registry; apps/expo/test/earningAssets.test.ts checks it.
+ * registry; apps/expo/test/earningAssets.test.ts checks it. The currency
+ * icons (Diamond, XP, DP coin) are deliberately absent: the app draws its
+ * app-wide icons for them and they can't be replaced here.
  */
 export const EARNING_ART_FILES: ReadonlyArray<readonly [string, string]> = [
-  ["diamond", "currencies/diamond.webp"],
-  ["diamondGlow", "currencies/diamond-glow.webp"],
-  ["xp", "currencies/xp.webp"],
-  ["dpCoin", "currencies/dp-coin.webp"],
   ["sparkle", "currencies/reward-sparkle.webp"],
   ["rewardsCrown", "branding/rewards-crown.webp"],
   ["levelWings", "badges/level-wings.webp"],

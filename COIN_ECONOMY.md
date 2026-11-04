@@ -92,10 +92,12 @@ special events (the featured admin event, else the live season), achievements, l
 own: every amount, limit, progress bar and claim comes from the existing actions (`getDailyReward`,
 `getDailyTasks`, `getQuests`, `getAchievements`, `getXpConversion`, `/read/me/referrals`, the rewarded-ad
 platform with SSV) and every claim is re-checked by the Worker. Winning a contest pays 🪙 DP coin; the
-contest card says so and shows no Diamond amount. Artwork: `apps/expo/assets/earning/` (48 transparent WebP,
+contest card says so and shows no Diamond amount. Artwork: `apps/expo/assets/earning/` (44 transparent WebP,
 256 px, illustrations 384 px; registry `index.ts`) and the claim-burst Lottie. The WebP are rendered from the SVG
 sources in `apps/expo/design/earning/` (`scripts/gen-earning-assets.py`) by `scripts/gen-earning-webp.mjs`, which
-adds glow, drop shadow and sheen; the app bundles no SVG for this artwork. Admins can replace any piece (below).
+adds glow, drop shadow and sheen; the app bundles no SVG for this artwork. 💎 Diamond, ⚡ XP and 🪙 DP coin are not
+artwork: the Rewards Center draws the app-wide icons (`DiamondIcon`, the XP star, `CoinIcon`) like every other screen,
+and they can't be replaced from the panel. Admins can replace any other piece (below).
 
 ### Rewards Center Diamonds (missions, achievements, contests)
 

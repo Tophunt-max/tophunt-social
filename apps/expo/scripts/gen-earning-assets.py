@@ -56,6 +56,10 @@ def add(path, defs, body):
 
 
 # ---------------------------------------------------------------- currencies
+# Diamond, XP and DP coin are NOT drawn here: the Rewards Center uses the
+# app-wide currency icons (DiamondIcon, the XP star, CoinIcon), so the
+# currencies look the same on every screen. diamond() / coin() are kept for
+# reference only and are not called.
 def diamond(path, c=CYAN, glow=False):
     p = path.replace("/", "-").replace(".svg", "")
     defs = grad(f"{p}-a", c) + grad(f"{p}-b", (c[0], c[0], c[1]))
@@ -74,8 +78,6 @@ def diamond(path, c=CYAN, glow=False):
     add(path, defs, body)
 
 
-diamond("currencies/diamond.svg")
-diamond("currencies/diamond-glow.svg", glow=True)
 
 
 def coin(path, c, label):
@@ -90,8 +92,6 @@ def coin(path, c, label):
     add(path, defs, body)
 
 
-coin("currencies/xp.svg", PURPLE, "XP")
-coin("currencies/dp-coin.svg", GOLD, "DP")
 
 
 def sparkle(path, c=GOLD):

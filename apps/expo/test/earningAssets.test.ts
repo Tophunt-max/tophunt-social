@@ -31,7 +31,7 @@ describe('Rewards Center artwork', () => {
   const sources = walk(SRC).filter((f) => f.endsWith('.svg')).map((f) => path.relative(SRC, f));
 
   it('ships WebP only: every registry entry exists, every WebP is registered, no SVG is bundled', () => {
-    expect(requires.length).toBe(48);
+    expect(requires.length).toBe(44);
     for (const rel of requires) expect(fs.existsSync(path.join(DIR, rel)), rel).toBe(true);
     expect([...webps].sort()).toEqual([...new Set(requires)].sort());
     expect(walk(DIR).filter((f) => /\.(svg|png|jpe?g)$/i.test(f))).toEqual([]);
@@ -71,6 +71,13 @@ describe('Rewards Center artwork', () => {
     }
   });
 
+  it('Diamond, XP and DP coin use the app-wide icons, not bundled artwork', () => {
+    expect(registry).toContain("export const CURRENCY_ART = ['diamond', 'diamondGlow', 'xp', 'dpCoin'] as const;");
+    expect(webps.filter((r) => /currencies\/(diamond|diamond-glow|xp|dp-coin)\.webp$/.test(r))).toEqual([]);
+    const bits = fs.readFileSync(path.join(ROOT, 'src', 'components', 'rewardsCenter', 'RewardsBits.tsx'), 'utf8');
+    for (const icon of ['<DiamondIcon', '<CoinIcon', 'assetKey="xp.star"']) expect(bits).toContain(icon);
+  });
+
   it('the claim Lottie is valid local JSON', () => {
     const anim = JSON.parse(fs.readFileSync(path.join(DIR, 'animations', 'diamond-claim.json'), 'utf8'));
     expect(anim).toMatchObject({ fr: 60, w: 200, h: 200 });
@@ -84,7 +91,7 @@ describe('Rewards Center artwork', () => {
     const constFile = Object.fromEntries([...registry.matchAll(/const (\w+): ImageSourcePropType = require\('\.\/([^']+\.webp)'\)/g)].map((m) => [m[1], m[2]]));
     const body = registry.slice(registry.indexOf('export const EARNING_ART = {'), registry.indexOf('} satisfies'));
     const app = [...body.matchAll(/^\s+(\w+): (\w+),$/gm)].map((m) => [m[1], constFile[m[2]]]);
-    expect(app.length).toBe(48);
+    expect(app.length).toBe(44);
     expect(listed).toEqual(app);
   });
 });
