@@ -314,12 +314,15 @@ export default function ShopScreen() {
     else if (nav.kind === 'physical') setTab('physical');
     else router.push(nav.path as any);
   }, [openDigital, setTab, router]);
-  const onShelfAll = useCallback((type: ShelfType) => openDigital({ type }), [openDigital]);
+  // Each Digital shelf / card opens its own category page (/shop/category/[type]).
+  const openCategory = useCallback((type: string) => router.push(`/shop/category/${encodeURIComponent(type)}` as any), [router]);
+  const onShelfAll = useCallback((type: ShelfType) => openCategory(type), [openCategory]);
   const onSpecial = useCallback((c: SpecialCard) => {
-    if (c.target?.kind === 'type') openDigital({ type: c.target.type });
+    if (c.target?.kind === 'type') openCategory(c.target.type);
     else if (c.target?.kind === 'gifts') router.push('/wallet/gifts' as any);
     else if (c.state === 'soon') emitToast(`${c.title} jaldi aa raha hai`, 'info');
-  }, [openDigital, router]);
+  }, [openCategory, router]);
+  // "Sab digital items dekho": the full catalogue (search + filters) inside the Digital tab.
   const onBrowseAll = useCallback(() => {
     setFilter(NO_FILTER);
     setBrowseAll(true);
@@ -401,11 +404,11 @@ export default function ShopScreen() {
     <View style={{ paddingHorizontal: pad }}><EmptyState p={p} icon="sparkles" text="Abhi koi digital item sale par nahi hai." /></View>
   ) : null;
 
-  // "Special Collections → Explore Now": the admin collections, else the featured items, else the full catalogue.
+  // "Special Collections → Explore Now": the admin collections, else the Featured page, else the full catalogue.
   const onExplore = adminCols.length
     ? () => router.push('/shop/collections' as any)
     : featured.length
-      ? () => openDigital({ ids: featured.map((i) => i.itemId) })
+      ? () => router.push('/shop/featured' as any)
       : onBrowseAll;
   const showDigitalHome = mobile && !browseAll && isDefaultDigitalFilter(filter);
   const digitalHome = cfg.store.enabled && store.isLoading ? (
