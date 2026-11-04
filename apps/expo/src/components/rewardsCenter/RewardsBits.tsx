@@ -10,6 +10,9 @@ import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSprin
 import LottieView from 'lottie-react-native';
 import { EARNING_ANIMATIONS, EARNING_ART, type EarningArtKey } from '@/assets/earning';
 import { SparkleBurst } from '@/src/components/gamification/SparkleBurst';
+import { AppImage } from '@/src/components/ui/AppImage';
+import { useEarningAssets } from '@/src/services/appSettings';
+import { safeArtUrl } from '@/src/lib/rewardsCenter';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 
 export const RC = {
@@ -34,16 +37,26 @@ export const RC = {
 export const GOLD_GRAD: [string, string] = ['#FFE680', '#F5B300'];
 export const PURPLE_GRAD: [string, string] = ['#A855F7', '#6D28D9'];
 
+/**
+ * One Rewards Center artwork slot. Draws the admin's uploaded WebP / PNG for
+ * this key when there is one (appConfig.earningAssets), else the built-in SVG;
+ * an image that fails to load falls back to the SVG too.
+ */
 export function Art({ name, size, style }: { name: EarningArtKey; size: number; style?: StyleProp<ViewStyle> }) {
+  const url = safeArtUrl(useEarningAssets()?.[name]);
+  const [failed, setFailed] = useState<string | null>(null);
   const C = EARNING_ART[name];
   return (
     <View style={[{ width: size, height: size }, style]} pointerEvents="none">
-      <C width={size} height={size} />
+      {url && failed !== url ? (
+        <AppImage source={{ uri: url }} style={{ width: size, height: size }} contentFit="contain" transition={0} onError={() => setFailed(url)} />
+      ) : (
+        <C width={size} height={size} />
+      )}
     </View>
   );
 }
 
-/** A dark card with a neon border and a soft purple glow. */
 export function NeonCard({ children, style, glow = RC.border, highlight }: { children: ReactNode; style?: StyleProp<ViewStyle>; glow?: string; highlight?: boolean }) {
   return (
     <View style={[styles.neonOuter, { shadowColor: glow, borderColor: highlight ? RC.magenta : RC.borderSoft }, style]}>

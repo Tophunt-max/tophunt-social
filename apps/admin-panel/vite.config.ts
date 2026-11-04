@@ -49,8 +49,9 @@ export default defineConfig({
     port: 5000,
     host: "0.0.0.0",
     // The digital-store previews import the app's own Shop artwork
-    // (apps/expo/assets/shop/digital, see src/lib/shopArt.ts).
-    fs: { allow: [searchForWorkspaceRoot(process.cwd()), path.resolve(import.meta.dirname, "../expo/assets/shop")] },
+    // (apps/expo/assets/shop/digital, see src/lib/shopArt.ts) and the Rewards
+    // Center SVGs (apps/expo/assets/earning, see src/lib/earningArt.ts).
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), path.resolve(import.meta.dirname, "../expo/assets/shop"), path.resolve(import.meta.dirname, "../expo/assets/earning")] },
     proxy: {
       "/admin": { target: WORKER_URL, changeOrigin: true, secure: false },
       "/api": { target: WORKER_URL, changeOrigin: true, secure: false },

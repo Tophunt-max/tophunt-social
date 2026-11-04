@@ -74,7 +74,7 @@ import {
   validateContestInput,
 } from "../lib/contestAdmin";
 import { normalizePrizeType, publicPrize, resolveMatchPrize } from "../lib/prizes";
-import { EXPLORE_BANNER_PREFIX, ONBOARDING_IMAGE_PREFIX, PRODUCT_IMAGE_PREFIX, SHOP_BANNER_PREFIX, SHOP_ITEM_ART_PREFIX } from "../lib/mediaCategories";
+import { EXPLORE_BANNER_PREFIX, ONBOARDING_IMAGE_PREFIX, PRODUCT_IMAGE_PREFIX, SHOP_BANNER_PREFIX, SHOP_ITEM_ART_PREFIX, EARNING_ASSET_PREFIX } from "../lib/mediaCategories";
 import { sanitizeOnboardingSlides } from "../lib/onboardingConfig";
 import { formatDeliveryAddress, summariseDeliveryAddress } from "../lib/deliveryAddress";
 import {
@@ -102,6 +102,8 @@ import { registerIntegrationRoutes } from "./integrations";
 import { registerGamificationRoutes } from "./adminGamification";
 import { registerMonetizationRoutes } from "./adminMonetization";
 import { registerEventRoutes } from "./adminEvents";
+import { registerEarningRoutes } from "./adminEarning";
+import { EARNING_ASSET_MAX_BYTES, EARNING_ASSET_MIME_TYPES } from "../lib/earningAssets";
 import { assertIdentifiersAvailable, recordUsernameTransition, validateUsername } from "../lib/userIdentifiers";
 import { revokeAllSessions } from "../lib/sessionRevocation";
 import {
@@ -281,6 +283,8 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["POST", /^\/media\/shop-item-art$/],
   // Special events pay Diamonds.
   ["PUT", /^\/earning\/events\/[^/]+$/],
+  ["POST", /^\/media\/earning-asset$/],
+  ["PUT", /^\/earning\/assets\/[^/]+$/],
 ];
 export function isSensitiveAdminRoute(method: string, path: string): boolean {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
@@ -355,6 +359,7 @@ registerMonetizationRoutes(adminRoute, requireFullAdmin, logAudit);
 
 // ---- special events (routes/adminEvents.ts) ----
 registerEventRoutes(adminRoute, requireFullAdmin, logAudit);
+registerEarningRoutes(adminRoute, requireFullAdmin, logAudit);
 
 // ---- app settings (settings/appConfig) ----
 
@@ -537,6 +542,10 @@ adminRoute.post("/app-settings", async (c) => {
     // checked for consistency with the values already stored.
     validateVerificationRewardConfig({ ...(existing.verificationReward || {}), ...(body.verificationReward || {}) });
   }
+  // Rewards Center artwork has its own editor (PUT /earning/assets/:key, which
+  // validates each URL). A full-document save never touches it, so a stale copy
+  // in another tab can't undo an upload.
+  if (body && typeof body === "object") delete body.earningAssets;
   const merged = mergeSettings(existing, body);
   // Monotonic: the app keeps whichever copy is newer (pushed vs polled).
   merged._version = Math.max(Date.now(), (Number(existing._version) || 0) + 1);
@@ -1105,6 +1114,24 @@ adminRoute.post("/media/shop-item-art", async (c) => {
   const body = await readAdminImageBody(c);
   const uploaded = await uploadToR2(c.env, fileType, SHOP_ITEM_ART_PREFIX, body, [fileType]);
   await logAudit(c, "shop.item_art.upload", "shop-item-art", uploaded.fileKey, { publicUrl: uploaded.publicUrl, bytes: body.byteLength });
+  return c.json(uploaded);
+});
+
+/**
+ * Rewards Center artwork that replaces a built-in SVG (Earning Management →
+ * Assets). WebP or PNG, 1 MB max, exact-type byte check. Uploading changes
+ * nothing in the app until PUT /earning/assets/:key points a key at it.
+ */
+adminRoute.post("/media/earning-asset", async (c) => {
+  requireFullAdmin(c);
+  const fileType = assertAdminImageUpload(c);
+  if (!EARNING_ASSET_MIME_TYPES.includes(fileType)) throw httpsError("invalid-argument", "Artwork must be a WebP or PNG image.");
+  const declared = Number(c.req.header("content-length") || 0);
+  if (declared > EARNING_ASSET_MAX_BYTES) throw httpsError("invalid-argument", "Artwork must be 1 MB or smaller.");
+  const body = await readAdminImageBody(c);
+  if (body.byteLength > EARNING_ASSET_MAX_BYTES) throw httpsError("invalid-argument", "Artwork must be 1 MB or smaller.");
+  const uploaded = await uploadToR2(c.env, fileType, EARNING_ASSET_PREFIX, body, [fileType]);
+  await logAudit(c, "earning.asset.upload", "earning-asset", uploaded.fileKey, { publicUrl: uploaded.publicUrl, bytes: body.byteLength });
   return c.json(uploaded);
 });
 

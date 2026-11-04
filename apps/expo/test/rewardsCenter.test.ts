@@ -42,3 +42,15 @@ describe('featured event', () => {
     expect(featuredEvent([])).toBeNull();
   });
 });
+
+describe('safeArtUrl', () => {
+  it('allows plain https image URLs only', async () => {
+    const { safeArtUrl } = await import('@/src/lib/rewardsCenter');
+    expect(safeArtUrl('https://media.tophunt.in/earning-assets/2026/11/abc.webp')).toBe('https://media.tophunt.in/earning-assets/2026/11/abc.webp');
+    expect(safeArtUrl('http://media.tophunt.in/x.webp')).toBeNull();
+    expect(safeArtUrl('https://user:pw@evil.test/x.webp')).toBeNull();
+    expect(safeArtUrl('javascript:alert(1)')).toBeNull();
+    expect(safeArtUrl('https://a.test/x y.webp')).toBeNull();
+    expect(safeArtUrl(undefined)).toBeNull();
+  });
+});

@@ -55,6 +55,28 @@ export function describeError(e: unknown): string {
   return e instanceof Error && e.message ? e.message : "Something went wrong.";
 }
 
+export interface EarningAnalytics {
+  from: string;
+  to: string;
+  days: number;
+  totals: { diamondsEarned: number; diamondsReversed: number; dpcoinWon: number; claims: number; earners: number; xp: number; xpUsers: number };
+  daily: { day: number; date: string; diamonds: number; reversed: number; dpcoin: number; claims: number; earners: number; xp: number; xpUsers: number }[];
+  byType: { type: string; count: number; users: number; diamonds: number; dpcoin: number }[];
+  events: { id: string; title: string; claims: number; users: number; participants: number; diamonds: number }[];
+  topEarners: { rank: number; uid: string; username: string | null; fullName: string | null; diamonds: number }[];
+}
+export interface EarningAssetRow { key: string; file: string; group: string; url: string | null }
+export interface EarningAuditRow {
+  id: string;
+  adminUid: string | null;
+  adminEmail: string | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  detail: unknown;
+  createdAt: number;
+}
+
 export type BlogStatus = "published" | "draft";
 
 /** Lightweight row returned by GET /admin/blog. Full content/tags are detail-only. */
@@ -314,12 +336,13 @@ export interface PrizeClaimStatusPayload {
 
 export type UploadProgressHandler = (percent: number) => void;
 
-function parseApiErrorPayload(text: string, fallback: string): { message: string; code?: string } {
+function parseApiErrorPayload(text: string, fallback: string): { message: string; code?: string; reason?: string } {
   try {
-    const payload = JSON.parse(text) as { error?: { message?: string; status?: string }; message?: string };
+    const payload = JSON.parse(text) as { error?: { message?: string; status?: string; reason?: string }; message?: string };
     return {
       message: payload.error?.message || payload.message || fallback,
       code: payload.error?.status,
+      reason: payload.error?.reason,
     };
   } catch {
     return { message: fallback };
@@ -353,9 +376,14 @@ async function uploadBinary(
   onProgress?.(0);
   let response = await send(false);
   if (response.status === 401) response = await send(true);
+  // Sensitive uploads need a recent sign-in: ask for the password once, then resend.
+  if (response.status === 412 && parseApiErrorPayload(response.body, "").reason === "reauth_required" && reauthHandler) {
+    if (!(await reauthHandler())) throw new ApiError("Cancelled: this action needs your password.", 412, undefined, "reauth_required");
+    response = await send(true);
+  }
   if (response.status < 200 || response.status >= 300) {
     const error = parseApiErrorPayload(response.body, response.statusText || failMessage);
-    throw new ApiError(error.message, response.status, error.code);
+    throw new ApiError(error.message, response.status, error.code, error.reason);
   }
   onProgress?.(100);
   return JSON.parse(response.body) as ContestBannerUpload;
@@ -387,6 +415,36 @@ const uploadShopBanner = (file: File, onProgress?: UploadProgressHandler) =>
 /** Digital item artwork, WebP only (Worker POST /admin/media/shop-item-art). */
 const uploadShopItemArt = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/shop-item-art", file, onProgress, "Artwork upload failed. Check your connection and try again.");
+
+/** Rewards Center artwork override, WebP or PNG up to 1 MB (Worker POST /admin/media/earning-asset). */
+const uploadEarningAsset = (file: File, onProgress?: UploadProgressHandler) =>
+  uploadBinary("/admin/media/earning-asset", file, onProgress, "Artwork upload failed. Check your connection and try again.");
+
+/** Authenticated file download (e.g. a CSV export): fetch with the admin token, then save via a temporary link. */
+async function downloadFile(path: string, fallbackName: string): Promise<{ truncated: boolean; rows: number | null }> {
+  const go = async (force: boolean) => {
+    const token = await idToken(force);
+    return fetch(`${BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  };
+  let res = await go(false);
+  if (res.status === 401) res = await go(true);
+  if (!res.ok) {
+    const e = parseApiErrorPayload(await res.text(), res.statusText || "Download failed.");
+    throw new ApiError(e.message, res.status, e.code, e.reason);
+  }
+  const blob = await res.blob();
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || fallbackName;
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 10_000);
+  const rows = res.headers.get("X-Rows");
+  return { truncated: res.headers.get("X-Truncated") === "1", rows: rows ? Number(rows) : null };
+}
 
 const uploadProductImage = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/product-image", file, onProgress, "Product image upload failed. Check your connection and try again.");
@@ -951,6 +1009,13 @@ export const api = {
     events: () => get<{ statuses: string[]; events: any[] }>("/admin/earning/events"),
     saveEvent: (id: string, payload: any) => put<{ success: boolean; id: string }>(`/admin/earning/events/${encodeURIComponent(id)}`, payload),
     eventParticipants: (id: string) => get<any[]>(`/admin/earning/events/${encodeURIComponent(id)}/participants`),
+    analytics: (days: number) => get<EarningAnalytics>(`/admin/earning/analytics?days=${days}`),
+    exportCsv: (kind: "daily" | "ledger", days: number) => downloadFile(`/admin/earning/export?kind=${kind}&days=${days}`, `tophunt-earning-${kind}.csv`),
+    assets: () => get<{ maxBytes: number; types: string[]; assets: EarningAssetRow[] }>("/admin/earning/assets"),
+    saveAsset: (key: string, url: string | null) => put<{ success: boolean; key: string; url: string | null }>(`/admin/earning/assets/${encodeURIComponent(key)}`, { url }),
+    uploadAsset: uploadEarningAsset,
+    audit: (before?: string | null) => get<{ items: EarningAuditRow[]; nextCursor: string | null }>(`/admin/earning/audit?limit=50${before ? `&before=${encodeURIComponent(before)}` : ""}`),
+    notifications: () => get<{ id: string; title: string; message: string; link: string | null; read: boolean; createdAt: number }[]>("/admin/earning/notifications?limit=100"),
   },
   rewards: () => get<any>("/admin/rewards"),
   saveRewards: (payload: any) => post("/admin/rewards", payload),
@@ -1229,7 +1294,7 @@ export const api = {
   confirmApprovalReset: (payload: { code: string; next: string }) =>
     post<{ success: boolean }>("/admin/approval-password/reset/confirm", payload),
   sendCoinReport: (period: "daily" | "weekly") => post<{ success: boolean; to: string }>("/admin/coin-economy/report", { period }),
-  runCoinAlerts: () => post<{ budgets: number; heavyEarners: number }>("/admin/coin-economy/alerts/run", {}),
+  runCoinAlerts: () => post<{ budgets: number; eventBudgets?: number; heavyEarners: number }>("/admin/coin-economy/alerts/run", {}),
   cronHealth: () => get<CronJobHealth[]>("/admin/ops/cron-health"),
 
   // SEO

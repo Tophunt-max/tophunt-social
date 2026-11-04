@@ -301,7 +301,7 @@ describe('coin alerts and report', () => {
     await env.DB.prepare(`UPDATE promo_budgets SET spent_coins = 85 WHERE id = ?`).bind(b).run();
     await adjustUserWallet(env as any, { uid: 'farm', amount: 80, direction: 'add', type: 'daily_task', description: 'x', locked: true });
     const out = await runCoinAlerts(env as any);
-    expect(out).toEqual({ budgets: 1, heavyEarners: 1 }); // no liability alert any more
+    expect(out).toEqual({ budgets: 1, eventBudgets: 0, heavyEarners: 1 }); // no liability alert any more
     expect(sentEmails.map((e) => e.subject)).toEqual(expect.arrayContaining([expect.stringMatching(/Budget 80%/), expect.stringMatching(/free coin/)]));
     // Dedupe: a second run sends nothing new.
     sentEmails.length = 0;
