@@ -40,6 +40,8 @@ export interface AchievementDef {
   metric: string;
   threshold: number;
   xpReward: number;
+  /** Diamonds granted per unlocked tier (migration 0085). 0 = none. */
+  diamondReward: number;
   itemId: string | null;
   repeatable: boolean;
   maxTiers: number;
@@ -97,6 +99,7 @@ export async function loadAchievementDefs(env: Env): Promise<AchievementDef[]> {
     metric: r.metric,
     threshold: Number(r.threshold),
     xpReward: Number(r.xp_reward),
+    diamondReward: Math.max(0, Number(r.diamond_reward) || 0),
     itemId: r.item_id ?? null,
     repeatable: !!r.repeatable,
     maxTiers: Math.max(1, Number(r.max_tiers) || 1),

@@ -12,7 +12,7 @@ const small = "bg-secondary text-foreground text-xs font-medium px-2 py-1 rounde
 
 export interface RankRow { id: string; name: string; minLevel: number; icon: string; color: string }
 export interface MilestoneRow { level: number; title: string; description: string; items: string[]; feature: string | null; coins: number }
-export interface QuestRow { id: string; title: string; period: "week" | "month"; metric: string; target: number; xp: number; minLevel: number; enabled: boolean }
+export interface QuestRow { id: string; title: string; period: "week" | "month"; metric: string; target: number; xp: number; coins?: number; minLevel: number; enabled: boolean }
 
 export const QUEST_METRICS = ["votes", "entries", "wins", "checkins", "active_days", "xp"];
 
@@ -155,7 +155,7 @@ export function QuestsEditor({ rows, onChange }: { rows: QuestRow[]; onChange: (
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
-        <thead><tr><th className={th}>Id</th><th className={th}>Title</th><th className={th}>Period</th><th className={th}>Metric</th><th className={th}>Target</th><th className={th}>XP</th><th className={th}>Min level</th><th className={th}>On</th><th /></tr></thead>
+        <thead><tr><th className={th}>Id</th><th className={th}>Title</th><th className={th}>Period</th><th className={th}>Metric</th><th className={th}>Target</th><th className={th}>XP</th><th className={th}>Diamond</th><th className={th}>Min level</th><th className={th}>On</th><th /></tr></thead>
         <tbody>
           {rows.map((row, i) => (
             <tr key={i}>
@@ -173,6 +173,7 @@ export function QuestsEditor({ rows, onChange }: { rows: QuestRow[]; onChange: (
               </td>
               <td className={td}><NumberCell min={1} value={row.target} onChange={(v) => r.set(i, { target: v as number })} /></td>
               <td className={td}><NumberCell min={0} value={row.xp} onChange={(v) => r.set(i, { xp: v as number })} /></td>
+              <td className={td}><NumberCell min={0} value={row.coins ?? 0} onChange={(v) => r.set(i, { coins: v as number })} /></td>
               <td className={td}><NumberCell min={1} value={row.minLevel} onChange={(v) => r.set(i, { minLevel: v as number })} /></td>
               <td className={`${td} text-center`}><input type="checkbox" className="mt-2" checked={row.enabled !== false} onChange={(e) => r.set(i, { enabled: e.target.checked })} /></td>
               <td className={td}><RowActions i={i} n={rows.length} move={r.move} remove={r.remove} /></td>
@@ -181,7 +182,7 @@ export function QuestsEditor({ rows, onChange }: { rows: QuestRow[]; onChange: (
         </tbody>
       </table>
       <button type="button" className={`${small} mt-2`} disabled={rows.length >= 30}
-        onClick={() => r.add({ id: "", title: "", period: "week", metric: "votes", target: 10, xp: 20, minLevel: 1, enabled: true })}>+ Add quest</button>
+        onClick={() => r.add({ id: "", title: "", period: "week", metric: "votes", target: 10, xp: 20, coins: 0, minLevel: 1, enabled: true })}>+ Add quest</button>
     </div>
   );
 }

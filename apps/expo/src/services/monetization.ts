@@ -42,7 +42,11 @@ export interface MonetizationPublicConfig {
    */
   store: { enabled: boolean; featured?: PublicFeaturedDrop; slider?: PublicSlider; deals?: PublicDeals };
   shop: { enabled: boolean };
-  earning: { xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number } };
+  earning: {
+    xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number };
+    /** Diamonds for taking part in / finishing second in a settled battle (worker contestSettlement.ts). */
+    contestRewards: { enabled: boolean; participation: number; runnerUp: number; paidOnly: boolean };
+  };
 }
 
 /** Everything off until the server says otherwise (older servers send nothing). */
@@ -64,7 +68,10 @@ const OFF: MonetizationPublicConfig = {
   gifts: { enabled: false, maxQuantity: 1, maxCoinsPerSend: 0 },
   store: { enabled: false },
   shop: { enabled: false },
-  earning: { xpConversion: { enabled: false, xpPerDiamond: 100, maxDiamondsPerDay: 0 } },
+  earning: {
+    xpConversion: { enabled: false, xpPerDiamond: 100, maxDiamondsPerDay: 0 },
+    contestRewards: { enabled: false, participation: 0, runnerUp: 0, paidOnly: true },
+  },
 };
 
 export function useMonetizationConfig(): MonetizationPublicConfig {
@@ -74,7 +81,7 @@ export function useMonetizationConfig(): MonetizationPublicConfig {
   return useMemo(
     () =>
       m && typeof m === 'object'
-        ? { ...OFF, ...m, ads: { ...OFF.ads, ...(m.ads ?? {}), web: { ...OFF.ads.web, ...(m.ads?.web ?? {}) } }, earning: { xpConversion: { ...OFF.earning.xpConversion, ...(m.earning?.xpConversion ?? {}) } } }
+        ? { ...OFF, ...m, ads: { ...OFF.ads, ...(m.ads ?? {}), web: { ...OFF.ads.web, ...(m.ads?.web ?? {}) } }, earning: { xpConversion: { ...OFF.earning.xpConversion, ...(m.earning?.xpConversion ?? {}) }, contestRewards: { ...OFF.earning.contestRewards, ...(m.earning?.contestRewards ?? {}) } } }
         : OFF,
     [m],
   );

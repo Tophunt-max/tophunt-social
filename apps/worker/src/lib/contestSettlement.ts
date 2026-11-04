@@ -4,6 +4,8 @@ import { matchPot } from "./money";
 import { matchReservationId, platformLedgerStatement, releaseStatement } from "./promoBudget";
 import { getProgression } from "./progression";
 import { getAppConfig } from "./settings";
+import { parseMonetizationConfig } from "./monetizationConfig";
+import { grantStatusArgs, grantStatusSql } from "./rewardIntegrity";
 import { economyConfig, samePairMatchesSince, utcDayStart, utcMonthStart, winCapExcessSql } from "./economyLimits";
 import { xpAwardStatements, xpReversalStatements } from "./xpService";
 
@@ -210,7 +212,9 @@ export async function settleWinner(
   const platformFee = product ? 0 : Math.max(0, pot - (rewardAmount - subsidyUsed));
 
   // Economy guardrails (lib/economyLimits.ts).
-  const economy = economyConfig(await getAppConfig(env));
+  const appCfg = await getAppConfig(env);
+  const economy = economyConfig(appCfg);
+  const contestRewards = parseMonetizationConfig(appCfg).earning.contestRewards;
   // Monthly DP coin win cap: the part of the prize above it is paid as Diamonds.
   // The users UPDATE runs before the ledger INSERT, so both read the same sum.
   const excess = winCapExcessSql(economy.monthlyDpCoinWinCap, input.winnerUid, utcMonthStart(input.completedAt), rewardAmount);
@@ -344,6 +348,27 @@ export async function settleWinner(
       ts: input.completedAt,
     }, gate, gateArgs));
   }
+  // Rewards Center contest Diamonds: claimable grants for taking part and for
+  // the runner-up, created in THIS batch and gated on this settlement, so they
+  // exist only for a match that really completed with a winner, once (fixed
+  // ids). Refunded / cancelled matches never reach here. Farmed repeat pairs
+  // and (by default) free matches get none.
+  if (contestRewards.enabled && !farmed && (!contestRewards.paidOnly || pot > 0)) {
+    const grant = (uid: string, kind: "participation" | "runner_up", coins: number, note: string) =>
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO reward_grants (id, uid, source_type, source_id, coins, status, note, created_at, updated_at)
+         SELECT ?, ?, 'contest', ?, ?, ${grantStatusSql(progression)}, ?, ?, ?
+          WHERE ${gate}`,
+      ).bind(`contest:${input.matchId}:${kind}:${uid}`, uid, `${input.matchId}:${kind}`, coins, ...grantStatusArgs(progression, uid), note, input.completedAt, input.completedAt, ...gateArgs);
+    if (contestRewards.participation > 0) {
+      statements.push(
+        grant(input.winnerUid, "participation", contestRewards.participation, "Contest participation"),
+        grant(input.loserUid, "participation", contestRewards.participation, "Contest participation"),
+      );
+    }
+    if (contestRewards.runnerUp > 0) statements.push(grant(input.loserUid, "runner_up", contestRewards.runnerUp, "Contest runner-up"));
+  }
+
   if (product && pot > 0) {
     statements.push(platformLedgerStatement(env, {
       id: `pl:product_prize_fund:${input.matchId}`,

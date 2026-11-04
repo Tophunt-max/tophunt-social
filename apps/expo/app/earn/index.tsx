@@ -37,7 +37,7 @@ import { walletService } from '@/src/services/wallet/walletService';
 import { useRewardedAd } from '@/src/ads/fullscreen';
 import { newRequestId, useMonetizationConfig } from '@/src/services/monetization';
 import { useConvertXp, useXpConversion } from '@/src/services/shop';
-import { useAchievements, useClaimQuest, useProgression, useQuests, type AchievementView, type QuestView } from '@/src/services/gamification';
+import { useAchievements, useClaimQuest, useClaimRewardGrant, useProgression, useQuests, type AchievementView, type QuestView } from '@/src/services/gamification';
 import { useMyReferrals } from '@/src/services/referrals';
 import { notificationService } from '@/src/services/notifications/notificationService';
 import { appShareOrigin, isCompletedShare, shareBattleLink } from '@/src/lib/share';
@@ -75,6 +75,7 @@ export default function RewardsCenterScreen() {
   const xpConv = useXpConversion(signedIn && mon.earning.xpConversion.enabled);
   const referrals = useMyReferrals(signedIn);
   const claimQuest = useClaimQuest();
+  const claimGrant = useClaimRewardGrant();
   const bal = balancesOf(me as any);
   const live = hasLiveBalance(me);
 
@@ -187,7 +188,10 @@ export default function RewardsCenterScreen() {
     if (q.claimed) return;
     if (!q.claimable) return go(q.metric);
     claimQuest.mutate(q.id, {
-      onSuccess: (r) => celebrate(`+${r?.xpEarned ?? q.xp} XP`),
+      onSuccess: (r) => {
+        celebrate([r?.diamonds ? `+${r.diamonds} Diamond` : null, r?.xpEarned ? `+${r.xpEarned} XP` : null].filter(Boolean).join(' · ') || 'Mission claimed');
+        void refetchMe();
+      },
       onError: (e: any) => fail(errorText(e, 'Claim nahi hua. Dobara try karo.')),
     });
   };
@@ -219,6 +223,15 @@ export default function RewardsCenterScreen() {
   };
 
   const level = prog.data?.levelInfo;
+  // Diamonds already earned and waiting (achievements, contests, level milestones, seasons).
+  const grants = prog.data?.rewards?.claimable ?? [];
+  const held = !!prog.data?.rewards?.held;
+  const contestCfg = mon.earning.contestRewards;
+  const claim = (id: string) =>
+    claimGrant.mutate(id, {
+      onSuccess: (r) => { celebrate(`+${r?.coins ?? 0} Diamond`); void refetchMe(); },
+      onError: (e: any) => fail(errorText(e, 'Claim nahi hua. Dobara try karo.')),
+    });
   const season = prog.data?.season ?? null;
   const achList = useMemo(() => pickAchievements(achievements.data?.achievements ?? []), [achievements.data]);
 
@@ -312,6 +325,32 @@ export default function RewardsCenterScreen() {
             </View>
           </PressScale>
         </NeonCard>
+
+        {held ? (
+          <NeonCard glow={RC.goldDeep}>
+            <Text style={styles.cardTitleSm}>Rewards review me hain</Text>
+            <Text style={[styles.cardSub, { marginTop: 4 }]}>Aapki haal ki activity ki jaanch ho rahi hai. XP aur level count ho rahe hain; ruke hue Diamond jaanch ke baad milenge.</Text>
+          </NeonCard>
+        ) : null}
+
+        {grants.length ? (
+          <NeonCard highlight>
+            <SectionTitle art="rewardChest" title="Rewards to Claim" sub="Aapke kamaye hue Diamond tayyar hain" />
+            <View style={{ gap: 10 }}>
+              {grants.slice(0, 6).map((g: any) => (
+                <View key={g.id} style={styles.mission}>
+                  <Art name={g.sourceType === 'contest' ? 'contest' : g.sourceType === 'achievement' ? 'achievement' : 'giftBox'} size={36} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.missionTitle} numberOfLines={1}>{g.note || 'Reward'}</Text>
+                    <DiamondAmount amount={Number(g.coins) || 0} />
+                  </View>
+                  <GoldButton small label="Claim" busy={claimGrant.isPending && claimGrant.variables === g.id} disabled={prog.data?.rewards?.budgetAvailable === false} onPress={() => claim(g.id)} />
+                </View>
+              ))}
+              {prog.data?.rewards?.budgetAvailable === false ? <Text style={styles.footnote}>Diamond rewards abhi ruke hain. Aapke rewards save hain, baad me claim karo.</Text> : null}
+            </View>
+          </NeonCard>
+        ) : null}
 
         {/* B. Shortcuts */}
         <View style={styles.shortcuts}>
@@ -413,7 +452,7 @@ export default function RewardsCenterScreen() {
                     title={q.title}
                     progress={q.progress}
                     target={q.target}
-                    reward={<XpAmount amount={q.xp} />}
+                    reward={(q.coins ?? 0) > 0 ? <DiamondAmount amount={q.coins ?? 0} /> : <XpAmount amount={q.xp} />}
                     hint={`${countdown(q.resetsAt) ?? ''} left`}
                     state={q.claimed ? 'done' : q.claimable ? 'claim' : 'go'}
                     busy={claimQuest.isPending && claimQuest.variables === q.id}
@@ -429,12 +468,16 @@ export default function RewardsCenterScreen() {
         <NeonCard>
           <SectionTitle art="contest" title="Contest Rewards" sub="Participate, Win & Earn More" action="View All" onAction={() => router.push('/explore/battles' as any)} />
           <View style={styles.rewardGrid}>
-            <RewardTile art="participation" label="Participation" value="XP" onPress={() => router.push('/explore/battles' as any)} />
+            <RewardTile art="participation" label="Participation" value={contestCfg.enabled && contestCfg.participation > 0 ? `+${contestCfg.participation.toLocaleString()} 💎` : 'XP'} onPress={() => router.push('/explore/battles' as any)} />
             <RewardTile art="winnerCrown" label="Winner" value="DP coin" gold onPress={() => router.push('/explore/battles' as any)} />
-            <RewardTile art="runnerUp" label="Runners-up" value="XP" onPress={() => router.push('/explore/battles' as any)} />
+            <RewardTile art="runnerUp" label="Runners-up" value={contestCfg.enabled && contestCfg.runnerUp > 0 ? `+${contestCfg.runnerUp.toLocaleString()} 💎` : 'XP'} onPress={() => router.push('/explore/battles' as any)} />
             <RewardTile art="specialPrize" label="Special" value="Hall of Fame" onPress={() => router.push('/rewards/hall-of-fame' as any)} />
           </View>
-          <Text style={styles.footnote}>Jeetne par DP coin (Shop ke liye). Har battle XP deta hai. Amounts contest page par.</Text>
+          <Text style={styles.footnote}>
+            {contestCfg.enabled && (contestCfg.participation > 0 || contestCfg.runnerUp > 0)
+              ? `Battle poori hone par Diamond "Rewards to Claim" me aate hain${contestCfg.paidOnly ? ' (entry fee wali battles)' : ''}. Jeetne par DP coin (Shop ke liye).`
+              : 'Jeetne par DP coin (Shop ke liye). Har battle XP deta hai.'}
+          </Text>
         </NeonCard>
 
         {/* G. Watch & Earn */}
@@ -673,7 +716,7 @@ function AchievementTile({ a, art, onPress }: { a: AchievementView; art: Earning
       <Text style={styles.rewardLabel} numberOfLines={1}>{a.name}</Text>
       {a.unlocked ? <Text style={[styles.rewardValue, { color: RC.green }]}>Unlocked</Text> : (
         <>
-          {a.xpReward > 0 ? <Text style={styles.rewardValue}>+{a.xpReward} XP</Text> : null}
+          {(a.diamondReward ?? 0) > 0 ? <Text style={styles.rewardValue}>+{a.diamondReward} 💎</Text> : a.xpReward > 0 ? <Text style={styles.rewardValue}>+{a.xpReward} XP</Text> : null}
           <View style={{ width: '90%' }}><NeonBar value={ratio} height={5} /></View>
         </>
       )}

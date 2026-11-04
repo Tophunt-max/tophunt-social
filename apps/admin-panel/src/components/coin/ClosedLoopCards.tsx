@@ -71,6 +71,44 @@ export function XpConversionCard() {
   );
 }
 
+/**
+ * Contest participation / runner-up Diamonds (appConfig.monetization.earning
+ * .contestRewards). Created as claimable grants only when a battle settles with
+ * a winner; the winner's prize stays DP coin.
+ */
+export function ContestRewardsCard() {
+  const qc = useQueryClient();
+  const cfgQ = useQuery({ queryKey: ["monetization-config"], queryFn: api.monetization.config });
+  const [f, setF] = useState<any>(null);
+  useEffect(() => {
+    if (cfgQ.data && !f) setF(structuredClone(cfgQ.data.effective.earning.contestRewards ?? { enabled: false, participation: 50, runnerUp: 100, paidOnly: true }));
+  }, [cfgQ.data, f]);
+  const save = useMutation({
+    mutationFn: () => api.saveAppSettings({ monetization: { earning: { contestRewards: { ...f, participation: Number(f.participation), runnerUp: Number(f.runnerUp) } } } }),
+    onSuccess: () => {
+      toast.success("Contest rewards saved");
+      setF(null);
+      qc.invalidateQueries({ queryKey: ["monetization-config"] });
+    },
+    onError: (e) => toast.error(describeError(e)),
+  });
+  if (!f) return <Card title="Contest rewards"><p className="text-sm text-muted-foreground">Loading…</p></Card>;
+  return (
+    <Card title="Contest rewards (Diamonds)" subtitle="Extra Diamonds for taking part in a battle and for the runner-up. The winner still gets the DP coin prize.">
+      <Toggle label="Contest rewards enabled" checked={f.enabled} onChange={(v) => setF({ ...f, enabled: v })} />
+      <div className="grid grid-cols-2 gap-3">
+        <Num label="Participation (each player)" value={f.participation} onChange={(v) => setF({ ...f, participation: v })} />
+        <Num label="Runner-up (the loser)" value={f.runnerUp} onChange={(v) => setF({ ...f, runnerUp: v })} />
+      </div>
+      <Toggle label="Only battles with an entry fee" checked={f.paidOnly} onChange={(v) => setF({ ...f, paidOnly: v })} />
+      <p className="text-xs text-muted-foreground">
+        Granted once per player per battle, only when it settles with a winner (never for cancelled or refunded battles, never for a farmed repeat pair). Users claim them in Rewards Center; they are paid from the free-rewards budget and count toward the daily free Diamond cap. Free battles are easy to farm with second accounts, so keep "entry fee only" on unless you have a reason.
+      </p>
+      <div className="flex justify-end"><Button onClick={() => save.mutate()} disabled={save.isPending}>Save</Button></div>
+    </Card>
+  );
+}
+
 /** What users hold, valued in ₹, and what the shop has delivered. */
 export function ShoppingSummaryCard() {
   const eco = useQuery({ queryKey: ["coin-economy"], queryFn: () => api.coinEconomy() });

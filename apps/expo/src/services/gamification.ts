@@ -88,6 +88,8 @@ export interface AchievementView {
   category: string;
   rarity: string;
   xpReward: number;
+  /** Diamonds per unlocked tier, claimed from Rewards to claim (newer Workers). */
+  diamondReward?: number;
   itemId: string | null;
   repeatable: boolean;
   tier: number;
@@ -143,6 +145,8 @@ export interface QuestView {
   target: number;
   progress: number;
   xp: number;
+  /** Diamonds paid on claim (newer Workers); 0 = XP only. */
+  coins?: number;
   claimed: boolean;
   claimable: boolean;
   locked: boolean;
@@ -354,7 +358,7 @@ export function usePinAchievements() {
 export function useClaimQuest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (questId: string) => callApi('claimQuest', { questId }) as Promise<{ xpEarned: number }>,
+    mutationFn: (questId: string) => callApi('claimQuest', { questId }) as Promise<{ xpEarned: number; diamonds?: number }>,
     onSuccess: () => invalidateProgression(qc),
   });
 }

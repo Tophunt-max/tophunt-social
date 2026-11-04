@@ -1843,6 +1843,7 @@ export const achievementDefinitions = sqliteTable("achievement_definitions", {
   metric: text("metric").notNull(),
   threshold: integer("threshold").notNull().default(1),
   xpReward: integer("xp_reward").notNull().default(0),
+    diamondReward: integer("diamond_reward").notNull().default(0), // migration 0085
   itemId: text("item_id"),
   repeatable: integer("repeatable", { mode: "boolean" }).notNull().default(false),
   maxTiers: integer("max_tiers").notNull().default(1),

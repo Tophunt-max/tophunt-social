@@ -22,7 +22,7 @@
  * Achievements are only ever decided here, from server-side data. No client
  * input reaches this module.
  */
-import { rewardsHeld, settleLevelRewards } from "./rewardIntegrity";
+import { grantStatusArgs, grantStatusSql, rewardsHeld, settleLevelRewards } from "./rewardIntegrity";
 import type { Env } from "../types";
 import { createNotification } from "./notify";
 import { experienceOn, getProgression, isFillerMilestone, levelInfo, milestonesUpTo, type LevelInfo, type Progression } from "./progression";
@@ -207,6 +207,21 @@ async function evaluateAchievements(env: Env, p: Progression, user: UserRow, sil
         );
       }
       if (def.itemId) statements.push(...grantItemStatements(env, user.uid, [def.itemId], "achievement", def.id, ts));
+      // Diamonds for this tier: a claimable grant (held while the account is
+      // under review), only for the row THIS run wrote. Backfilled rows never pay.
+      if (!silent && def.diamondReward > 0) {
+        statements.push(
+          env.DB.prepare(
+            `INSERT OR IGNORE INTO reward_grants (id, uid, source_type, source_id, coins, status, note, created_at, updated_at)
+             SELECT ?, ?, 'achievement', ?, ?, ${grantStatusSql(p)}, ?, ?, ?
+              WHERE EXISTS (SELECT 1 FROM user_achievements WHERE uid = ? AND achievement_id = ? AND tier = ? AND event_id = ?)`,
+          ).bind(
+            `achievement:${def.id}:${tier}:${user.uid}`, user.uid, `${def.id}:${tier}`, Math.floor(def.diamondReward),
+            ...grantStatusArgs(p, user.uid), `Achievement: ${def.name}${def.repeatable ? ` (tier ${tier})` : ""}`, ts, ts,
+            user.uid, def.id, tier, eventId,
+          ),
+        );
+      }
       pending.push({ def, tier, insertIndex });
     }
   }

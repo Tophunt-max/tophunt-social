@@ -12,7 +12,11 @@
  */
 import type { Env } from "../types";
 import { httpsError } from "./http";
-import { rewardDayNumber } from "./gamification";
+import { rewardDayNumber, rewardDayStart } from "./gamification";
+import { getAppConfig } from "./settings";
+import { assertUnderFreeDiamondCap, economyConfig, freeDiamondCapGate } from "./economyLimits";
+import { FREE_REWARDS_EXHAUSTED, freeRewardBudgetStatements, freeRewardsBudgetId } from "./promoBudget";
+import { rewardsHeld } from "./rewardIntegrity";
 import { ENTRY_MATCH_JOIN, ENTRY_ROWS, VALID_ENTRY_STATUS } from "./achievements";
 import { levelFor, type Progression, type QuestDef } from "./progression";
 import { xpAwardStatements, xpEventOutcome } from "./xpService";
@@ -100,6 +104,8 @@ export interface QuestView {
   target: number;
   progress: number;
   xp: number;
+  /** Diamonds paid on claim (0 = XP only). */
+  coins: number;
   claimed: boolean;
   claimable: boolean;
   locked: boolean;
@@ -134,6 +140,7 @@ export async function listQuests(env: Env, uid: string, p: Progression, xp: numb
       target: q.target,
       progress: Math.min(progress, q.target),
       xp: q.xp,
+      coins: Math.max(0, Math.floor(Number(q.coins) || 0)),
       claimed: isClaimed,
       claimable: !locked && !isClaimed && progress >= q.target,
       locked,
@@ -144,7 +151,18 @@ export async function listQuests(env: Env, uid: string, p: Progression, xp: numb
   return out;
 }
 
-export async function claimQuest(env: Env, uid: string, p: Progression, questIdRaw: unknown, ts = Date.now()): Promise<{ xpEarned: number }> {
+/**
+ * Claim a completed quest: its XP and, when configured, its Diamonds.
+ *
+ * Everything is one D1 batch keyed on the quest_claims row (uid, quest, period):
+ *   - the claim row is written only when the Diamonds fit under today's free cap;
+ *   - XP is awarded only by the request that wrote the claim row;
+ *   - the Diamond credit + ledger row (`quest:<id>:<period>:<uid>`, type
+ *     `quest_reward`) are gated on the claim existing and the ledger row not,
+ *     and on the free-rewards budget, so a retry after "budget used up" pays
+ *     once the budget has room, and a replay never pays twice.
+ */
+export async function claimQuest(env: Env, uid: string, p: Progression, questIdRaw: unknown, ts = Date.now()): Promise<{ xpEarned: number; diamonds: number }> {
   const questId = typeof questIdRaw === "string" ? questIdRaw : "";
   const quest = p.cfg.quests.find((q) => q.id === questId && q.enabled !== false);
   if (!quest) throw httpsError("not-found", "Unknown quest.");
@@ -157,10 +175,22 @@ export async function claimQuest(env: Env, uid: string, p: Progression, questIdR
   if ((await questProgress(env, uid, quest.metric, period)) < quest.target) {
     throw httpsError("failed-precondition", "Quest not completed yet.");
   }
+  const coins = Math.max(0, Math.floor(Number(quest.coins) || 0));
+  // Bonus-chasing guard: nothing is recorded, so the quest can be claimed after the review.
+  if (coins > 0 && (await rewardsHeld(env, p, uid))) {
+    throw httpsError("failed-precondition", "Aapke rewards review me hain. Review ke baad claim kar sakte ho.", "rewards_held");
+  }
+  const appCfg = coins > 0 ? await getAppConfig(env) : null;
+  const dayStart = rewardDayStart(ts, p.settings.dayResetOffsetMinutes);
+  const cap = appCfg ? economyConfig(appCfg).dailyFreeDiamondCap : 0;
+  if (coins > 0) await assertUnderFreeDiamondCap(env, cap, uid, dayStart, coins);
+  const capGate = freeDiamondCapGate(cap, uid, dayStart, coins);
+  const ledgerId = `quest:${quest.id}:${period.key}:${uid}`;
+
   const award = xpAwardStatements(env, p, {
     uid,
     action: "quest",
-    eventId: `quest:${quest.id}:${period.key}:${uid}`,
+    eventId: ledgerId,
     amount: quest.xp,
     sourceType: "quest",
     sourceId: `${quest.id}:${period.key}`,
@@ -168,12 +198,57 @@ export async function claimQuest(env: Env, uid: string, p: Progression, questIdR
     gate: `EXISTS (SELECT 1 FROM quest_claims WHERE uid = ? AND quest_id = ? AND period_key = ? AND created_at = ?)`,
     gateArgs: [uid, quest.id, period.key, ts],
   });
+  const gate = `EXISTS (SELECT 1 FROM quest_claims WHERE uid = ? AND quest_id = ? AND period_key = ?)
+    AND NOT EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)
+    AND EXISTS (SELECT 1 FROM users WHERE uid = ?)
+    AND ${capGate.sql}`;
+  const gateArgs = [uid, quest.id, period.key, ledgerId, uid, ...capGate.args];
+  const budget = freeRewardBudgetStatements(env, {
+    budgetId: appCfg ? freeRewardsBudgetId(appCfg) : null,
+    refId: ledgerId,
+    uid,
+    coins,
+    ts,
+    label: `Mission "${quest.title}"`,
+    gate,
+    gateArgs,
+  });
+  const credit = coins > 0
+    ? [
+        ...budget.reserve,
+        env.DB.prepare(`UPDATE users SET dpcoin = dpcoin + ?, locked_coins = locked_coins + ?, updated_at = ? WHERE uid = ? AND ${gate} AND ${budget.heldGate}`)
+          .bind(coins, coins, ts, uid, ...gateArgs, ...budget.heldArgs),
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO coin_transactions (id, uid, amount, type, description, created_at, locked_delta)
+           SELECT ?, ?, ?, 'quest_reward', ?, ?, ? WHERE ${gate} AND ${budget.heldGate}`,
+        ).bind(ledgerId, uid, coins, `Mission reward: ${quest.title} · Diamond`, ts, coins, ...gateArgs, ...budget.heldArgs),
+        ...budget.finalize,
+      ]
+    : [];
   const res = await env.DB.batch([
-    env.DB.prepare(`INSERT OR IGNORE INTO quest_claims (uid, quest_id, period_key, xp, created_at) VALUES (?, ?, ?, ?, ?)`)
-      .bind(uid, quest.id, period.key, quest.xp, ts),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO quest_claims (uid, quest_id, period_key, xp, created_at) SELECT ?, ?, ?, ?, ? WHERE ${capGate.sql}`,
+    ).bind(uid, quest.id, period.key, quest.xp, ts, ...capGate.args),
     ...award.statements,
+    ...credit,
   ]);
-  if (Number(res[0]?.meta?.changes || 0) === 0) throw httpsError("already-exists", "Quest already claimed.");
-  const out = award.active ? await xpEventOutcome(env, award.eventId, award.nonce) : { delta: 0 };
-  return { xpEarned: out.delta };
+  const claimWritten = Number(res[0]?.meta?.changes || 0) > 0;
+  const creditIndex = 1 + award.statements.length + budget.reserve.length;
+  const credited = coins > 0 && Number(res[creditIndex]?.meta?.changes || 0) > 0;
+  if (!claimWritten && !credited) {
+    if (coins > 0) {
+      const paid = await env.DB.prepare(`SELECT 1 AS x FROM coin_transactions WHERE id = ?`).bind(ledgerId).first();
+      const claimed = await env.DB.prepare(`SELECT 1 AS x FROM quest_claims WHERE uid = ? AND quest_id = ? AND period_key = ?`).bind(uid, quest.id, period.key).first();
+      if (claimed && !paid) {
+        throw httpsError("failed-precondition", "Rewards abhi khatam ho gaye hain. Aapka reward save hai, thodi der baad claim karo.", FREE_REWARDS_EXHAUSTED);
+      }
+      if (!claimed) await assertUnderFreeDiamondCap(env, cap, uid, dayStart, coins);
+    }
+    throw httpsError("already-exists", "Quest already claimed.");
+  }
+  if (coins > 0 && !credited) {
+    throw httpsError("failed-precondition", "Rewards abhi khatam ho gaye hain. Aapka reward save hai, thodi der baad claim karo.", FREE_REWARDS_EXHAUSTED);
+  }
+  const out = claimWritten && award.active ? await xpEventOutcome(env, award.eventId, award.nonce) : { delta: 0 };
+  return { xpEarned: out.delta, diamonds: credited ? coins : 0 };
 }

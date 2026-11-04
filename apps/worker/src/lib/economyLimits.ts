@@ -22,7 +22,11 @@ import { parseMonetizationConfig, type EconomyConfig } from "./monetizationConfi
 
 export const DAILY_FREE_LIMIT = "daily_free_limit";
 /** Ledger types that pay free Diamonds and share the daily cap. */
-export const FREE_DIAMOND_TYPES = ["daily_reward", "daily_task", "ad_reward", "xp_conversion"] as const;
+export const FREE_DIAMOND_TYPES = [
+  "daily_reward", "daily_task", "ad_reward", "xp_conversion",
+  // Rewards Center: weekly / monthly mission, achievement and contest reward Diamonds.
+  "quest_reward", "achievement_reward", "contest_reward",
+] as const;
 const FREE_TYPES_SQL = FREE_DIAMOND_TYPES.map((t) => `'${t}'`).join(", ");
 
 export function economyConfig(appCfg: any): EconomyConfig {
