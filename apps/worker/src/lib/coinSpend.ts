@@ -1,10 +1,11 @@
 /**
  * Spending DP coin on goods: virtual gifts, digital store items, physical shop orders.
  *
- * Closed-loop economy (lib/cashRetirement.ts): Diamonds are earned and only
- * pay contest entry fees; DP coin is won in contests and only buys things.
- * A spend therefore takes DP coin ONLY (`dpcoin - locked_coins`) and never
- * touches Diamonds; its ledger row has `locked_delta = 0`.
+ * Closed-loop economy (lib/cashRetirement.ts): Diamonds are earned and pay
+ * contest entry fees and Shop Bundles (items only); DP coin is won in contests
+ * and buys gifts, digital items and physical goods. `spendStatements` takes DP
+ * coin ONLY (`dpcoin - locked_coins`) with `locked_delta = 0`;
+ * `diamondSpendStatements` takes Diamonds ONLY (bundles).
  *
  * Callers build ONE D1 batch: the ledger row, the balance UPDATE and their own
  * records, all behind the same gate, so either everything is written or
@@ -15,6 +16,7 @@
  * disagree (the pattern adjustUserWallet uses).
  */
 import type { Env } from "../types";
+import { DIAMONDS_COVER } from "./diamonds";
 
 export interface SpendInput {
   uid: string;
@@ -46,6 +48,44 @@ export function spendStatements(env: Env, s: SpendInput): D1PreparedStatement[] 
           AND EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)
           AND ${s.gate}`,
     ).bind(s.coins, s.ts, s.uid, s.coins, s.ledgerId, ...s.gateArgs),
+  ];
+}
+
+export interface DiamondSpendInput {
+  uid: string;
+  diamonds: number;
+  ledgerId: string;
+  type: string;
+  description: string;
+  ts: number;
+  /** Extra SQL condition (no leading AND) that must hold for the spend to apply. */
+  gate: string;
+  gateArgs: unknown[];
+}
+
+/**
+ * Spending DIAMONDS on Shop Bundles (lib/storeBundles.ts): the only Diamond
+ * spend besides contest entry. Same shape and ordering rule as
+ * spendStatements, but the cover check is DIAMONDS_COVER and both `dpcoin`
+ * (the total) and `locked_coins` (the Diamond part) go down by the price, so
+ * the ledger row carries amount = locked_delta = -diamonds. DP coin is never
+ * touched.
+ */
+export function diamondSpendStatements(env: Env, s: DiamondSpendInput): D1PreparedStatement[] {
+  return [
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO coin_transactions
+         (id, uid, amount, type, description, created_at, locked_delta)
+       SELECT ?, ?, ?, ?, ?, ?, ?
+        WHERE EXISTS (SELECT 1 FROM users WHERE uid = ? AND ${DIAMONDS_COVER})
+          AND ${s.gate}`,
+    ).bind(s.ledgerId, s.uid, -s.diamonds, s.type, s.description, s.ts, -s.diamonds, s.uid, s.diamonds, ...s.gateArgs),
+    env.DB.prepare(
+      `UPDATE users SET dpcoin = dpcoin - ?, locked_coins = locked_coins - ?, updated_at = ?
+        WHERE uid = ? AND ${DIAMONDS_COVER}
+          AND EXISTS (SELECT 1 FROM coin_transactions WHERE id = ?)
+          AND ${s.gate}`,
+    ).bind(s.diamonds, s.diamonds, s.ts, s.uid, s.diamonds, s.ledgerId, ...s.gateArgs),
   ];
 }
 

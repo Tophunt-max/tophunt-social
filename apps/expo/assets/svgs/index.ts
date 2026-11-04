@@ -3,6 +3,8 @@ import Home_Light from './homeLight.svg';
 import Home_Dark from './homeDark.svg';
 import Inbox_Light from './inboxLight.svg';
 import Inbox_Dark from './inboxDark.svg';
+import Shop_Light from './shopLight.svg';
+import Shop_Dark from './shopDark.svg';
 import Discover_Dark from './discoverDark.svg';
 import Discover_Light from './discoverLight.svg';
 import Profile_Light from './profileLight.svg';
@@ -132,11 +134,13 @@ import Toast_Warning from './toastWarning.svg';
 export {
   Home_Light,
   Inbox_Light,
+  Shop_Light,
   Discover_Light,
   Add_Icon,
   Profile_Light,
   Home_Dark,
   Inbox_Dark,
+  Shop_Dark,
   Discover_Dark,
   Profile_Dark,
   Left_Arrow,

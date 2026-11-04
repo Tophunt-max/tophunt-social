@@ -57,6 +57,20 @@ export const SHOP_POPULAR_GRADS: [string, string][] = [
   ['#3B0764', '#6D28D9'],
   ['#1E3A8A', '#7C3AED'],
 ];
+/**
+ * Admin collection card gradients by accent name (shopModel SHOP_ACCENTS).
+ * The first five match SHOP_POPULAR_GRADS so admin cards keep the mock look.
+ */
+export const SHOP_ACCENT_GRADS: Record<'violet' | 'blue' | 'plum' | 'pink' | 'purple' | 'gold', [string, string]> = {
+  violet: ['#7C3AED', '#C026D3'],
+  blue: ['#4338CA', '#2563EB'],
+  plum: ['#6B2163', '#9D174D'],
+  pink: ['#DB2777', '#F472B6'],
+  purple: ['#3B0764', '#6D28D9'],
+  gold: ['#92400E', '#D97706'],
+};
+/** "Shop Bundles" cards: rich violet → magenta. */
+export const SHOP_BUNDLE_GRAD: [string, string, string] = ['#4C1D95', '#7E22CE', '#C026D3'];
 
 export const TH = {
   colors: {

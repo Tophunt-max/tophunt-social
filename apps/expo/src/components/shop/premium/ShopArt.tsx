@@ -214,6 +214,11 @@ export function GiftArt({ width, height }: TileArtProps) {
   );
 }
 
+/** Small gift box for section headers ("Shop Bundles"), `size` tall. */
+export function GiftIcon({ size }: IconProps) {
+  return <GiftArt width={size * 1.2} height={size} />;
+}
+
 export function EmoteArt({ width, height }: TileArtProps) {
   return (
     <Svg width={width} height={height} viewBox="0 0 48 40">

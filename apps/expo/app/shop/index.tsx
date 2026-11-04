@@ -29,7 +29,9 @@ import { MOCK, MOCK_M, MOCK_MARGIN, MOCK_M_MARGIN, cellWidth, isMobileShop, mobi
 import { ShopHeader, ShopHeaderMobile } from '@/src/components/shop/premium/ShopHeader';
 import { DealPager } from '@/src/components/shop/premium/DealPager';
 import { ShopNavigationTabs, ShopNavigationTabsMobile } from '@/src/components/shop/premium/ShopNavigationTabs';
+import { ShopBundlesM } from '@/src/components/shop/premium/ShopBundles';
 import {
+  AdminCollectionsM,
   CategoryGridM,
   DealCardM,
   FeatureCardM,
@@ -49,8 +51,10 @@ import { useDigitalPurchase } from '@/src/hooks/useDigitalPurchase';
 import { balancesOf, hasLiveBalance } from '@/src/lib/balances';
 import {
   NO_FILTER,
+  POPULAR_COLLECTIONS_MAX,
   cardTag,
   categoryTiles,
+  collectionCards,
   collectionTiles,
   UPGRADE_RARITIES,
   dealsBlock,
@@ -71,6 +75,7 @@ import {
   resolveDealCards,
   showUpgradeBanner,
   trendingItems,
+  visibleBundles,
   withWishlist,
   type CategoryTile,
   type DigitalFilter,
@@ -79,7 +84,7 @@ import {
   type ShopTab,
 } from '@/src/lib/shopModel';
 import { useInventory } from '@/src/services/gamification';
-import { useGiftCatalog, useGiftHistory, useMonetizationConfig, useStore, useWishlist, type StoreItemView } from '@/src/services/monetization';
+import { useGiftCatalog, useGiftHistory, useMonetizationConfig, useShopCollections, useStore, useWishlist, type StoreItemView } from '@/src/services/monetization';
 import { useCart, useShopProducts } from '@/src/services/shop';
 import { BRAND, TH, asExplorePalette, gridCellWidth, gridColumns, rarityToken, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';
 
@@ -156,6 +161,7 @@ export default function ShopScreen() {
   const gifts = useGiftCatalog(!!user && cfg.gifts.enabled);
   const giftsIn = useGiftHistory('received', !!user && cfg.gifts.enabled);
   const wishlist = useWishlist(!!user && cfg.store.enabled);
+  const shopCols = useShopCollections(!!user && cfg.store.enabled);
   const inventory = useInventory(!!user);
   const { data: me, refetch: refetchMe } = useProfile(user?.uid || '');
   const bal = balancesOf(me as any);
@@ -208,6 +214,11 @@ export default function ShopScreen() {
   const trendingM = useMemo(() => trendingItems(digital, MOCK_M.trend.cols), [digital]);
   const tilesM = useMemo(() => mobileCategoryTiles(tiles), [tiles]);
   const popularM = useMemo(() => popularCollections(digital), [digital]);
+  // Admin collections (items resolved from the live store, admin order); none → the automatic cards above.
+  const adminCols = useMemo(() => collectionCards(shopCols.data?.collections ?? [], digital), [shopCols.data?.collections, digital]);
+  const bundles = useMemo(() => (cfg.store.enabled ? visibleBundles(shopCols.data?.bundles ?? [], now) : []), [cfg.store.enabled, shopCols.data?.bundles, now]);
+  // Wait for the admin answer before drawing the fallback, so the section does not swap cards on load.
+  const colsSettled = !shopCols.isLoading;
   const deals0 = useMemo(() => dealsSummary(digital, now), [digital, now]);
   const upgrade = showUpgradeBanner(cfg.store.enabled, digital);
   const giftPage = giftsIn.data?.pages?.[0];
@@ -292,6 +303,7 @@ export default function ShopScreen() {
     void products.refetch();
     void refetchMe();
     if (user) void inventory.refetch();
+    if (user && cfg.store.enabled) void shopCols.refetch();
     if (user && cfg.store.enabled) void wishlist.refetch();
     if (user && cfg.gifts.enabled) {
       void gifts.refetch();
@@ -470,6 +482,8 @@ export default function ShopScreen() {
     ...(user ? [{ key: 'collection' as const, title: 'My Collection', sub: 'View Owned Items & Equip Now', onPress: openCollection }] : []),
     { key: 'orders', title: 'Orders', sub: 'Track & Manage Your Purchases', onPress: () => router.push('/shop/orders' as any) },
   ];
+  const openAdminCollection = useCallback((id: string) => router.push(`/shop/collections/${encodeURIComponent(id)}` as any), [router]);
+  const openBundle = useCallback((id: string) => router.push(`/shop/bundle/${encodeURIComponent(id)}` as any), [router]);
   const onPopular = useCallback(
     (c: PopularCollection<StoreItemView>) => openDigital(c.kind === 'rarity' ? { rarity: c.value } : { type: c.value }),
     [openDigital],
@@ -489,7 +503,9 @@ export default function ShopScreen() {
   );
 
   // Phone home, top to bottom as the design mock: hero, categories, featured,
-  // trending, daily deals, popular collections, My Collection / Orders, upgrade.
+  // trending, daily deals, popular collections (admin collections when there
+  // are any), Shop Bundles (Diamond bundles, hidden when none), My Collection /
+  // Orders, upgrade.
   const homeMobile = (
     <View style={{ paddingHorizontal: margin }}>
       {hero && cfg.store.enabled ? (
@@ -545,7 +561,21 @@ export default function ShopScreen() {
         )}
       </View>
 
-      {!digitalState && popularM.length ? (
+      {!digitalState && adminCols.length ? (
+        <>
+          <SectionHeaderM
+            p={p}
+            u={uM}
+            style={{ marginTop: mGap }}
+            icon={<StarIcon size={mIcon} />}
+            title="Popular Collection"
+            action={{ label: 'View All', onPress: adminCols.length > POPULAR_COLLECTIONS_MAX ? () => router.push('/shop/collections' as any) : () => openDigital({}) }}
+          />
+          <View style={{ marginTop: mHead }}>
+            <AdminCollectionsM cards={adminCols.slice(0, POPULAR_COLLECTIONS_MAX)} u={uM} inner={inner} viewer={viewer} onPress={openAdminCollection} />
+          </View>
+        </>
+      ) : !digitalState && colsSettled && popularM.length ? (
         <>
           <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<StarIcon size={mIcon} />} title="Popular Collection" action={{ label: 'View All', onPress: () => openDigital({}) }} />
           <View style={{ marginTop: mHead }}>
@@ -553,6 +583,8 @@ export default function ShopScreen() {
           </View>
         </>
       ) : null}
+
+      <ShopBundlesM p={p} bundles={bundles} u={uM} inner={inner} viewer={viewer} onOpen={openBundle} onAll={() => router.push('/shop/bundles' as any)} style={{ marginTop: mGap }} />
 
       <View style={{ marginTop: mGap }}>
         <ShortcutCardsM p={p} cards={shortcuts} u={uM} inner={inner} />

@@ -5,19 +5,24 @@ import { ProductsTab } from "@/components/shop/ProductsTab";
 import { StoreTab } from "@/components/monetization/StoreTab";
 import { FraudRulesTab } from "@/components/shop/FraudRulesTab";
 import { ShopHomeTab } from "@/components/shop/ShopHomeTab";
+import { CollectionsTab } from "@/components/shop/CollectionsTab";
+import { BundlesTab } from "@/components/shop/BundlesTab";
 
 const TABS = [
   { id: "orders", label: "Orders" },
   { id: "products", label: "Physical products" },
   { id: "digital", label: "Digital items" },
   { id: "home", label: "Shop home" },
+  { id: "collections", label: "Collections" },
+  { id: "bundles", label: "Bundles" },
   { id: "fraud", label: "Fraud rules" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
 
 /**
- * Shopping: users spend 🪙 DP coin (won in contests) on
- * physical products and digital items. No ₹ changes hands.
+ * Shopping: users spend 🪙 DP coin (won in contests) on physical products
+ * and digital items, and 💎 Diamonds on Shop Bundles (items only). No ₹
+ * changes hands.
  */
 export default function Shopping() {
   const [tab, setTab] = useState<Tab>(() => {
@@ -26,7 +31,7 @@ export default function Shopping() {
   });
   return (
     <div>
-      <PageHeader title="Shopping" subtitle="Users spend 🪙 DP coin on physical products and digital items. You ship physical orders by hand." />
+      <PageHeader title="Shopping" subtitle="Users spend 🪙 DP coin on physical products and digital items, and 💎 Diamonds on bundles (items only). You ship physical orders by hand." />
       <div className="flex gap-1 mb-5 overflow-x-auto border-b border-border">
         {TABS.map((t) => (
           <button
@@ -42,6 +47,8 @@ export default function Shopping() {
       {tab === "products" && <ProductsTab />}
       {tab === "digital" && <StoreTab />}
       {tab === "home" && <ShopHomeTab />}
+      {tab === "collections" && <CollectionsTab />}
+      {tab === "bundles" && <BundlesTab />}
       {tab === "fraud" && <FraudRulesTab />}
     </div>
   );

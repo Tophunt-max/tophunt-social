@@ -85,8 +85,9 @@ refuse on their own. A customer can always cancel an order that is under review.
 ### Spending rule changed
 
 Gifts, digital items and shop orders are paid in **DP coin only** (`lib/coinSpend.ts`, `dpcoin - locked_coins >= price`,
-`locked_delta = 0`). Diamonds pay contest entry fees only. The "Diamonds first" rule described further down was the
-first version and no longer applies.
+`locked_delta = 0`). Diamonds pay contest entry fees and **Shop Bundles** (`diamondSpendStatements`,
+`MIN(locked_coins, dpcoin) >= price`, `amount = locked_delta = -price`); bundles contain items only, never DP coin or
+Diamonds. The "Diamonds first" rule described further down was the first version and no longer applies.
 
 ### Economy limits
 
@@ -174,11 +175,42 @@ and re-checks price and availability inside the transaction.
   was paid (same Diamond/DP split), revokes the item, unequips it, once. An item revoked for another reason
   (e.g. abuse) cannot be bought back.
 - Not supported yet: time-limited items (needs an expiry on `user_inventory` honoured by equip and the public
-  profile), bundles/collections, promotional pricing. No randomised paid items.
+  profile), promotional pricing. No randomised paid items. Bundles and collections: see below.
 - `getStore` items also carry `startsAt`, `createdAt` (listing time) and `soldCount` (the same counter the
   stock limit uses). The Shop builds "New arrivals" (sale start, else listing time, last 30 days), "Popular"
   (`soldCount > 0`) and "Limited edition" (real stock left or a future sale end) from them and omits a rail
   with nothing in it (`apps/expo/src/lib/shopModel.ts`).
+
+### Shop Collections and Diamond Bundles (migration 0088, `lib/storeBundles.ts`)
+
+- **Where:** admin Shopping → **Collections** and Shopping → **Bundles** (full admins; writes audited with
+  before/after, recent sign-in required).
+- **Collections** (`store_collections`, `store_collection_items`): name, subtitle, optional artwork, accent
+  (violet, blue, plum, pink, purple, gold), sort, active and 1-60 ordered catalogue items (free XP items excluded).
+  Display only: the app Shop home shows them as "Popular Collection"; each item is still bought on its own listing.
+  `getShopCollections` returns active collections with only the items that are on sale now, and omits empty ones.
+- **Bundles** (`store_bundles`, `store_bundle_items`, `store_bundle_purchases`): 2-12 active catalogue items (free XP
+  items excluded; no store listing needed, so an item can be bundle-only), a price in **Diamonds**, optional
+  compare-at price (display only), badge, artwork, sale window, stock limit, sort, active. **Items only**: a bundle
+  never contains DP coin or Diamonds. No delete; turn a bundle off instead (purchases reference it).
+- `/api` actions: `getShopCollections` (collections + live bundles with per-item `owned`, `ownedCount`,
+  `purchased`) and `buyStoreBundle { bundleId, expectedPrice, requestId }` (in the App Control `shopping` kill
+  switch, fail-closed rate limit 20/min). Errors carry `reason`: `store_disabled`, `invalid_request`,
+  `bundle_unavailable`, `price_changed`, `already_purchased`, `already_owned`, `not_enough_diamonds`.
+- **Rules:** one completed purchase per user and bundle (partial unique index). Owning every item refuses the
+  purchase (`already_owned`); owning some grants only the missing ones at the full price. Retrying the same
+  `requestId` returns the stored purchase and charges nothing.
+- **One batch:** ledger row `store_bundle_purchase` (Diamond out), balance UPDATE (`dpcoin` and `locked_coins` both
+  down by the price), one `user_inventory` grant per missing item (`source = 'store_bundle'`,
+  `source_ref` = purchase id), `sold_count + 1`, then the purchase row with the granted item ids. All behind one gate,
+  so either everything is written or nothing is; the ledger invariants keep holding.
+- **Refund** (`POST /admin/monetization/bundles/purchases/:id/refund`, reason required): ledger row
+  `store_bundle_refund` returns the Diamonds, only the rows that purchase granted are revoked
+  (`revoke_reason = store_bundle_refund:<id>`) and unequipped, status → refunded, once. Refunded items can be bought
+  again, alone or in a bundle.
+- Reports: Coin Economy groups both types as "Diamond spent: Shop Bundles"; `GET /admin/monetization/coins` has
+  `diamond.shopBundles`, `/admin/monetization/daily` has `diamondsSpentShop`. They are never counted as DP coin
+  spend or contest fees.
 
 ### Admin-managed digital items and uploaded WebP artwork
 

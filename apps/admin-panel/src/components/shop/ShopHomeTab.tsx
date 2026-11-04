@@ -92,7 +92,7 @@ export function ShopHomeTab() {
 // ------------------------------------------------------------------ shared editors
 
 /** Upload to /admin/media/shop-banner with progress, preview and remove. */
-function ImageField({ label, hint, value, onChange, aspect }: { label: string; hint: string; value: string; onChange: (v: string) => void; aspect: string }) {
+export function ImageField({ label, hint, value, onChange, aspect }: { label: string; hint: string; value: string; onChange: (v: string) => void; aspect: string }) {
   const ref = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);

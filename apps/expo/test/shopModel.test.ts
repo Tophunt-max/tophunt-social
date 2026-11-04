@@ -34,6 +34,21 @@ import {
   typeLine,
   popularCollections,
   POPULAR_COLLECTIONS_MAX,
+  bundleAvailable,
+  bundleDiscount,
+  bundleErrorView,
+  bundleItemsLine,
+  bundleOwnedNote,
+  bundleState,
+  bundleStockLabel,
+  bundleTypeLine,
+  collectionCards,
+  collectionItems,
+  isUnknownActionError,
+  normalizeShopCollections,
+  visibleBundles,
+  type ShopBundleDef,
+  type ShopCollectionDef,
   type ShopItem,
 } from '@/src/lib/shopModel';
 import { isCrownRarity, rarityColor, rarityRank } from '@/src/lib/progression';
@@ -499,5 +514,174 @@ describe('popularCollections', () => {
     }
     // Unknown rarities get no rarity card (no made-up label).
     expect(popularCollections([item('x', { rarity: 'cosmic', type: 'frame' })]).map((c) => c.key)).toEqual(['type:frame']);
+  });
+});
+
+// ------------------------------------------------------------------ admin collections + bundles
+
+const bitem = (id: string, type: string, owned = false) => ({ itemId: id, type, name: id, rarity: 'rare', asset: {}, owned });
+const bundle = (over: Partial<ShopBundleDef> = {}): ShopBundleDef => ({
+  id: 'b1',
+  name: 'Starter Pack',
+  description: '',
+  imageUrl: null,
+  badge: null,
+  priceDiamonds: 120,
+  compareAtDiamonds: null,
+  startsAt: null,
+  endsAt: null,
+  remaining: null,
+  items: [bitem('f', 'frame'), bitem('b', 'badge'), bitem('t', 'title')],
+  ownedCount: 0,
+  purchased: false,
+  ...over,
+});
+const col = (over: Partial<ShopCollectionDef> = {}): ShopCollectionDef => ({ id: 'c1', name: 'Royal', subtitle: '', imageUrl: null, accent: 'violet', itemIds: [], ...over });
+
+describe('bundleTypeLine / bundleItemsLine', () => {
+  it('lists the distinct types in display order', () => {
+    expect(bundleTypeLine([bitem('t', 'title'), bitem('f', 'frame'), bitem('b', 'badge'), bitem('f2', 'frame')])).toBe('Frame, Badge & Title');
+    expect(bundleTypeLine([bitem('f', 'frame')])).toBe('Frame');
+    expect(bundleTypeLine([bitem('f', 'frame'), bitem('t', 'theme')])).toBe('Frame & Theme');
+    expect(bundleTypeLine([])).toBe('');
+  });
+  it('capitalises unknown types after the known ones', () => {
+    expect(bundleTypeLine([bitem('x', 'aura'), bitem('f', 'frame')])).toBe('Frame & Aura');
+  });
+  it('counts the items', () => {
+    expect(bundleItemsLine(bundle().items)).toBe('3 items • Frame, Badge & Title');
+    expect(bundleItemsLine([bitem('f', 'frame')])).toBe('1 item • Frame');
+  });
+});
+
+describe('bundleState', () => {
+  const opts = { live: true, diamonds: 500, signedIn: true };
+  it('buy when signed in, on sale and affordable', () => {
+    expect(bundleState(bundle(), opts)).toBe('buy');
+  });
+  it('owned once bought, before anything else', () => {
+    expect(bundleState(bundle({ purchased: true }), { ...opts, signedIn: false, diamonds: 0 })).toBe('owned');
+  });
+  it('signin for guests', () => {
+    expect(bundleState(bundle(), { ...opts, signedIn: false })).toBe('signin');
+  });
+  it('all_owned when every item is in the collection', () => {
+    expect(bundleState(bundle({ ownedCount: 3 }), opts)).toBe('all_owned');
+    const items = [bitem('f', 'frame', true), bitem('b', 'badge', true)];
+    expect(bundleState(bundle({ items, ownedCount: 0 }), opts)).toBe('all_owned');
+    expect(bundleState(bundle({ ownedCount: 1 }), opts)).toBe('buy');
+  });
+  it('short only with a known balance below the price', () => {
+    expect(bundleState(bundle(), { ...opts, diamonds: 119 })).toBe('short');
+    expect(bundleState(bundle(), { ...opts, diamonds: 120 })).toBe('buy');
+    expect(bundleState(bundle(), { ...opts, live: false, diamonds: 0 })).toBe('buy');
+  });
+  it('unavailable outside the schedule or sold out (with now)', () => {
+    expect(bundleState(bundle({ endsAt: NOW - 1 }), { ...opts, now: NOW })).toBe('unavailable');
+    expect(bundleState(bundle({ startsAt: NOW + DAY }), { ...opts, now: NOW })).toBe('unavailable');
+    expect(bundleState(bundle({ remaining: 0 }), { ...opts, now: NOW })).toBe('unavailable');
+    expect(bundleState(bundle({ endsAt: NOW + DAY, remaining: 4 }), { ...opts, now: NOW })).toBe('buy');
+  });
+});
+
+describe('bundle helpers', () => {
+  it('bundleAvailable / visibleBundles keep purchased ones', () => {
+    expect(bundleAvailable(bundle(), NOW)).toBe(true);
+    const list = [bundle({ id: 'a' }), bundle({ id: 'b', endsAt: NOW - 1 }), bundle({ id: 'c', endsAt: NOW - 1, purchased: true }), bundle({ id: 'd', remaining: 0 })];
+    expect(visibleBundles(list, NOW).map((b) => b.id)).toEqual(['a', 'c']);
+  });
+  it('bundleDiscount only for a real compare-at', () => {
+    expect(bundleDiscount({ priceDiamonds: 75, compareAtDiamonds: 100 })).toBe(25);
+    expect(bundleDiscount({ priceDiamonds: 100, compareAtDiamonds: 100 })).toBe(0);
+    expect(bundleDiscount({ priceDiamonds: 100, compareAtDiamonds: null })).toBe(0);
+  });
+  it('bundleOwnedNote', () => {
+    expect(bundleOwnedNote(bundle())).toBeNull();
+    expect(bundleOwnedNote(bundle({ ownedCount: 1 }))).toBe('1 of 3 already owned — sirf baaki 2 items milenge');
+    expect(bundleOwnedNote(bundle({ ownedCount: 2 }))).toBe('2 of 3 already owned — sirf baaki 1 item milega');
+  });
+  it('bundleStockLabel only for a real positive number', () => {
+    expect(bundleStockLabel(5)).toBe('Sirf 5 bache');
+    expect(bundleStockLabel(null)).toBeNull();
+    expect(bundleStockLabel(0)).toBeNull();
+    expect(bundleStockLabel('5')).toBeNull();
+  });
+});
+
+describe('collectionItems / collectionCards', () => {
+  const store = [item('a', { rarity: 'rare' }), item('b', { rarity: 'legendary', type: 'badge' }), item('c', { type: 'title' })];
+  it('keeps the admin order and drops missing / repeated ids', () => {
+    expect(collectionItems(col({ itemIds: ['c', 'zz', 'a', 'c'] }), store).map((i) => i.itemId)).toEqual(['c', 'a']);
+    expect(collectionItems(col({ itemIds: [] }), store)).toEqual([]);
+  });
+  it('builds cards only for collections with live items; art = best item; subtitle falls back to types', () => {
+    const cards = collectionCards([col({ id: 'x', itemIds: ['a', 'b', 'c'] }), col({ id: 'empty', itemIds: ['zz'] }), col({ id: 'y', subtitle: 'Admin line', itemIds: ['c'] })], store);
+    expect(cards.map((c) => c.collection.id)).toEqual(['x', 'y']);
+    expect(cards[0].art.itemId).toBe('b');
+    expect(cards[0].subtitle).toBe('Frames, Badges & Titles');
+    expect(cards[1].subtitle).toBe('Admin line');
+  });
+});
+
+describe('normalizeShopCollections', () => {
+  it('parses the contract and drops invalid entries', () => {
+    const out = normalizeShopCollections({
+      collections: [
+        { id: 'c1', name: 'Royal', subtitle: ' Kings ', imageUrl: '', accent: 'teal', itemIds: ['a', 3, ''] },
+        { id: '', name: 'No id' },
+      ],
+      bundles: [
+        { id: 'b1', name: 'Pack', description: 'x', imageUrl: 'https://x/y.png', badge: 'Best Value', priceDiamonds: 100, compareAtDiamonds: 90, startsAt: null, endsAt: 5, remaining: null, items: [{ itemId: 'a', type: 'frame', name: 'A', rarity: 'epic', asset: {}, owned: true }, { nope: 1 }], ownedCount: 1, purchased: false },
+        { id: 'b2', name: 'Bad price', priceDiamonds: 'x' },
+      ],
+    });
+    expect(out.collections).toEqual([{ id: 'c1', name: 'Royal', subtitle: 'Kings', imageUrl: null, accent: 'violet', itemIds: ['a'] }]);
+    expect(out.bundles).toHaveLength(1);
+    expect(out.bundles[0]).toMatchObject({ id: 'b1', badge: 'Best Value', compareAtDiamonds: null, endsAt: 5, ownedCount: 1, imageUrl: 'https://x/y.png' });
+    expect(out.bundles[0].items).toHaveLength(1);
+  });
+  it('is empty for nothing', () => {
+    expect(normalizeShopCollections(null)).toEqual({ collections: [], bundles: [] });
+    expect(normalizeShopCollections({ collections: 'x' })).toEqual({ collections: [], bundles: [] });
+  });
+});
+
+describe('isUnknownActionError', () => {
+  it('recognises an older server that lacks the action', () => {
+    expect(isUnknownActionError({ status: 404 })).toBe(true);
+    expect(isUnknownActionError({ status: 400, message: "Action 'getShopCollections' nahi mila." })).toBe(true);
+    expect(isUnknownActionError({ status: 400, message: 'Unknown action getShopCollections.' })).toBe(true);
+    expect(isUnknownActionError({ status: 400, reason: 'unknown_action' })).toBe(true);
+  });
+  it('does not hide real failures', () => {
+    expect(isUnknownActionError({ status: 500, message: 'boom' })).toBe(false);
+    expect(isUnknownActionError({ message: 'Network request failed' })).toBe(false);
+    expect(isUnknownActionError({ status: 400, reason: 'invalid_request', message: 'Unknown action' })).toBe(false);
+    expect(isUnknownActionError(null)).toBe(false);
+    expect(isUnknownActionError({ status: 404, reason: 'bundle_unavailable' })).toBe(false);
+  });
+});
+
+describe('bundleErrorView', () => {
+  it('maps every server reason', () => {
+    const k = (reason: string) => bundleErrorView({ status: 400, reason }).kind;
+    expect(k('not_enough_diamonds')).toBe('insufficient');
+    expect(k('already_purchased')).toBe('owned');
+    expect(k('already_owned')).toBe('all_owned');
+    expect(k('price_changed')).toBe('price_changed');
+    expect(k('bundle_unavailable')).toBe('unavailable');
+    expect(k('store_disabled')).toBe('store_closed');
+    expect(k('invalid_request')).toBe('invalid');
+    expect(k('something_else')).toBe('other');
+  });
+  it('refreshes on price / availability changes', () => {
+    expect(bundleErrorView({ status: 409, reason: 'price_changed' }).refresh).toBe(true);
+    expect(bundleErrorView({ status: 409, reason: 'bundle_unavailable' }).refresh).toBe(true);
+    expect(bundleErrorView({ status: 402, reason: 'not_enough_diamonds' }).refresh).toBe(false);
+  });
+  it('a network failure retries the same request', () => {
+    const v = bundleErrorView(new Error('offline'));
+    expect(v.kind).toBe('network');
+    expect(v.retrySameRequest).toBe(true);
   });
 });

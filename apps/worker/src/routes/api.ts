@@ -4031,6 +4031,8 @@ apiRoute.post("/", async (c) => {
     case "getGiftHistory":
     case "getStore":
     case "buyStoreItem":
+    case "getShopCollections":
+    case "buyStoreBundle":
     case "getWishlist":
     case "setWishlist":
     case "recordAdEvents":

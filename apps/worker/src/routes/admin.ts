@@ -276,7 +276,7 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["PATCH", /^\/gamification\/flags\/[^/]+$/],
   ["PUT", /^\/gamification\/(achievements|catalog|xp-rewards)\/[^/]+$/],
   // Monetization writes: prices, refunds, revenue imports, campaign approval.
-  ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop)(\/.*)?$/],
+  ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop|collections|bundles)(\/.*)?$/],
   // Shop home artwork goes straight onto the Shop's first screen.
   ["POST", /^\/media\/shop-banner$/],
   // Digital item artwork is drawn on every profile and list row that equips it.

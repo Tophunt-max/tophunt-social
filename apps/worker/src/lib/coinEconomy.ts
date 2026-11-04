@@ -60,6 +60,9 @@ export const LEDGER_CATEGORIES: Record<string, string> = {
   store_refund: "spend",
   shop_order: "spend",
   shop_refund: "spend",
+  // Diamonds spent on Shop Bundles (lib/storeBundles.ts): items only, never currency.
+  store_bundle_purchase: "diamond_spend",
+  store_bundle_refund: "diamond_spend",
   // Earning: XP turned into Diamonds (lib/xpConversion.ts), paid from free-rewards budget.
   xp_conversion: "rewards",
   // One-off fresh start run by the operator (MONETIZATION.md): removed balances, kept in the ledger.
@@ -73,6 +76,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   contests: "Contests (entry Diamond, prize DP coin, refund)",
   reversals: "Refund clawback / account deletion",
   spend: "DP coin spent: gifts, digital store, shop orders (and refunds)",
+  diamond_spend: "Diamond spent: Shop Bundles (and refunds)",
   other: "Other",
 };
 

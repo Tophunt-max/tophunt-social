@@ -11,6 +11,7 @@ import { httpsError } from "./http";
 import { consumeRateLimit, rateLimit } from "./rateLimit";
 import { giftHistory, listLiveGifts, sendGift } from "./gifts";
 import { buyStoreItem, listStore } from "./store";
+import { buyStoreBundle, listShopCollections } from "./storeBundles";
 import { getWishlist, setWishlist } from "./wishlist";
 import { recordAdEvents } from "./adMetrics";
 import { adsSuppressedUntil, ivtCheck } from "./adStats";
@@ -33,6 +34,8 @@ export const MONETIZATION_ACTIONS = new Set([
   "getGiftHistory",
   "getStore",
   "buyStoreItem",
+  "getShopCollections",
+  "buyStoreBundle",
   "getWishlist",
   "setWishlist",
   "recordAdEvents",
@@ -113,6 +116,19 @@ export async function handleMonetizationAction(action: string, ctx: Ctx): Promis
     case "buyStoreItem": {
       await rateLimit(env, `storebuy:${uid}`, 20, 60, { failClosed: true });
       const purchase = await buyStoreItem(env, uid, { itemId: body.itemId, expectedPrice: body.expectedPrice, requestId: body.requestId });
+      if (!purchase.replayed) ctx.purgeProfile();
+      return { success: true, purchase };
+    }
+
+    // ---------------------------------------------------------- collections + Diamond bundles (lib/storeBundles.ts)
+    case "getShopCollections": {
+      await rateLimit(env, `storecol:${uid}`, 60, 60);
+      return listShopCollections(env, uid);
+    }
+
+    case "buyStoreBundle": {
+      await rateLimit(env, `storebuy:${uid}`, 20, 60, { failClosed: true });
+      const purchase = await buyStoreBundle(env, uid, { bundleId: body.bundleId, expectedPrice: body.expectedPrice, requestId: body.requestId });
       if (!purchase.replayed) ctx.purgeProfile();
       return { success: true, purchase };
     }
