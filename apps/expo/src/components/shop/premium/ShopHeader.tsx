@@ -8,7 +8,7 @@ import { useImageAspect } from '@/src/components/home/Header';
 import { Ionicons } from '@/src/lib/icons';
 import { fitArt } from '@/src/lib/layout';
 import { useAppConfig } from '@/src/services/appSettings';
-import { TH } from '@/src/theme/tophunt';
+import { BRAND, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import images from '@/assets/images';
 import { FONT_FLOOR, MOCK, MOCK_M, font, mfont, px } from './mock';
 import { Laurel } from './ShopArt';
@@ -36,6 +36,8 @@ function BrandLogo({ maxWidth, maxHeight }: { maxWidth: number; maxHeight: numbe
 }
 
 interface HeaderProps {
+  /** App light / dark surfaces (useTophuntPalette). */
+  p: TophuntPalette;
   u: number;
   inner: number;
   live: boolean;
@@ -51,11 +53,15 @@ interface HeaderProps {
 /**
  * DP coin / Diamond balance pill. Tapping opens the wallet. Shows a skeleton
  * until the server answers (never a fake 0). Uses the app-wide CoinIcon /
- * DiamondIcon, the same symbols as the wallet and the rest of the app.
+ * DiamondIcon, the same symbols as the wallet and the rest of the app. The
+ * pill is a neutral card; only the amount carries the currency colour (gold
+ * DP, cyan Diamond in dark mode, plain text for Diamond on light where cyan
+ * does not read).
  */
 function BalancePill({
-  kind, value, live, height, fontSize, icon, padX, gap, minWidth, border, skeletonW, onPress,
+  p, kind, value, live, height, fontSize, icon, padX, gap, minWidth, border, skeletonW, onPress,
 }: {
+  p: TophuntPalette;
   kind: 'dp' | 'diamond';
   value: number;
   live: boolean;
@@ -80,12 +86,12 @@ function BalancePill({
       accessibilityLabel={live ? `${value.toLocaleString()} ${label}. Wallet kholo` : `${label} balance load ho raha hai. Wallet kholo`}
       style={[
         styles.pill,
-        { height, borderRadius: height / 2, paddingHorizontal: padX, gap, minWidth, borderWidth: border, borderColor: dp ? '#F5B935' : '#22D3EE' },
+        { height, borderRadius: height / 2, paddingHorizontal: padX, gap, minWidth, borderWidth: border, backgroundColor: p.card, borderColor: p.border },
       ]}
     >
       {dp ? <CoinIcon size={icon} /> : <DiamondIcon size={icon} />}
       {live ? (
-        <Text style={[styles.pillText, { fontSize }]} numberOfLines={1}>
+        <Text style={[styles.pillText, { fontSize, color: dp ? p.gold : p.isDark ? TH.colors.diamond : p.text }]} numberOfLines={1}>
           {dp ? `${value.toLocaleString()} DP` : value.toLocaleString()}
         </Text>
       ) : (
@@ -95,10 +101,10 @@ function BalancePill({
   );
 }
 
-function CartButton({ count, size, badge, onPress }: { count: number; size: number; badge: number; onPress: () => void }) {
+function CartButton({ p, count, size, badge, onPress }: { p: TophuntPalette; count: number; size: number; badge: number; onPress: () => void }) {
   return (
     <TouchableOpacity onPress={onPress} hitSlop={10} accessibilityRole="button" accessibilityLabel={count ? `Cart, ${count} items` : 'Cart, empty'}>
-      <Ionicons name="cart-outline" size={size} color="#FFFFFF" />
+      <Ionicons name="cart-outline" size={size} color={p.text} />
       {count > 0 ? (
         <View style={[styles.badge, { minWidth: badge, height: badge, borderRadius: badge / 2, top: -badge * 0.4, right: -badge * 0.45 }]}>
           <Text style={[styles.badgeText, { fontSize: Math.max(7.5, badge * 0.62) }]}>{count > 99 ? '99+' : count}</Text>
@@ -108,14 +114,14 @@ function CartButton({ count, size, badge, onPress }: { count: number; size: numb
   );
 }
 
-function Tagline({ fontSize, laurelW, laurelH, gap }: { fontSize: number; laurelW: number; laurelH: number; gap: number }) {
+function Tagline({ p, fontSize, laurelW, laurelH, gap }: { p: TophuntPalette; fontSize: number; laurelW: number; laurelH: number; gap: number }) {
   return (
     <View style={[styles.row, { justifyContent: 'center', gap }]}>
-      <Laurel width={laurelW} height={laurelH} />
-      <Text style={[styles.tagline, { fontSize }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+      <Laurel width={laurelW} height={laurelH} color={BRAND} />
+      <Text style={[styles.tagline, { fontSize, color: p.sub }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
         Collect • Customize • Upgrade • Stand Out
       </Text>
-      <Laurel width={laurelW} height={laurelH} flip />
+      <Laurel width={laurelW} height={laurelH} flip color={BRAND} />
     </View>
   );
 }
@@ -125,7 +131,7 @@ function Tagline({ fontSize, laurelW, laurelH, gap }: { fontSize: number; laurel
  * logo (same as Home), the DP coin and Diamond pills (tap → wallet), cart
  * with its count and orders; under it the tagline between laurels.
  */
-export function ShopHeader({ u, inner, live, dpcoin, diamonds, cartCount, onOrders, onCart, onWallet }: HeaderProps) {
+export function ShopHeader({ p, u, inner, live, dpcoin, diamonds, cartCount, onOrders, onCart, onWallet }: HeaderProps) {
   const H = MOCK.header;
   const T = MOCK.title;
   const pillH = px(H.pillH, u);
@@ -137,21 +143,21 @@ export function ShopHeader({ u, inner, live, dpcoin, diamonds, cartCount, onOrde
       <View style={[styles.row, { marginTop: px(H.y, u), height: px(H.h, u), gap: px(H.gap, u) }]}>
         <BrandLogo maxWidth={inner * 0.3} maxHeight={Math.max(28, px(H.h + 6, u))} />
         <View style={{ flex: 1 }} />
-        <BalancePill kind="dp" value={dpcoin} live={live} height={pillH} fontSize={pillFs} icon={pillIcon} padX={px(8, u)} gap={px(5, u)} minWidth={px(H.dpW, u)} border={border} skeletonW={px(60, u)} onPress={onWallet} />
-        <BalancePill kind="diamond" value={diamonds} live={live} height={pillH} fontSize={pillFs} icon={pillIcon} padX={px(8, u)} gap={px(5, u)} minWidth={px(H.diaW, u)} border={border} skeletonW={px(44, u)} onPress={onWallet} />
-        <CartButton count={cartCount} size={Math.max(16, px(H.cart, u))} badge={Math.max(px(H.badge, u), 11)} onPress={onCart} />
+        <BalancePill p={p} kind="dp" value={dpcoin} live={live} height={pillH} fontSize={pillFs} icon={pillIcon} padX={px(8, u)} gap={px(5, u)} minWidth={px(H.dpW, u)} border={border} skeletonW={px(60, u)} onPress={onWallet} />
+        <BalancePill p={p} kind="diamond" value={diamonds} live={live} height={pillH} fontSize={pillFs} icon={pillIcon} padX={px(8, u)} gap={px(5, u)} minWidth={px(H.diaW, u)} border={border} skeletonW={px(44, u)} onPress={onWallet} />
+        <CartButton p={p} count={cartCount} size={Math.max(16, px(H.cart, u))} badge={Math.max(px(H.badge, u), 11)} onPress={onCart} />
         <TouchableOpacity
           onPress={onOrders}
           hitSlop={10}
-          style={[styles.orders, { width: Math.max(18, px(H.orders, u)), height: Math.max(18, px(H.orders, u)), borderRadius: px(8, u) }]}
+          style={[styles.orders, { width: Math.max(18, px(H.orders, u)), height: Math.max(18, px(H.orders, u)), borderRadius: px(8, u), backgroundColor: p.card, borderColor: p.border }]}
           accessibilityRole="button"
           accessibilityLabel="My orders"
         >
-          <Ionicons name="receipt-outline" size={Math.max(12, px(17, u))} color="#FFFFFF" />
+          <Ionicons name="receipt-outline" size={Math.max(12, px(17, u))} color={p.text} />
         </TouchableOpacity>
       </View>
       <View style={{ marginTop: px(T.y - H.y - H.h, u), height: px(T.h, u), justifyContent: 'center' }}>
-        <Tagline fontSize={font(T.tagline, u)} laurelW={px(9, u)} laurelH={px(18, u)} gap={px(4, u)} />
+        <Tagline p={p} fontSize={font(T.tagline, u)} laurelW={px(9, u)} laurelH={px(18, u)} gap={px(4, u)} />
       </View>
     </View>
   );
@@ -162,7 +168,7 @@ export function ShopHeader({ u, inner, live, dpcoin, diamonds, cartCount, onOrde
  * (same as Home), DP coin and Diamond pills (tap → wallet), cart and orders;
  * under it the tagline between laurels.
  */
-export function ShopHeaderMobile({ u, inner, live, dpcoin, diamonds, cartCount, onOrders, onCart, onWallet }: HeaderProps) {
+export function ShopHeaderMobile({ p, u, inner, live, dpcoin, diamonds, cartCount, onOrders, onCart, onWallet }: HeaderProps) {
   const H = MOCK_M.header;
   const T = MOCK_M.title;
   const pillH = px(H.pillH, u);
@@ -175,15 +181,15 @@ export function ShopHeaderMobile({ u, inner, live, dpcoin, diamonds, cartCount, 
       <View style={[styles.row, { marginTop: px(H.rowTop, u), height: rowH, gap: px(H.gap, u) }]}>
         <BrandLogo maxWidth={inner * 0.3} maxHeight={rowH + px(6, u)} />
         <View style={{ flex: 1 }} />
-        <BalancePill kind="dp" value={dpcoin} live={live} height={pillH} fontSize={pillFs} icon={pillIcon} padX={px(6, u)} gap={px(4, u)} minWidth={px(H.dpW, u)} border={border} skeletonW={px(40, u)} onPress={onWallet} />
-        <BalancePill kind="diamond" value={diamonds} live={live} height={pillH} fontSize={pillFs} icon={pillIcon} padX={px(6, u)} gap={px(4, u)} minWidth={px(H.diaW, u)} border={border} skeletonW={px(30, u)} onPress={onWallet} />
-        <CartButton count={cartCount} size={px(H.cart, u)} badge={px(H.badge, u)} onPress={onCart} />
+        <BalancePill p={p} kind="dp" value={dpcoin} live={live} height={pillH} fontSize={pillFs} icon={pillIcon} padX={px(6, u)} gap={px(4, u)} minWidth={px(H.dpW, u)} border={border} skeletonW={px(40, u)} onPress={onWallet} />
+        <BalancePill p={p} kind="diamond" value={diamonds} live={live} height={pillH} fontSize={pillFs} icon={pillIcon} padX={px(6, u)} gap={px(4, u)} minWidth={px(H.diaW, u)} border={border} skeletonW={px(30, u)} onPress={onWallet} />
+        <CartButton p={p} count={cartCount} size={px(H.cart, u)} badge={px(H.badge, u)} onPress={onCart} />
         <TouchableOpacity onPress={onOrders} hitSlop={8} accessibilityRole="button" accessibilityLabel="My orders">
-          <Ionicons name="receipt-outline" size={px(H.orders, u)} color="#FFFFFF" />
+          <Ionicons name="receipt-outline" size={px(H.orders, u)} color={p.text} />
         </TouchableOpacity>
       </View>
       <View style={{ marginTop: px(T.y - H.h, u), height: px(T.h, u), justifyContent: 'center' }}>
-        <Tagline fontSize={mfont(T.tagline + 1, u)} laurelW={px(T.laurel * 0.5, u)} laurelH={px(T.laurel, u)} gap={px(3, u)} />
+        <Tagline p={p} fontSize={mfont(T.tagline + 1, u)} laurelW={px(T.laurel * 0.5, u)} laurelH={px(T.laurel, u)} gap={px(3, u)} />
       </View>
     </View>
   );
@@ -191,10 +197,10 @@ export function ShopHeaderMobile({ u, inner, live, dpcoin, diamonds, cartCount, 
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
-  pill: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#160A33' },
-  pillText: { color: '#FFFFFF', fontFamily: TH.fonts.bold, flexShrink: 1 },
-  badge: { position: 'absolute', backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  pill: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  pillText: { fontFamily: TH.fonts.bold, flexShrink: 1 },
+  badge: { position: 'absolute', backgroundColor: BRAND, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   badgeText: { color: '#FFF', fontFamily: TH.fonts.bold },
-  orders: { borderWidth: 1, borderColor: 'rgba(168,85,247,0.55)', backgroundColor: '#160A33', alignItems: 'center', justifyContent: 'center' },
-  tagline: { color: '#F5D58A', fontFamily: TH.fonts.semibold, flexShrink: 1 },
+  orders: { borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  tagline: { fontFamily: TH.fonts.semibold, flexShrink: 1 },
 });

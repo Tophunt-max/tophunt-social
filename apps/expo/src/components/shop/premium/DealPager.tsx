@@ -8,17 +8,17 @@
  *    autoplay, so the platform's own paging gives the expected feel, keyboard
  *    and screen-reader scrolling for free. One card = no pager, no dots.
  *    Dot / screen-reader page changes jump without animation under reduced motion.
- *  - DealTimerPill: the red "⏱ 12:36:59" pill, only for a real future end.
+ *  - DealTimerPill: the brand pink "⏱ 12:36:59" pill, only for a real future end.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, type AccessibilityActionEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 import { Ionicons } from '@/src/lib/icons';
 import { dealTimerLabel } from '@/src/lib/shopModel';
-import { TH } from '@/src/theme/tophunt';
+import { BRAND, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import { MOCK_M, mfont, px } from './mock';
 
-/** Red "⏱ 12:36:59" pill: only for a real future end; ticks every second when ≤ 7 days away, else every minute. */
+/** Brand pink "⏱ 12:36:59" pill: only for a real future end; ticks every second when ≤ 7 days away, else every minute. */
 export function DealTimerPill({ endsAt, u }: { endsAt: number; u: number }) {
   const [now, setNow] = useState(() => Date.now());
   const near = endsAt - now <= 7 * 86_400_000;
@@ -40,8 +40,10 @@ export function DealTimerPill({ endsAt, u }: { endsAt: number; u: number }) {
 }
 
 export function DealPager({
-  count, width, u, renderPage, onIndex, labelOf, dotSize = 5,
+  p, count, width, u, renderPage, onIndex, labelOf, dotSize = 5,
 }: {
+  /** Card surface the dots sit on (inactive dot colour); without it the dots assume a dark surface. */
+  p?: TophuntPalette;
   count: number;
   /** Page width (= the card width). */
   width: number;
@@ -129,7 +131,7 @@ export function DealPager({
             onPress={() => goTo(i)}
             hitSlop={8}
             accessible={false}
-            style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: i === index ? '#F472B6' : 'rgba(255,255,255,0.4)' }}
+            style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: i === index ? BRAND : p ? `${p.sub}66` : 'rgba(255,255,255,0.4)' }}
           />
         ))}
       </View>
@@ -138,7 +140,7 @@ export function DealPager({
 }
 
 const styles = StyleSheet.create({
-  timer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EF4444' },
+  timer: { flexDirection: 'row', alignItems: 'center', backgroundColor: BRAND },
   timerText: { color: '#FFF', fontFamily: TH.fonts.bold, fontVariant: ['tabular-nums'] },
   dots: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
 });

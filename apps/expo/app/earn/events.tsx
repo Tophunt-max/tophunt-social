@@ -6,7 +6,6 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { BackButton } from '@/src/components/ui/BackButton';
@@ -17,9 +16,22 @@ import { useDesignWindow } from '@/src/lib/layout';
 import { countdown, errorText, missionRoute } from '@/src/lib/rewardsCenter';
 import { MISSION_ART } from '@/assets/earning';
 import { useClaimEventTask, useEvents, useJoinEvent, type RewardEventView } from '@/src/services/events';
-import { Art, ClaimBurst, DiamondAmount, GoldButton, NeonBar, NeonCard, RC, StateNote } from '@/src/components/rewardsCenter/RewardsBits';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Art, ClaimBurst, DiamondAmount, GoldButton, NeonBar, NeonCard, RewardsThemeContext, StateNote, rewardsPalette, useRC, type RewardsPalette } from '@/src/components/rewardsCenter/RewardsBits';
+
+const STYLE_CACHE = new Map<RewardsPalette, ReturnType<typeof makeStyles>>();
+function stylesFor(rc: RewardsPalette) {
+  let s = STYLE_CACHE.get(rc);
+  if (!s) {
+    s = makeStyles(rc);
+    STYLE_CACHE.set(rc, s);
+  }
+  return s;
+}
 
 export default function EventsScreen() {
+  const RC = rewardsPalette(useColorScheme() === 'dark');
+  const styles = stylesFor(RC);
   const router = useRouter();
   const { user } = useAuth();
   const { focus } = useLocalSearchParams<{ focus?: string }>();
@@ -50,8 +62,8 @@ export default function EventsScreen() {
   };
 
   return (
+    <RewardsThemeContext.Provider value={RC}>
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <LinearGradient colors={[RC.bg2, RC.bg]} style={StyleSheet.absoluteFill} />
       <View style={styles.header}>
         <BackButton size={24} color={RC.text} style={{ marginRight: 6 }} />
         <Art name="specialEvent" size={30} />
@@ -62,9 +74,9 @@ export default function EventsScreen() {
       </View>
       <ScrollView
         contentContainerStyle={{ width: Math.min(width, 640), alignSelf: 'center', padding: 16, gap: 14, paddingBottom: 48 }}
-        refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => q.refetch()} tintColor={RC.gold} />}
+        refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => q.refetch()} tintColor={RC.brand} colors={[RC.brand]} />}
       >
-        {!user ? <StateNote text="Events dekhne ke liye sign in karo." /> : q.isLoading ? <ActivityIndicator color={RC.gold} style={{ marginTop: 40 }} /> : q.isError ? (
+        {!user ? <StateNote text="Events dekhne ke liye sign in karo." /> : q.isLoading ? <ActivityIndicator color={RC.brand} style={{ marginTop: 40 }} /> : q.isError ? (
           <StateNote text="Events load nahi hue." action="Dobara try karo" onAction={() => q.refetch()} />
         ) : !events.length ? (
           <StateNote text="Abhi koi event nahi hai. Naye events jaldi aayenge." />
@@ -81,8 +93,18 @@ export default function EventsScreen() {
                 {e.description ? <Text style={styles.sub}>{e.description}</Text> : null}
                 <Text style={styles.meta}>
                   {e.phase === 'scheduled' ? `Shuru hoga ${countdown(e.startsAt)} me` : e.phase === 'live' ? `${countdown(e.endsAt)} baaki` : `Claim ${countdown(e.claimUntil)} tak`}
-                  {'  ·  '}Total +{e.totalCoins.toLocaleString()} 💎{e.budgetLeft != null ? `  ·  Budget ${e.budgetLeft.toLocaleString()} 💎 bacha` : ''}
                 </Text>
+                <View style={styles.metaRow}>
+                  <Text style={styles.meta}>Total</Text>
+                  <DiamondAmount amount={e.totalCoins} size={12} />
+                  {e.budgetLeft != null ? (
+                    <>
+                      <Text style={styles.meta}>·  Budget</Text>
+                      <DiamondAmount amount={e.budgetLeft} size={12} prefix="" />
+                      <Text style={styles.meta}>bacha</Text>
+                    </>
+                  ) : null}
+                </View>
               </View>
             </View>
             {e.blockedReason && !e.joined ? (
@@ -107,7 +129,7 @@ export default function EventsScreen() {
                       {t.claimed ? <Text style={styles.done}>Claimed</Text> : t.claimable ? (
                         <GoldButton small label="Claim" busy={claim.isPending && claim.variables?.taskId === t.id && claim.variables?.eventId === e.id} onPress={() => onClaim(e, t.id)} />
                       ) : e.phase === 'live' ? (
-                        <GoldButton small label="Go" grad={['#A855F7', '#6D28D9']} textColor="#FFFFFF" onPress={() => go(t.metric)} />
+                        <GoldButton small label="Go" variant="secondary" onPress={() => go(t.metric)} />
                       ) : null}
                     </View>
                   </View>
@@ -119,16 +141,20 @@ export default function EventsScreen() {
       </ScrollView>
       <ClaimBurst playKey={burst} />
     </SafeAreaView>
+    </RewardsThemeContext.Provider>
   );
 }
 
 function PhasePill({ e }: { e: RewardEventView }) {
-  if (e.phase === 'live') return <View style={[styles.pill, { backgroundColor: '#EF4444' }]}><View style={styles.dot} /><Text style={styles.pillText}>LIVE</Text></View>;
-  if (e.phase === 'scheduled') return <View style={[styles.pill, { backgroundColor: '#2563EB' }]}><Text style={styles.pillText}>SOON</Text></View>;
-  return <View style={[styles.pill, { backgroundColor: '#475569' }]}><Text style={styles.pillText}>ENDED</Text></View>;
+  const RC = useRC();
+  const styles = stylesFor(RC);
+  if (e.phase === 'live') return <View style={[styles.pill, { backgroundColor: RC.brand }]}><View style={styles.dot} /><Text style={styles.pillText}>LIVE</Text></View>;
+  if (e.phase === 'scheduled') return <View style={[styles.pill, { backgroundColor: RC.brandSoft }]}><Text style={[styles.pillText, { color: RC.brand }]}>SOON</Text></View>;
+  return <View style={[styles.pill, { backgroundColor: RC.tint }]}><Text style={[styles.pillText, { color: RC.sub }]}>ENDED</Text></View>;
 }
 
-const styles = StyleSheet.create({
+function makeStyles(RC: RewardsPalette) {
+  return StyleSheet.create({
   screen: { flex: 1, backgroundColor: RC.bg },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
   title: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 20 },
@@ -136,7 +162,7 @@ const styles = StyleSheet.create({
   banner: { width: '100%', height: 140, borderRadius: 14, marginBottom: 12 },
   top: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  eventTitle: { color: RC.gold, fontFamily: 'Urbanist-Bold', fontSize: 18, flexShrink: 1 },
+  eventTitle: { color: RC.text, fontFamily: 'Urbanist-Bold', fontSize: 18, flexShrink: 1 },
   meta: { color: RC.muted, fontFamily: 'Urbanist-Medium', fontSize: 11.5 },
   joined: { color: RC.green, fontFamily: 'Urbanist-Bold', fontSize: 12 },
   task: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -145,4 +171,6 @@ const styles = StyleSheet.create({
   pill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF' },
   pillText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 10 },
-});
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
+  });
+}

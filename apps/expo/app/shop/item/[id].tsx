@@ -22,7 +22,7 @@ import { balancesOf, hasLiveBalance } from '@/src/lib/balances';
 import { coinsInInr } from '@/src/lib/coinValue';
 import { EQUIP_WHERE, TYPE_SINGULAR, hasRealStock, isShort } from '@/src/lib/shopModel';
 import { useMonetizationConfig, useStore, type StoreItemView } from '@/src/services/monetization';
-import { TH, rarityToken, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';
+import { BRAND, BRAND_BUTTON, TH, rarityToken, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';
 
 /**
  * One digital item: a large live preview on the viewer's own avatar / name,
@@ -93,7 +93,7 @@ export default function ShopItemScreen() {
       </View>
       <ScrollView
         contentContainerStyle={{ width: contentW, alignSelf: 'center', paddingHorizontal: pad, paddingBottom: 48 }}
-        refreshControl={<RefreshControl refreshing={store.isRefetching} onRefresh={() => { void store.refetch(); void refetchMe(); }} tintColor={TH.colors.primary} />}
+        refreshControl={<RefreshControl refreshing={store.isRefetching} onRefresh={() => { void store.refetch(); void refetchMe(); }} tintColor={BRAND} />}
       >
         {body}
       </ScrollView>
@@ -175,21 +175,21 @@ function ItemDetail({
 
       <View style={{ gap: 10 }}>
         {item.owned ? (
-          <PrimaryButton label="Equip karo" icon="sparkles" onPress={onEquip} />
+          <PrimaryButton p={p} label="Equip karo" icon="sparkles" onPress={onEquip} />
         ) : saleOver ? (
-          <PrimaryButton label="Sale khatam ho gayi" icon="time" disabled />
+          <PrimaryButton p={p} label="Sale khatam ho gayi" icon="time" disabled />
         ) : short ? (
           <>
-            <PrimaryButton label="DP coin kam hai" icon="lock-closed" disabled hint={`${(item.priceCoins - dpcoin).toLocaleString()} DP coin aur chahiye`} />
+            <PrimaryButton p={p} label="DP coin kam hai" icon="lock-closed" disabled hint={`${(item.priceCoins - dpcoin).toLocaleString()} DP coin aur chahiye`} />
             <TouchableOpacity onPress={onEarn} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Kamao: contest jeet kar DP coin kamao">
-              <LinearGradient colors={TH.gradients.gold} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.btn}>
-                <Ionicons name="trophy" size={16} color="#2A1A00" />
-                <Text style={[styles.btnText, { color: '#2A1A00' }]}>Kamao</Text>
+              <LinearGradient colors={BRAND_BUTTON} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.btn}>
+                <Ionicons name="trophy" size={16} color="#FFF" />
+                <Text style={styles.btnText}>Kamao</Text>
               </LinearGradient>
             </TouchableOpacity>
           </>
         ) : (
-          <PrimaryButton label={`Abhi kharido · ${item.priceCoins.toLocaleString()}`} icon="flash" onPress={onBuy} busy={busy} />
+          <PrimaryButton p={p} label={`Abhi kharido · ${item.priceCoins.toLocaleString()}`} icon="flash" onPress={onBuy} busy={busy} />
         )}
       </View>
     </View>
@@ -210,7 +210,7 @@ function Fact({ p, icon, title, text, last }: { p: TophuntPalette; icon: string;
   return (
     <View style={[styles.fact, !last && { borderBottomWidth: 1, borderBottomColor: p.border }]}>
       <View style={[styles.factIcon, { backgroundColor: p.cardAlt }]}>
-        <Ionicons name={icon} size={15} color={p.isDark ? TH.colors.diamond : TH.colors.royal} />
+        <Ionicons name={icon} size={15} color={BRAND} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={[styles.factTitle, { color: p.text }]}>{title}</Text>
@@ -220,7 +220,8 @@ function Fact({ p, icon, title, text, last }: { p: TophuntPalette; icon: string;
   );
 }
 
-function PrimaryButton({ label, icon, onPress, disabled, busy, hint }: { label: string; icon: string; onPress?: () => void; disabled?: boolean; busy?: boolean; hint?: string }) {
+/** Brand pink primary button; disabled reads as a neutral chip. */
+function PrimaryButton({ p, label, icon, onPress, disabled, busy, hint }: { p: TophuntPalette; label: string; icon: string; onPress?: () => void; disabled?: boolean; busy?: boolean; hint?: string }) {
   const off = disabled || busy;
   return (
     <TouchableOpacity
@@ -232,15 +233,15 @@ function PrimaryButton({ label, icon, onPress, disabled, busy, hint }: { label: 
       accessibilityLabel={hint ? `${label}. ${hint}` : label}
     >
       <LinearGradient
-        colors={disabled ? ['#4B4B6B', '#4B4B6B'] : [TH.colors.royal, TH.colors.primary, TH.colors.electric]}
+        colors={disabled ? [p.cardAlt, p.cardAlt] : BRAND_BUTTON}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={[styles.btn, busy && { opacity: 0.7 }]}
       >
-        <Ionicons name={icon} size={16} color="#FFF" />
+        <Ionicons name={icon} size={16} color={disabled ? p.sub : '#FFF'} />
         <View style={{ alignItems: 'center' }}>
-          <Text style={styles.btnText}>{label}</Text>
-          {hint ? <Text style={styles.btnHint}>{hint}</Text> : null}
+          <Text style={[styles.btnText, disabled && { color: p.sub }]}>{label}</Text>
+          {hint ? <Text style={[styles.btnHint, disabled && { color: p.sub }]}>{hint}</Text> : null}
         </View>
       </LinearGradient>
     </TouchableOpacity>

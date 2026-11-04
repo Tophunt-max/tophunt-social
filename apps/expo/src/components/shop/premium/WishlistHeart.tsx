@@ -1,6 +1,7 @@
 /**
- * Heart toggle for the Shop wishlist (worker lib/wishlist.ts). Filled pink
- * when the item is on the list. Optimistic with rollback (useToggleWishlist);
+ * Heart toggle for the Shop wishlist (worker lib/wishlist.ts). Filled brand
+ * pink when the item is on the list. The outline `color` defaults to white
+ * for the dark bubble / art stage; pass p.sub (or p.text) on a page surface. Optimistic with rollback (useToggleWishlist);
  * a refusal from the server (list full, item gone) is explained in an alert.
  * Renders nothing for signed-out viewers or while the store is off.
  */
@@ -50,11 +51,11 @@ export function WishlistHeart({
       accessibilityLabel={`${name ? `${name}: ` : ''}${on ? 'Wishlist se hatao' : 'Wishlist mein daalo'}`}
       style={[bubble && [styles.bubble, { width: box, height: box, borderRadius: box / 2 }], style]}
     >
-      <Heart size={size} color={on ? TH.colors.pink : color} fill={on ? TH.colors.pink : 'transparent'} strokeWidth={2.2} />
+      <Heart size={size} color={on ? TH.colors.primary : color} fill={on ? TH.colors.primary : 'transparent'} strokeWidth={2.2} />
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  bubble: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,6,32,0.55)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
+  bubble: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.5)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
 });

@@ -83,17 +83,9 @@ import {
 import { useInventory } from '@/src/services/gamification';
 import { useGiftCatalog, useGiftHistory, useMonetizationConfig, useStore, useWishlist, type StoreItemView } from '@/src/services/monetization';
 import { useCart, useShopProducts } from '@/src/services/shop';
-import { TH, asExplorePalette, gridCellWidth, gridColumns, rarityToken, surfacesFor, type TophuntPalette } from '@/src/theme/tophunt';
+import { BRAND, TH, asExplorePalette, gridCellWidth, gridColumns, rarityToken, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';
 
 const GAP = 12;
-/** Page base colour of the reference mock. */
-const PAGE_BG = '#0A0418';
-/**
- * The Shop is a branded store surface drawn on the dark neon reference mock
- * (gold on deep purple), so the whole /shop screen uses the dark palette
- * whatever the system theme. Its artwork and gold text do not read on light.
- */
-const P_SHOP = surfacesFor(true);
 
 /** Wall clock that updates once a minute: enough for "new" windows and sale ends on the overview. */
 function useMinuteClock(): number {
@@ -109,18 +101,18 @@ const RAIL_GAP = 12;
 /** Vertical gap (scaled) between the bottom of one mock element and the top of the next. */
 const gapY = (prevBottom: number, nextTop: number, u: number) => px(Math.max(0, nextTop - prevBottom), u);
 
-/** Soft radial purple glows behind the page (static, does not scroll). */
+/** A very faint brand pink glow behind the page in dark mode only (static, does not scroll). */
 const PageGlow = React.memo(function PageGlow({ width, height, heroBottom }: { width: number; height: number; heroBottom: number }) {
   return (
     <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
       <Defs>
         <RadialGradient id="pg-a" cx={width * 0.08} cy={height * 0.05} r={Math.max(width, 400) * 0.7} gradientUnits="userSpaceOnUse">
-          <Stop offset="0" stopColor="#6D28D9" stopOpacity={0.25} />
-          <Stop offset="1" stopColor="#6D28D9" stopOpacity={0} />
+          <Stop offset="0" stopColor={BRAND} stopOpacity={0.08} />
+          <Stop offset="1" stopColor={BRAND} stopOpacity={0} />
         </RadialGradient>
         <RadialGradient id="pg-b" cx={width * 0.92} cy={heroBottom + 40} r={Math.max(width, 400) * 0.55} gradientUnits="userSpaceOnUse">
-          <Stop offset="0" stopColor="#A21CAF" stopOpacity={0.2} />
-          <Stop offset="1" stopColor="#A21CAF" stopOpacity={0} />
+          <Stop offset="0" stopColor={BRAND} stopOpacity={0.06} />
+          <Stop offset="1" stopColor={BRAND} stopOpacity={0} />
         </RadialGradient>
       </Defs>
       <Circle cx={width * 0.08} cy={height * 0.05} r={Math.max(width, 400) * 0.7} fill="url(#pg-a)" />
@@ -148,9 +140,13 @@ const PageGlow = React.memo(function PageGlow({ width, height, heroBottom }: { w
  * nothing is shown as new, trending, limited or featured without a signal for
  * it. Blocks the mock has but the data cannot fill yet are drawn as honest
  * "jaldi aa raha hai" placeholders (no prices, timers or discounts).
+ *
+ * Colours follow the app's Dark Mode setting (useTophuntPalette): app
+ * neutrals for page and cards, brand pink for buttons, tabs and links. Item
+ * artwork and the hero slides stay on their dark stage in both modes.
  */
 export default function ShopScreen() {
-  const p = P_SHOP;
+  const p = useTophuntPalette();
   const ep = useMemo(() => asExplorePalette(p), [p]);
   const router = useRouter();
   const focused = useIsFocused();
@@ -381,6 +377,7 @@ export default function ShopScreen() {
       ) : (
         <>
           <SectionHeader
+            p={p}
             u={u}
             style={{ marginTop: gapY(heroBottom, MOCK.catHead.y, u) }}
             icon={<BagIcon size={icon} />}
@@ -388,12 +385,13 @@ export default function ShopScreen() {
             action={{ label: 'View All', onPress: () => openDigital({}) }}
           />
           <View style={{ marginTop: gapY(MOCK.catHead.y + MOCK.catHead.h, MOCK.catRow1.y, u) }}>
-            <CategoryGrid tiles={tiles} u={u} inner={inner} onPick={onTile} />
+            <CategoryGrid p={p} tiles={tiles} u={u} inner={inner} onPick={onTile} />
           </View>
 
           {featured.length ? (
             <>
               <SectionHeader
+                p={p}
                 u={u}
                 style={{ marginTop: gapY(MOCK.catRow2.y + MOCK.catRow2.h, MOCK.featHead.y, u) }}
                 icon={<StarIcon size={icon} />}
@@ -401,7 +399,7 @@ export default function ShopScreen() {
                 action={{ label: 'View All', onPress: () => openDigital({ ids: featured.map((i) => i.itemId) }) }}
               />
               <View style={[styles.row, { gap: featGap, marginTop: gapY(MOCK.featHead.y + MOCK.featHead.h, MOCK.feat.y, u) }]}>
-                {featured.map((i) => <FeatureCard key={i.itemId} item={i} tag={cardTag(i, now)} u={u} width={featW} viewer={viewer} onOpen={() => openItem(i.itemId)} />)}
+                {featured.map((i) => <FeatureCard key={i.itemId} p={p} item={i} tag={cardTag(i, now)} u={u} width={featW} viewer={viewer} onOpen={() => openItem(i.itemId)} />)}
               </View>
             </>
           ) : null}
@@ -409,6 +407,7 @@ export default function ShopScreen() {
           {trending.items.length ? (
             <>
               <SectionHeader
+                p={p}
                 u={u}
                 style={{ marginTop: gapY(MOCK.feat.y + MOCK.feat.h, MOCK.trendHead.y, u) }}
                 icon={<FlameIcon size={icon} />}
@@ -416,7 +415,7 @@ export default function ShopScreen() {
                 action={{ label: 'View All', onPress: () => openDigital({}) }}
               />
               <View style={[styles.row, { gap: trendGap, marginTop: gapY(MOCK.trendHead.y + MOCK.trendHead.h, MOCK.trend.y, u) }]}>
-                {trending.items.map((i) => <TrendCard key={i.itemId} item={i} u={u} width={trendW} viewer={viewer} onOpen={() => openItem(i.itemId)} />)}
+                {trending.items.map((i) => <TrendCard key={i.itemId} p={p} item={i} u={u} width={trendW} viewer={viewer} onOpen={() => openItem(i.itemId)} />)}
               </View>
             </>
           ) : null}
@@ -424,17 +423,18 @@ export default function ShopScreen() {
       )}
 
       <View style={[styles.row, { marginTop: gapY(MOCK.trend.y + MOCK.trend.h, MOCK.physHead.y, u), gap: px(MOCK.deals.x - MOCK.physHead.blockW - 26, u), alignItems: 'flex-start' }]}>
-        <PhysicalBlock products={homeDeals.products} u={u} onAll={() => setTab('physical')} onOpen={openProduct} />
+        <PhysicalBlock p={p} products={homeDeals.products} u={u} onAll={() => setTab('physical')} onOpen={openProduct} />
         {dealCards.length ? (
-          <AdminDealsCard title={dealsHeading} cards={dealCards} u={u} onNav={followNav} />
+          <AdminDealsCard p={p} title={dealsHeading} cards={dealCards} u={u} onNav={followNav} />
         ) : (
-          <DealsCard product={homeDeals.deal} u={u} onGrab={openProduct} onContest={() => router.push('/explore/battles' as any)} />
+          <DealsCard p={p} product={homeDeals.deal} u={u} onGrab={openProduct} onContest={() => router.push('/explore/battles' as any)} />
         )}
       </View>
 
       {user ? (
         <>
           <SectionHeader
+            p={p}
             u={u}
             style={{ marginTop: gapY(physBottom, MOCK.colHead.y, u) }}
             icon={<BagIcon size={icon} />}
@@ -443,7 +443,7 @@ export default function ShopScreen() {
           />
           <View style={{ marginTop: gapY(MOCK.colHead.y + MOCK.colHead.h, MOCK.col.y, u) }}>
             {inventory.data ? (
-              <CollectionRow tiles={collection.tiles} u={u} inner={inner} onPress={openCollection} />
+              <CollectionRow p={p} tiles={collection.tiles} u={u} inner={inner} onPress={openCollection} />
             ) : inventory.isError ? (
               <View style={{ marginHorizontal: -margin }}>
                 <View style={{ paddingHorizontal: pad }}><ErrorState p={p} text="Collection load nahi hui." onRetry={() => void inventory.refetch()} /></View>
@@ -460,7 +460,7 @@ export default function ShopScreen() {
       ) : null}
 
       <View style={{ marginTop: gapY(user ? colBottom : physBottom, MOCK.quick.y, u) }}>
-        <QuickActionsBar actions={quickActions} u={u} width={inner} />
+        <QuickActionsBar p={p} actions={quickActions} u={u} width={inner} />
       </View>
     </View>
   );
@@ -473,10 +473,10 @@ export default function ShopScreen() {
   const trendGapM = px(MOCK_M.trend.gap, uM);
   const quickCards: QuickCard[] = [
     ...(cfg.store.enabled && user
-      ? [{ key: 'wish', icon: <HeartIcon size={mQaIcon} />, title: 'Wishlist', sub: 'Save Items', accent: '#EC4899', onPress: () => openDigital({ wishlist: true }) }]
+      ? [{ key: 'wish', icon: <HeartIcon size={mQaIcon} />, title: 'Wishlist', sub: 'Save Items', accent: BRAND, onPress: () => openDigital({ wishlist: true }) }]
       : []),
-    { key: 'orders', icon: <GoldBoxIcon size={mQaIcon} />, title: 'Orders', sub: 'Track & Manage', accent: '#F59E0B', onPress: () => router.push('/shop/orders' as any) },
-    { key: 'history', icon: <ClockIcon size={mQaIcon} />, title: 'History', sub: 'Purchase Records', accent: '#F5B935', onPress: () => router.push('/wallet' as any) },
+    { key: 'orders', icon: <GoldBoxIcon size={mQaIcon} />, title: 'Orders', sub: 'Track & Manage', accent: BRAND, onPress: () => router.push('/shop/orders' as any) },
+    { key: 'history', icon: <ClockIcon size={mQaIcon} />, title: 'History', sub: 'Purchase Records', accent: BRAND, onPress: () => router.push('/wallet' as any) },
   ];
   const collectionM = mobileCollectionTiles(collection.tiles);
 
@@ -491,17 +491,17 @@ export default function ShopScreen() {
         <View style={{ marginHorizontal: -margin, marginTop: mGap }}>{digitalState}</View>
       ) : (
         <>
-          <SectionHeaderM u={uM} style={{ marginTop: mGap }} icon={<CrownIcon size={mIcon} />} title="Shop Categories" action={{ label: 'View All', onPress: () => openDigital({}) }} />
+          <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<CrownIcon size={mIcon} />} title="Shop Categories" action={{ label: 'View All', onPress: () => openDigital({}) }} />
           <View style={{ marginTop: mHead }}>
-            <CategoryGridM tiles={tilesM} u={uM} inner={inner} onPick={onTile} />
+            <CategoryGridM p={p} tiles={tilesM} u={uM} inner={inner} onPick={onTile} />
           </View>
 
           {featuredM.length ? (
             <>
-              <SectionHeaderM u={uM} style={{ marginTop: mGap }} icon={<StarIcon size={mIcon} />} title="Featured Collection" action={{ label: 'View All', onPress: () => openDigital({ ids: featured.map((i) => i.itemId) }) }} />
+              <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<StarIcon size={mIcon} />} title="Featured Collection" action={{ label: 'View All', onPress: () => openDigital({ ids: featured.map((i) => i.itemId) }) }} />
               <View style={[styles.row, { gap: featGapM, marginTop: mHead }]}>
                 {featuredM.map((i) => (
-                  <FeatureCardM key={i.itemId} item={i} tag={cardTag(i, now)} u={uM} width={cellWidth(inner, MOCK_M.feat.cols, featGapM)} viewer={viewer} onOpen={() => openItem(i.itemId)} />
+                  <FeatureCardM key={i.itemId} p={p} item={i} tag={cardTag(i, now)} u={uM} width={cellWidth(inner, MOCK_M.feat.cols, featGapM)} viewer={viewer} onOpen={() => openItem(i.itemId)} />
                 ))}
               </View>
             </>
@@ -509,10 +509,10 @@ export default function ShopScreen() {
 
           {trendingM.items.length ? (
             <>
-              <SectionHeaderM u={uM} style={{ marginTop: mGap }} icon={<FlameIcon size={mIcon} />} title={trendingM.title} action={{ label: 'View All', onPress: () => openDigital({}) }} />
+              <SectionHeaderM p={p} u={uM} style={{ marginTop: mGap }} icon={<FlameIcon size={mIcon} />} title={trendingM.title} action={{ label: 'View All', onPress: () => openDigital({}) }} />
               <View style={[styles.row, { gap: trendGapM, marginTop: mHead }]}>
                 {trendingM.items.map((i) => (
-                  <TrendCardM key={i.itemId} item={i} u={uM} width={cellWidth(inner, MOCK_M.trend.cols, trendGapM)} viewer={viewer} onOpen={() => openItem(i.itemId)} />
+                  <TrendCardM key={i.itemId} p={p} item={i} u={uM} width={cellWidth(inner, MOCK_M.trend.cols, trendGapM)} viewer={viewer} onOpen={() => openItem(i.itemId)} />
                 ))}
               </View>
             </>
@@ -521,6 +521,7 @@ export default function ShopScreen() {
       )}
 
       <SectionHeaderM
+        p={p}
         u={uM}
         style={{ marginTop: mGap }}
         icon={<BoltIcon size={mIcon} />}
@@ -534,6 +535,7 @@ export default function ShopScreen() {
       <View style={{ marginTop: mHead }}>
         {dealCards.length ? (
           <DealPager
+            p={p}
             count={dealCards.length}
             width={inner}
             u={uM}
@@ -541,6 +543,7 @@ export default function ShopScreen() {
             labelOf={(i) => dealCards[i]?.title ?? ''}
             renderPage={(i) => (
               <DealCardM
+                p={p}
                 content={{ kind: 'admin', card: dealCards[i] }}
                 u={uM}
                 width={inner}
@@ -553,6 +556,7 @@ export default function ShopScreen() {
           />
         ) : (
           <DealCardM
+            p={p}
             content={dealContent}
             u={uM}
             width={inner}
@@ -564,6 +568,7 @@ export default function ShopScreen() {
       </View>
 
       <SectionHeaderM
+        p={p}
         u={uM}
         style={{ marginTop: mGap }}
         icon={<BoxIcon size={mIcon} />}
@@ -571,12 +576,13 @@ export default function ShopScreen() {
         action={physM ? { label: 'View All', onPress: () => setTab('physical') } : undefined}
       />
       <View style={{ marginTop: mHead }}>
-        <PhysicalRowM products={physM} u={uM} inner={inner} onOpen={openProduct} />
+        <PhysicalRowM p={p} products={physM} u={uM} inner={inner} onOpen={openProduct} />
       </View>
 
       {user ? (
         <>
           <SectionHeaderM
+            p={p}
             u={uM}
             style={{ marginTop: mGap }}
             icon={<CrownIcon size={mIcon} />}
@@ -585,7 +591,7 @@ export default function ShopScreen() {
           />
           <View style={{ marginTop: mHead }}>
             {inventory.data ? (
-              <CollectionRowM tiles={collectionM} u={uM} inner={inner} onPress={openCollection} />
+              <CollectionRowM p={p} tiles={collectionM} u={uM} inner={inner} onPress={openCollection} />
             ) : inventory.isError ? (
               <View style={{ marginHorizontal: -margin, paddingHorizontal: pad }}>
                 <ErrorState p={p} text="Collection load nahi hui." onRetry={() => void inventory.refetch()} />
@@ -603,12 +609,12 @@ export default function ShopScreen() {
 
       {upgrade ? (
         <View style={{ marginTop: mGap }}>
-          <UpgradeBannerM u={uM} width={inner} onPress={() => openDigital({ rarities: [...UPGRADE_RARITIES] })} />
+          <UpgradeBannerM p={p} u={uM} width={inner} onPress={() => openDigital({ rarities: [...UPGRADE_RARITIES] })} />
         </View>
       ) : null}
 
       <View style={{ marginTop: mGap }}>
-        <QuickCardsM cards={quickCards} u={uM} width={inner} />
+        <QuickCardsM p={p} cards={quickCards} u={uM} width={inner} />
       </View>
     </View>
   );
@@ -617,20 +623,21 @@ export default function ShopScreen() {
   const heroBottomY = mobile ? px(MOCK_M.hero.y + MOCK_M.hero.h, uM) : px(MOCK.hero.y + MOCK.hero.h, u);
 
   return (
-    <View style={[styles.container, { backgroundColor: PAGE_BG }]}>
-      {focused ? <StatusBar style="light" /> : null}
-      <PageGlow width={width} height={height} heroBottom={heroBottomY} />
+    <View style={[styles.container, { backgroundColor: p.bg }]}>
+      {focused ? <StatusBar style={p.isDark ? 'light' : 'dark'} /> : null}
+      {p.isDark ? <PageGlow width={width} height={height} heroBottom={heroBottomY} /> : null}
       <SafeAreaView style={styles.container} edges={['top']}>
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: bottomPad + (tab === 'shop' ? 0 : 32), width: contentW, alignSelf: 'center' }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={TH.colors.primary} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={BRAND} />}
           keyboardShouldPersistTaps="handled"
         >
           {mobile ? (
             <View style={{ paddingHorizontal: margin }}>
               <ShopHeaderMobile
+                p={p}
                 u={uM}
                 inner={inner}
                 live={live}
@@ -642,7 +649,7 @@ export default function ShopScreen() {
                 onCart={() => router.push('/shop/cart' as any)}
               />
               <View style={{ marginTop: px(MOCK_M.tabs.y - MOCK_M.title.y - MOCK_M.title.h, uM) }}>
-                <ShopNavigationTabsMobile u={uM} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
+                <ShopNavigationTabsMobile p={p} u={uM} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
               </View>
               {tab === 'shop' && rail.length ? (
                 <View style={{ marginTop: px(10, uM), marginHorizontal: -margin }}>
@@ -653,6 +660,7 @@ export default function ShopScreen() {
           ) : (
           <View style={{ paddingHorizontal: margin }}>
             <ShopHeader
+              p={p}
               u={u}
               inner={inner}
               live={live}
@@ -664,7 +672,7 @@ export default function ShopScreen() {
               onCart={() => router.push('/shop/cart' as any)}
             />
             <View style={{ marginTop: gapY(MOCK.title.y + MOCK.title.h, MOCK.tabs.y, u) }}>
-              <ShopNavigationTabs u={u} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
+              <ShopNavigationTabs p={p} u={u} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
             </View>
             {tab === 'shop' && rail.length ? (
               <View style={{ marginTop: px(12, u), marginHorizontal: -margin }}>
@@ -728,8 +736,8 @@ export default function ShopScreen() {
             </>
           )}
         </ScrollView>
-        {/* The app-wide bottom bar, on the Shop's dark store surface (the safe-area bottom inset is applied inside it). */}
-        <BottomNav backgroundColor={PAGE_BG} isDark />
+        {/* The app-wide bottom bar on the page background (the safe-area bottom inset is applied inside it). */}
+        <BottomNav backgroundColor={p.bg} isDark={p.isDark} />
         {dialog}
       </SafeAreaView>
     </View>

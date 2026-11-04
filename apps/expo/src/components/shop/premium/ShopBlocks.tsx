@@ -8,7 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@/src/lib/icons';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { Skeleton } from '@/src/components/ui/Skeleton';
-import { TH, type TophuntPalette } from '@/src/theme/tophunt';
+import { BRAND, BRAND_BUTTON, TH, type TophuntPalette } from '@/src/theme/tophunt';
 
 export function SectionHeader({
   p, title, sub, action, pad,
@@ -21,8 +21,8 @@ export function SectionHeader({
       </View>
       {action ? (
         <TouchableOpacity onPress={action.onPress} style={styles.action} accessibilityRole="button" accessibilityLabel={`${action.label}: ${title}`} hitSlop={8}>
-          <Text style={[styles.actionText, { color: p.isDark ? TH.colors.diamond : TH.colors.royal }]}>{action.label}</Text>
-          <ArrowIcon variant="chevron" direction="right" size={11} color={p.isDark ? TH.colors.diamond : TH.colors.royal} />
+          <Text style={[styles.actionText, { color: BRAND }]}>{action.label}</Text>
+          <ArrowIcon variant="chevron" direction="right" size={11} color={BRAND} />
         </TouchableOpacity>
       ) : null}
     </View>
@@ -47,7 +47,7 @@ export function Chip({ p, label, on, onPress, count, icon }: { p: TophuntPalette
       accessibilityLabel={`${label}${count !== undefined ? `, ${count} items` : ''}`}
     >
       {on ? (
-        <LinearGradient colors={[TH.colors.royal, TH.colors.primary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.chip}>{inner}</LinearGradient>
+        <LinearGradient colors={BRAND_BUTTON} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.chip}>{inner}</LinearGradient>
       ) : (
         <View style={[styles.chip, { backgroundColor: p.card, borderColor: p.border, borderWidth: 1 }]}>{inner}</View>
       )}
@@ -118,8 +118,8 @@ export function EmptyState({ p, icon, title, text, action }: { p: TophuntPalette
       {title ? <Text style={[styles.emptyTitle, { color: p.text }]}>{title}</Text> : null}
       <Text style={[styles.emptyText, { color: p.sub }]}>{text}</Text>
       {action ? (
-        <TouchableOpacity onPress={action.onPress} style={[styles.emptyBtn, { borderColor: p.border }]} accessibilityRole="button">
-          <Text style={[styles.emptyBtnText, { color: p.text }]}>{action.label}</Text>
+        <TouchableOpacity onPress={action.onPress} style={[styles.emptyBtn, { backgroundColor: p.cardAlt, borderColor: p.border }]} accessibilityRole="button">
+          <Text style={[styles.emptyBtnText, { color: BRAND }]}>{action.label}</Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -134,7 +134,7 @@ export function ErrorState({ p, text, onRetry }: { p: TophuntPalette; text: stri
       </View>
       <Text style={[styles.emptyText, { color: p.sub }]}>{text}</Text>
       <TouchableOpacity onPress={onRetry} accessibilityRole="button" accessibilityLabel="Dobara try karo">
-        <LinearGradient colors={[TH.colors.royal, TH.colors.primary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.retry}>
+        <LinearGradient colors={BRAND_BUTTON} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.retry}>
           <Ionicons name="refresh" size={14} color="#FFF" />
           <Text style={styles.retryText}>Dobara try karo</Text>
         </LinearGradient>

@@ -11,7 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { SparkleBurst } from '@/src/components/gamification/SparkleBurst';
 import { Ionicons } from '@/src/lib/icons';
-import { TH, type TophuntPalette } from '@/src/theme/tophunt';
+import { BRAND_BUTTON, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
 import { ProductPreview } from './ProductPreview';
@@ -57,7 +57,7 @@ export function PurchaseSuccessAnimation({
         <Text style={[styles.sub, { color: p.sub }]}>{item.name} aapke collection mein add ho gaya. Equip karo aur sab ko dikhao.</Text>
       </Animated.View>
       <TouchableOpacity onPress={onEquip} activeOpacity={0.85} accessibilityRole="button" style={{ alignSelf: 'stretch' }}>
-        <LinearGradient colors={[TH.colors.royal, TH.colors.primary, TH.colors.electric]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.primary}>
+        <LinearGradient colors={BRAND_BUTTON} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.primary}>
           <Ionicons name="sparkles" size={16} color="#FFF" />
           <Text style={styles.primaryText}>Equip karo</Text>
         </LinearGradient>

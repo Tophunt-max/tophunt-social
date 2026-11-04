@@ -20,19 +20,24 @@
  * fallback slides carry no "drop" / "limited" wording. The mock's
  * illustrated character is not an asset we have: the slide shows the real
  * item's artwork on the viewer's avatar instead.
+ *
+ * Colours: the slide stays dark in both app themes (TH.gradients.banner; item
+ * art is designed on dark) with white text; the CTA, active dot and
+ * "LIMITED TIME" pill are brand pink. The badge pill is brand pink, or the
+ * rarity colours when it names a rarity ("LEGENDARY DROP", "EPIC COLLECTION").
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, TouchableOpacity, View, type AccessibilityActionEvent } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { cancelAnimation, runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
-import Svg, { Circle, Defs, G, LinearGradient as SvgLinearGradient, Path, RadialGradient, Stop, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Defs, G, Path, RadialGradient, Stop, Text as SvgText } from 'react-native-svg';
 import { useIsFocused } from '@react-navigation/native';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { Ionicons } from '@/src/lib/icons';
 import { countdownParts, slideImage, type HeroSlide, type HeroSlides, type ShopNav } from '@/src/lib/shopModel';
-import { TH, glowShadow } from '@/src/theme/tophunt';
+import { BRAND, BRAND_BUTTON, RARITY_TOKENS, TH, TH_DARK, type RarityToken } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import type { StoreItemView } from '@/src/services/monetization';
 import { FONT_FLOOR, HERO, HERO_M, MOCK, MOCK_M, fitFont, font, loopDelta, mfont, px, slideOffset, snapTarget, wrapIndex } from './mock';
@@ -50,6 +55,20 @@ function useSecondClock(on: boolean): number {
   }, [on]);
   return now;
 }
+
+/**
+ * Badge pill colours: a rarity named in the badge text keeps its rarity
+ * gradient and ink (item semantics, e.g. gold for "LEGENDARY DROP");
+ * anything else is a brand pink pill with white text.
+ */
+function badgeLook(badge: string): { colors: [string, string]; ink: string } {
+  const up = badge.toUpperCase();
+  const r = (Object.values(RARITY_TOKENS) as RarityToken[]).find((t) => up.includes(t.label.toUpperCase()) && t.rank >= 3);
+  return r ? { colors: r.gradient, ink: r.ink } : { colors: BRAND_BUTTON, ink: TH.colors.white };
+}
+
+/** Text-side scrim over admin artwork: the dark app background, fading out. */
+const SCRIM: [string, string, string] = ['rgba(15,15,19,0.88)', 'rgba(15,15,19,0.55)', 'rgba(15,15,19,0)'];
 
 /** Centre x (hero px) of the artwork: further left when the timer takes the top-right. */
 const artCenter = (timed: boolean) => (timed ? 430 : 500);
@@ -160,9 +179,9 @@ export function HeroBanner({
   const dotSize = px(mobile ? HERO_M.dots.size : HERO.dots.size, u);
   const dotsTop = px(mobile ? HERO_M.dots.y : HERO.dots.y, u) - dotSize / 2;
   return (
-    <View style={[{ width: W, height: H, borderRadius: radius }, glowShadow('#EC4899', true, 'md')]}>
+    <View style={{ width: W, height: H, borderRadius: radius }}>
       <View style={[styles.clip, { width: W, height: H, borderRadius: radius }]}>
-        <LinearGradient colors={['#2A0A5E', '#4C0F86', '#7E1A9E']} start={{ x: 0, y: 0.1 }} end={{ x: 1, y: 0.9 }} style={StyleSheet.absoluteFill} />
+        <LinearGradient colors={TH.gradients.banner} start={{ x: 0, y: 0.1 }} end={{ x: 1, y: 0.9 }} style={StyleSheet.absoluteFill} />
         {mobile ? (
           <HeroBurst width={W} height={H} vw={HERO_M.w} vh={HERO_M.h} cx={HERO_M.w - HERO_M.art / 2 + 4} cy={HERO_M.h / 2} k={0.42} />
         ) : (
@@ -265,7 +284,7 @@ export function HeroBanner({
                   onPress={() => go(loopDelta(index, i, n))}
                   hitSlop={8}
                   accessible={false}
-                  style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: i === index ? '#F472B6' : 'rgba(255,255,255,0.4)' }}
+                  style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: i === index ? BRAND : 'rgba(255,255,255,0.4)' }}
                 />
               );
             })}
@@ -288,7 +307,7 @@ function SlideArtwork({ uri, W, H, label, onOpen, textFrac }: { uri: string; W: 
     <TouchableOpacity onPress={onOpen} activeOpacity={0.95} accessibilityRole="button" accessibilityLabel={label} style={StyleSheet.absoluteFill}>
       <AppImage source={{ uri }} displayWidth={W} style={{ width: W, height: H }} contentFit="cover" transition={150} accessibilityIgnoresInvertColors />
       <LinearGradient
-        colors={['rgba(10,4,24,0.88)', 'rgba(10,4,24,0.55)', 'rgba(10,4,24,0)']}
+        colors={SCRIM}
         locations={[0, Math.min(0.9, textFrac * 0.75), Math.min(1, textFrac + 0.2)]}
         start={{ x: 0, y: 0.5 }}
         end={{ x: 1, y: 0.5 }}
@@ -299,7 +318,7 @@ function SlideArtwork({ uri, W, H, label, onOpen, textFrac }: { uri: string; W: 
   );
 }
 
-/** Static light burst behind the art: rays, sparks and a gold glow (hero px, scaled to W×H). */
+/** Static light burst behind the art: rays, sparks and a soft brand pink glow (hero px, scaled to W×H). */
 const HeroBurst = React.memo(function HeroBurst({
   width, height, cx, cy = 72, vw = HERO.w, vh = HERO.h, k = 1,
 }: { width: number; height: number; cx: number; cy?: number; vw?: number; vh?: number; k?: number }) {
@@ -323,13 +342,13 @@ const HeroBurst = React.memo(function HeroBurst({
           <Stop offset="1" stopColor="#FFE7FF" stopOpacity={0} />
         </RadialGradient>
         <RadialGradient id="hb-gold" cx={cx} cy={cy} r={110 * k} gradientUnits="userSpaceOnUse">
-          <Stop offset="0" stopColor="#FFD24A" stopOpacity={0.55} />
-          <Stop offset="0.5" stopColor="#F59E0B" stopOpacity={0.2} />
-          <Stop offset="1" stopColor="#F59E0B" stopOpacity={0} />
+          <Stop offset="0" stopColor={BRAND} stopOpacity={0.45} />
+          <Stop offset="0.5" stopColor={BRAND} stopOpacity={0.15} />
+          <Stop offset="1" stopColor={BRAND} stopOpacity={0} />
         </RadialGradient>
         <RadialGradient id="hb-pink" cx={pinkX} cy={pinkY} r={180 * k} gradientUnits="userSpaceOnUse">
-          <Stop offset="0" stopColor="#F472B6" stopOpacity={0.35} />
-          <Stop offset="1" stopColor="#F472B6" stopOpacity={0} />
+          <Stop offset="0" stopColor={BRAND} stopOpacity={0.3} />
+          <Stop offset="1" stopColor={BRAND} stopOpacity={0} />
         </RadialGradient>
       </Defs>
       <Circle cx={pinkX} cy={pinkY} r={180 * k} fill="url(#hb-pink)" />
@@ -337,13 +356,13 @@ const HeroBurst = React.memo(function HeroBurst({
         {rays.map((d) => <Path key={d} d={d} fill="url(#hb-ray)" />)}
       </G>
       <Circle cx={cx} cy={cy} r={110 * k} fill="url(#hb-gold)" />
-      {sparks.map(([x, y, r]) => <Circle key={`${x}-${y}`} cx={x} cy={y} r={r} fill="#FFF7D6" opacity={0.9} />)}
+      {sparks.map(([x, y, r]) => <Circle key={`${x}-${y}`} cx={x} cy={y} r={r} fill={TH.colors.white} opacity={0.9} />)}
     </Svg>
   );
 });
 
-/** Gold gradient caps with a dark outline and drop shadow (react-native-svg text), laurels either side. */
-function GoldTitle({ text, width, max }: { text: string; width: number; max: number }) {
+/** White caps with a dark outline and drop shadow (react-native-svg text) on the dark slide, light pink laurels either side. */
+function HeroTitle({ text, width, max }: { text: string; width: number; max: number }) {
   const lw = Math.max(6, max * 0.42);
   const fs = fitFont(text, width - lw * 2 - 6, max, FONT_FLOOR.title);
   const height = Math.ceil(fs * 1.2);
@@ -355,22 +374,15 @@ function GoldTitle({ text, width, max }: { text: string; width: number; max: num
   return (
     <View style={{ width, height }} accessible accessibilityRole="header" accessibilityLabel={text}>
       <Svg width={width} height={height}>
-        <Defs>
-          <SvgLinearGradient id="hero-gold" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#FFF6C2" />
-            <Stop offset="0.45" stopColor="#FFD24A" />
-            <Stop offset="1" stopColor="#E08A00" />
-          </SvgLinearGradient>
-        </Defs>
-        <SvgText {...common} y={y + fs * 0.07} fill="rgba(20,0,40,0.55)">{text}</SvgText>
-        <SvgText {...common} fill="none" stroke="#3A0D12" strokeWidth={stroke * 2} strokeLinejoin="round">{text}</SvgText>
-        <SvgText {...common} fill="url(#hero-gold)" stroke="#FFE9A8" strokeWidth={0.4}>{text}</SvgText>
+        <SvgText {...common} y={y + fs * 0.07} fill="rgba(0,0,0,0.55)">{text}</SvgText>
+        <SvgText {...common} fill="none" stroke={TH_DARK.bg} strokeWidth={stroke * 2} strokeLinejoin="round">{text}</SvgText>
+        <SvgText {...common} fill={TH.colors.white}>{text}</SvgText>
       </Svg>
       <View style={[styles.laurel, { left: x - textW / 2 - lw - 2, width: lw, height: fs * 1.1, top: (height - fs * 1.1) / 2 }]} pointerEvents="none">
-        <Laurel width={lw} height={fs * 1.1} />
+        <Laurel width={lw} height={fs * 1.1} color={TH.colors.lilac} />
       </View>
       <View style={[styles.laurel, { left: x + textW / 2 + 2, width: lw, height: fs * 1.1, top: (height - fs * 1.1) / 2 }]} pointerEvents="none">
-        <Laurel width={lw} height={fs * 1.1} flip />
+        <Laurel width={lw} height={fs * 1.1} flip color={TH.colors.lilac} />
       </View>
     </View>
   );
@@ -425,14 +437,14 @@ const SlideView = React.memo(function SlideView({
       <View style={[styles.abs, styles.column, { left: px(HERO.textX, u), top: 0, width: textW, height: H - dotsRoom, gap }]} pointerEvents="box-none">
         {slide.badge ? (
           <View pointerEvents="none">
-            <LinearGradient colors={['#FFD24A', '#F5A524']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeBox, borderRadius: badgeBox / 2, paddingHorizontal: px(8, u), gap: px(4, u) }]}>
+            <LinearGradient colors={badgeLook(slide.badge).colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeBox, borderRadius: badgeBox / 2, paddingHorizontal: px(8, u), gap: px(4, u) }]}>
               <CrownLogo width={badgeFs * 1.2} height={badgeFs} />
-              <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: Math.max(0.4, 1 * u) }]} numberOfLines={1}>{slide.badge}</Text>
+              <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: Math.max(0.4, 1 * u), color: badgeLook(slide.badge).ink }]} numberOfLines={1}>{slide.badge}</Text>
             </LinearGradient>
           </View>
         ) : null}
         <View pointerEvents="none">
-          <GoldTitle text={slide.title} width={textW} max={titleMax} />
+          <HeroTitle text={slide.title} width={textW} max={titleMax} />
         </View>
         {slide.caps ? (
           <Text style={[styles.caps, { width: textW, fontSize: capsFs, lineHeight: capsFs * 1.15, letterSpacing: 2 * u }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
@@ -446,13 +458,13 @@ const SlideView = React.memo(function SlideView({
         ) : null}
         <TouchableOpacity onPress={onExplore} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel={slide.ctaLabel} style={{ marginTop: gap }}>
           <LinearGradient
-            colors={['#FFE45C', '#FFC41A']}
+            colors={BRAND_BUTTON}
             start={{ x: 0, y: 0 }}
             end={{ x: 0, y: 1 }}
             style={[styles.cta, { minWidth: px(HERO.cta.w, u), height: ctaH, borderRadius: ctaH / 2, paddingHorizontal: px(10, u), gap: px(5, u) }]}
           >
             <Text style={[styles.ctaText, { fontSize: ctaFs }]} numberOfLines={1}>{slide.ctaLabel}</Text>
-            <ArrowIcon variant="arrow" direction="right" size={ctaFs} color="#1A1033" />
+            <ArrowIcon variant="arrow" direction="right" size={ctaFs} color={TH.colors.white} />
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -460,8 +472,8 @@ const SlideView = React.memo(function SlideView({
   );
 });
 
-/** One line of gold gradient text (react-native-svg), left-aligned, shrunk to fit `width`. */
-function GoldLine({ text, width, size, id }: { text: string; width: number; size: number; id: string }) {
+/** One line of white title text with a dark outline (react-native-svg), left-aligned, shrunk to fit `width`. */
+function HeroLine({ text, width, size }: { text: string; width: number; size: number }) {
   const fs = fitFont(text, width, size, Math.min(size, 10));
   const height = Math.ceil(fs * 1.12);
   const y = height / 2 + fs * 0.35;
@@ -469,27 +481,20 @@ function GoldLine({ text, width, size, id }: { text: string; width: number; size
   return (
     <View style={{ width, height }} pointerEvents="none">
       <Svg width={width} height={height}>
-        <Defs>
-          <SvgLinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#FFF6C2" />
-            <Stop offset="0.45" stopColor="#FFD24A" />
-            <Stop offset="1" stopColor="#E08A00" />
-          </SvgLinearGradient>
-        </Defs>
-        <SvgText {...common} y={y + fs * 0.06} fill="rgba(20,0,40,0.55)">{text}</SvgText>
-        <SvgText {...common} fill="none" stroke="#3A0D12" strokeWidth={Math.max(1, fs * 0.08) * 2} strokeLinejoin="round">{text}</SvgText>
-        <SvgText {...common} fill={`url(#${id})`} stroke="#FFE9A8" strokeWidth={0.3}>{text}</SvgText>
+        <SvgText {...common} y={y + fs * 0.06} fill="rgba(0,0,0,0.55)">{text}</SvgText>
+        <SvgText {...common} fill="none" stroke={TH_DARK.bg} strokeWidth={Math.max(1, fs * 0.08) * 2} strokeLinejoin="round">{text}</SvgText>
+        <SvgText {...common} fill={TH.colors.white}>{text}</SvgText>
       </Svg>
     </View>
   );
 }
 
-/** "MYTHIC COLLECTION" caps → "Mythic Collection" for the second gold line of the phone hero. */
+/** "MYTHIC COLLECTION" caps → "Mythic Collection" for the second title line of the phone hero. */
 const titleCase = (s: string) => s.toLowerCase().replace(/(^|\s)(\S)/g, (_m, sp: string, c: string) => sp + c.toUpperCase());
 
 /**
  * One slide of the phone hero (HERO_M, 316×124 mock px): text column left
- * (badge, two gold lines, the type line, CTA), the item art large on the
+ * (badge, two title lines, the type line, CTA), the item art large on the
  * right, bleeding past the edge.
  */
 const MobileSlideView = React.memo(function MobileSlideView({
@@ -531,15 +536,15 @@ const MobileSlideView = React.memo(function MobileSlideView({
       <View style={[styles.abs, styles.columnLeft, { left: px(HERO_M.textX, u), top: 0, width: textW, height: H - px(10, u), gap: px(2, u) }]} pointerEvents="box-none">
         {slide.badge ? (
           <View pointerEvents="none">
-            <LinearGradient colors={['#FFD24A', '#F5A524']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeH, borderRadius: badgeH / 2, paddingHorizontal: px(6, u), gap: px(3, u) }]}>
+            <LinearGradient colors={badgeLook(slide.badge).colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.badge, { height: badgeH, borderRadius: badgeH / 2, paddingHorizontal: px(6, u), gap: px(3, u) }]}>
               <CrownLogo width={badgeFs * 1.2} height={badgeFs} />
-              <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: 0.5 * u }]} numberOfLines={1}>{slide.badge}</Text>
+              <Text style={[styles.badgeText, { fontSize: badgeFs, letterSpacing: 0.5 * u, color: badgeLook(slide.badge).ink }]} numberOfLines={1}>{slide.badge}</Text>
             </LinearGradient>
           </View>
         ) : null}
         <View accessible accessibilityRole="header" accessibilityLabel={`${slide.title} ${line2}`.trim()}>
-          <GoldLine text={slide.title} width={textW} size={mfont(HERO_M.line1, u)} id="hero-m-gold-1" />
-          {line2 ? <GoldLine text={line2} width={textW} size={mfont(HERO_M.line2, u)} id="hero-m-gold-2" /> : null}
+          <HeroLine text={slide.title} width={textW} size={mfont(HERO_M.line1, u)} />
+          {line2 ? <HeroLine text={line2} width={textW} size={mfont(HERO_M.line2, u)} /> : null}
         </View>
         {slide.subtitle ? (
           <Text style={[styles.sub, { textAlign: 'left', width: textW, fontSize: subFs, lineHeight: subFs * 1.25 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
@@ -548,13 +553,13 @@ const MobileSlideView = React.memo(function MobileSlideView({
         ) : null}
         <TouchableOpacity onPress={onExplore} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel={slide.ctaLabel} style={{ marginTop: px(4, u) }}>
           <LinearGradient
-            colors={['#FFE45C', '#FFC41A']}
+            colors={BRAND_BUTTON}
             start={{ x: 0, y: 0 }}
             end={{ x: 0, y: 1 }}
             style={[styles.cta, { width: px(HERO_M.cta.w, u), height: ctaH, borderRadius: ctaH / 2, paddingHorizontal: px(8, u), gap: px(4, u) }]}
           >
             <Text style={[styles.ctaText, { fontSize: ctaFs }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{slide.ctaLabel}</Text>
-            <ArrowIcon variant="arrow" direction="right" size={ctaFs} color="#1A1033" />
+            <ArrowIcon variant="arrow" direction="right" size={ctaFs} color={TH.colors.white} />
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -563,25 +568,25 @@ const MobileSlideView = React.memo(function MobileSlideView({
 });
 
 const styles = StyleSheet.create({
-  clip: { overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(236,72,153,0.6)', backgroundColor: '#2A0A5E' },
+  clip: { overflow: 'hidden', borderWidth: 1, borderColor: TH_DARK.border, backgroundColor: TH_DARK.cardAlt },
   abs: { position: 'absolute' },
   center: { alignItems: 'center', justifyContent: 'center' },
   column: { alignItems: 'center', justifyContent: 'center' },
   columnLeft: { alignItems: 'flex-start', justifyContent: 'center' },
   laurel: { position: 'absolute' },
   badge: { flexDirection: 'row', alignItems: 'center' },
-  badgeText: { color: '#2A1300', fontFamily: TH.fonts.bold },
+  badgeText: { fontFamily: TH.fonts.bold },
   caps: { color: '#FFFFFF', fontFamily: TH.fonts.bold, textAlign: 'center' },
   sub: { color: '#FFFFFF', fontFamily: TH.fonts.medium, textAlign: 'center' },
   cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  ctaText: { color: '#1A1033', fontFamily: TH.fonts.bold },
+  ctaText: { color: TH.colors.white, fontFamily: TH.fonts.bold },
   timer: { position: 'absolute', alignItems: 'center' },
-  limited: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch', backgroundColor: '#F43F8E' },
+  limited: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', alignSelf: 'stretch', backgroundColor: BRAND },
   limitedText: { color: '#FFF', fontFamily: TH.fonts.bold },
   endsIn: { color: '#FFF', fontFamily: TH.fonts.semibold },
   boxes: { flexDirection: 'row', justifyContent: 'center' },
-  box: { backgroundColor: '#12072B', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' },
+  box: { backgroundColor: TH_DARK.bg, borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' },
   boxNum: { color: '#FFF', fontFamily: TH.fonts.bold },
-  boxUnit: { color: '#E9D5FF', fontFamily: TH.fonts.bold },
+  boxUnit: { color: TH.colors.lilac, fontFamily: TH.fonts.bold },
   dots: { position: 'absolute', left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
 });

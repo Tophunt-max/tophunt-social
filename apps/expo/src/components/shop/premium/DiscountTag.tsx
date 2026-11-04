@@ -7,10 +7,10 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { discountOf } from '@/src/lib/shopModel';
-import { TH } from '@/src/theme/tophunt';
+import { BRAND, TH } from '@/src/theme/tophunt';
 
 export function DiscountTag({
-  item, size, color = '#B8A9D9', showWas = true, showPercent = true,
+  item, size, color = TH.colors.sub, showWas = true, showPercent = true,
 }: {
   item: { priceCoins: number; compareAtCoins?: number | null; owned?: boolean };
   size: number;
@@ -38,6 +38,6 @@ export function DiscountTag({
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', flexShrink: 1 },
   was: { fontFamily: TH.fonts.medium, textDecorationLine: 'line-through', flexShrink: 1 },
-  pill: { backgroundColor: '#EF4444' },
+  pill: { backgroundColor: BRAND },
   pct: { color: '#FFF', fontFamily: TH.fonts.bold },
 });
