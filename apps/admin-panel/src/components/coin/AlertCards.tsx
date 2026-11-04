@@ -76,6 +76,7 @@ export function CoinAlertsCard({ data, pending, onSave }: CardProps) {
     onSuccess: (r) => {
       const parts = [
         r.budgets ? `${r.budgets} budget 80%+` : "",
+        r.eventBudgets ? `${r.eventBudgets} event budget 80%+` : "",
         r.heavyEarners ? `${r.heavyEarners} heavy earner` : "",
       ].filter(Boolean);
       toast.success(parts.length ? `Alert bheje: ${parts.join(", ")}` : "Sab theek, koi alert nahi");

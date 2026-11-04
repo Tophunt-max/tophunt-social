@@ -140,6 +140,8 @@ export const EXPLORE_BANNER_PREFIX = "explore-banners";
 export const SHOP_BANNER_PREFIX = "shop-banners";
 /** Artwork for digital shop items (frames, themes, badges, titles, stickers, ...), uploaded by admins. */
 export const SHOP_ITEM_ART_PREFIX = "shop-items";
+/** Rewards Center artwork overrides (appConfig.earningAssets, lib/earningAssets.ts), uploaded by admins. */
+export const EARNING_ASSET_PREFIX = "earning-assets";
 export const BLOG_IMPORT_PREFIX = "blog/imported";
 /** Encoded video (HLS + poster), one folder per video. See lib/qencode.ts. */
 export const VIDEO_PREFIX = "videos";
@@ -370,6 +372,18 @@ export const MEDIA_CATEGORIES: readonly MediaCategory[] = [
     legacyVideo: false,
     proxyOnly: false,
     description: "Artwork (WebP, optionally animated) for digital shop items, set from the admin panel.",
+  },
+  {
+    prefix: EARNING_ASSET_PREFIX,
+    writer: "admin",
+    kinds: ["image"],
+    // New key per upload; appConfig.earningAssets names the exact object.
+    cache: "immutable",
+    retentionDays: null,
+    dateSharded: true,
+    legacyVideo: false,
+    proxyOnly: false,
+    description: "Rewards Center artwork (WebP / PNG) that replaces a built-in SVG, set from the admin panel.",
   },
 
   // --- Server-written -----------------------------------------------------

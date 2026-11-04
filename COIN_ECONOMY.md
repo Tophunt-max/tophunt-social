@@ -151,6 +151,20 @@ minimum account age, verified only), an optional Diamond budget, and tasks. Each
   rule, tie-break (score, lifetime XP, account age, uid), 500-deep limit and block filter as the XP boards.
   The XP board also has a `day` (Today) period.
 
+### Earning Management (admin panel group)
+
+One sidebar group, "Earning Management", holds every Rewards Center control:
+
+| Page | What it does |
+|---|---|
+| Earning Dashboard (`/earning-dashboard`, `GET /admin/earning/analytics?days=7\|30\|90`) | 💎 earned, 💎 reversed, 🪙 DP coin won, XP and distinct earners per reward day; totals by ledger type; special-event claims; top 20 earners. House accounts excluded (`lib/earningAnalytics.ts`). |
+| CSV export (`GET /admin/earning/export?kind=daily\|ledger&days=`) | Daily summary per type plus XP (up to 90 days), or every earning ledger row (up to 31 days, 20,000 rows; `X-Truncated: 1` when cut). Text cells are formula-safe. Each export is audited (`earning.export`). |
+| Earn Settings (💎 Diamond) | Coin Economy → Diamond tab (check-in, tasks, ads, signup bonus, contest rewards). |
+| Special Events (`/earning-events`) | The event editor (also in Gamification → Events). |
+| Gamification, Referral Program | Moved into the group unchanged. |
+| Earning Assets (`/earning-assets`) | Every artwork key with its built-in SVG. Upload a WebP or PNG (1 MB max, `POST /admin/media/earning-asset`, stored under `earning-assets/`) and it replaces the SVG in the app; Reset brings the SVG back (`PUT /admin/earning/assets/:key {url\|null}`). Saved in `appConfig.earningAssets`, delivered by `/read/app-config` and the realtime config push, so no app update is needed. Only known keys and our own `earning-assets/` URLs are accepted; the full App Settings save ignores this field. Upload and save need a recent sign-in and are audited (`earning.asset.upload / update / reset`). |
+| Audit & Alerts (`/earning-audit`) | `GET /admin/earning/audit`: admin actions on events, artwork, gamification, referrals, budgets, wallet adjustments and reward settings, paged. `GET /admin/earning/notifications`: admin alerts that link to an earning page. The 6-hourly coin alerts also flag a special event whose Diamond budget is 80%+ claimed. |
+
 ## Daily check-in, daily tasks, referrals (admin controls)
 
 - **Daily check-in** (Earn → Daily check-in, `gamification` row): on/off (`dailyLoginEnabled`), base + streak bonus (bonus capped at 30 days) or a fixed per-day schedule (`dailyRewardSchedule`, up to 30 days, repeats). The app draws its track from `getDailyReward`, which uses the same function the claim pays with, so the app and the server always agree.

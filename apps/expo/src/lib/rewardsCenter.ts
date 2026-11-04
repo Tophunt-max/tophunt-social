@@ -46,3 +46,13 @@ export function featuredEvent<T extends { phase: string; startsAt: number; endsA
   const soon = list.filter((e) => e.phase === 'scheduled').sort((a, b) => a.startsAt - b.startsAt);
   return soon[0] ?? list[0] ?? null;
 }
+
+/**
+ * An admin artwork URL the app may draw: https, a plain host (no credentials),
+ * no whitespace. Anything else keeps the SVG. Regex only: React Native's URL
+ * is not a full implementation.
+ */
+export function safeArtUrl(url: unknown): string | null {
+  if (typeof url !== 'string' || url.length > 500) return null;
+  return /^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?\/[^\s"'<>\\]*$/.test(url) ? url : null;
+}

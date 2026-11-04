@@ -28,6 +28,7 @@ import { parseReferralConfig, publicReferralConfig, validateReferralPatch } from
 import { publicExploreConfig, validateExplorePatch } from "./exploreConfig";
 import { publicMonetizationConfig, validateMonetizationPatch } from "./monetizationConfig";
 import { httpsError } from "./http";
+import { sanitizeEarningAssets } from "./earningAssets";
 import { legacyAuthSettings, methodAllowed, resolveAuthMethods } from "./authMethods";
 import { onboardingEnabled, ONBOARDING_MAX_SLIDES } from "./onboardingConfig";
 
@@ -241,6 +242,8 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
     socialLinks: cfg.socialLinks || {},
     splashImageUrl: typeof cfg.splashImageUrl === "string" ? cfg.splashImageUrl : "",
     headerLogoUrl: typeof cfg.headerLogoUrl === "string" ? cfg.headerLogoUrl : "",
+    // Rewards Center artwork uploads that replace built-in SVGs (lib/earningAssets.ts).
+    earningAssets: sanitizeEarningAssets(cfg.earningAssets),
     onboardingEnabled: onboardingEnabled(cfg),
     onboarding: Array.isArray(cfg.onboarding)
       ? cfg.onboarding.slice(0, ONBOARDING_MAX_SLIDES).map((s: any) => ({

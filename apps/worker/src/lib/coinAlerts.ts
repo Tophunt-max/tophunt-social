@@ -49,11 +49,13 @@ export function validateCoinAlertPatch(body: any): void {
 
 export interface CoinAlertResult {
   budgets: number;
+  /** Special events whose Diamond budget is 80%+ claimed. */
+  eventBudgets: number;
   heavyEarners: number;
 }
 
 export async function runCoinAlerts(env: Env, ts = Date.now()): Promise<CoinAlertResult> {
-  const out: CoinAlertResult = { budgets: 0, heavyEarners: 0 };
+  const out: CoinAlertResult = { budgets: 0, eventBudgets: 0, heavyEarners: 0 };
   const cfg = await getAppConfig(env);
 
   // 1. Budgets 80%+ used.
@@ -70,6 +72,29 @@ export async function runCoinAlerts(env: Env, ts = Date.now()): Promise<CoinAler
       3 * DAY,
     );
     if (sent) out.budgets++;
+  }
+
+  // 1b. Special-event Diamond budgets 80%+ claimed (lib/rewardEvents.ts).
+  const events = await env.DB.prepare(
+    `SELECT e.id, e.title, e.total_budget AS budget, COALESCE((SELECT SUM(coins) FROM reward_event_claims c WHERE c.event_id = e.id), 0) AS spent
+       FROM reward_events e
+      WHERE e.status = 'active' AND e.total_budget > 0 AND e.ends_at + ? > ?`,
+  )
+    .bind(DAY, ts)
+    .all<{ id: string; title: string; budget: number; spent: number }>()
+    .catch(() => ({ results: [] as any[] }));
+  for (const e of events.results ?? []) {
+    const used = Number(e.spent) / Number(e.budget);
+    if (!(used >= 0.8)) continue;
+    const pct = Math.min(100, Math.round(used * 100));
+    const sent = await adminAlert(
+      env,
+      `Event budget ${pct >= 100 ? "khatam" : "80%+"}: ${e.title}`,
+      `"${e.title}" ke ${pct}% Diamonds claim ho gaye (${e.spent} / ${e.budget}). Zaroorat ho to Earning Management → Special Events me budget badhao.`,
+      "/earning-events",
+      3 * DAY,
+    );
+    if (sent) out.eventBudgets++;
   }
 
   // 2. Users who got a lot of free coins in 24 hours.

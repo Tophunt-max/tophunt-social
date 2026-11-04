@@ -4,8 +4,12 @@
  * and imported through react-native-svg-transformer, so it scales cleanly on
  * phones, tablets and web. Screens use `EARNING_ART[key]`, never a path.
  *
- * To replace a piece with designer artwork, keep the key and swap the file
- * (or regenerate). test/earningAssets.test.ts checks every key resolves.
+ * Admins can replace any piece without an app update: Earning Management →
+ * Assets uploads a WebP / PNG for a key (appConfig.earningAssets), and the
+ * `Art` component draws it instead of the SVG (falling back to the SVG if it
+ * fails to load). Keys and files here must match the Worker list in
+ * apps/worker/src/lib/earningAssets.ts; test/earningAssets.test.ts checks
+ * both, and that every key resolves.
  */
 import type { FC } from 'react';
 import type { SvgProps } from 'react-native-svg';

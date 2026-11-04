@@ -54,4 +54,15 @@ describe('Rewards Center screen covers every reference section', () => {
     expect(screen).not.toMatch(/onPress=\{\(\) => \{\s*\}\}/);
     expect(screen).not.toMatch(/2,?450|8,?750/);
   });
+
+  it('the Worker override list (Earning Management → Assets) has exactly these keys and files', () => {
+    const worker = fs.readFileSync(path.join(ROOT, '..', 'worker', 'src', 'lib', 'earningAssets.ts'), 'utf8');
+    const listed = [...worker.matchAll(/^\s+\["(\w+)", "([^"]+\.svg)"\],$/gm)].map((m) => [m[1], m[2]]);
+    const importName = Object.fromEntries([...registry.matchAll(/import (\w+) from '\.\/([^']+\.svg)'/g)].map((m) => [m[1], m[2]]));
+    const body = registry.slice(registry.indexOf('export const EARNING_ART = {'), registry.indexOf('} satisfies'));
+    const app = [...body.matchAll(/^\s+(\w+): (\w+),$/gm)].map((m) => [m[1], importName[m[2]]]);
+    expect(app.length).toBe(48);
+    expect(listed).toEqual(app);
+  });
 });
+

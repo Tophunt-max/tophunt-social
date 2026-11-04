@@ -7,6 +7,8 @@ import { inRollout } from "@/src/lib/rollout";
 import { useAuth } from "@/src/hooks/useAuth";
 
 export interface AppConfig {
+  /** Rewards Center artwork uploads by key (server lib/earningAssets.ts); a missing key keeps the built-in SVG. */
+  earningAssets?: Record<string, string>;
   appName: string;
   appVersion: string;
   maintenanceMode: boolean;
@@ -157,4 +159,20 @@ export async function getAppConfig(): Promise<AppConfig | null> {
     console.error("Error in getAppConfig:", error);
     return null;
   }
+}
+
+/**
+ * Admin-uploaded Rewards Center artwork (Earning Management → Assets), read
+ * from the shared app-config entry. A passive observer: it never fetches or
+ * polls itself (LiveAppConfig keeps the entry fresh), so the many artwork
+ * slots on a screen don't each start a refetch timer.
+ */
+export function useEarningAssets(): Record<string, string> | undefined {
+  const { data } = useQuery({
+    queryKey: APP_CONFIG_QUERY_KEY,
+    queryFn: fetchAppConfig,
+    enabled: false,
+    select: (c: AppConfig) => c?.earningAssets,
+  });
+  return data;
 }

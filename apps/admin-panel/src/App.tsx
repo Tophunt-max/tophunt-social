@@ -73,6 +73,10 @@ const Announcements = lazyWithReload(() => import("@/pages/Announcements"));
 const Rewards = lazyWithReload(() => import("@/pages/Rewards"));
 const Gamification = lazyWithReload(() => import("@/pages/Gamification"));
 const Referrals = lazyWithReload(() => import("@/pages/Referrals"));
+const EarningDashboard = lazyWithReload(() => import("@/pages/EarningDashboard"));
+const EarningEvents = lazyWithReload(() => import("@/pages/EarningEvents"));
+const EarningAssets = lazyWithReload(() => import("@/pages/EarningAssets"));
+const EarningAudit = lazyWithReload(() => import("@/pages/EarningAudit"));
 const ExplorePage = lazyWithReload(() => import("@/pages/Explore"));
 const AppControl = lazyWithReload(() => import("@/pages/AppControl"));
 const AppSettings = lazyWithReload(() => import("@/pages/AppSettings"));
@@ -141,6 +145,10 @@ function ProtectedApp() {
           <Route path="/rewards" component={Rewards} />
           <Route path="/gamification" component={Gamification} />
           <Route path="/referrals" component={Referrals} />
+          <Route path="/earning-dashboard" component={EarningDashboard} />
+          <Route path="/earning-events" component={EarningEvents} />
+          <Route path="/earning-assets" component={EarningAssets} />
+          <Route path="/earning-audit" component={EarningAudit} />
           <Route path="/explore" component={ExplorePage} />
           <Route path="/app-control" component={AppControl} />
           <Route path="/app-settings" component={AppSettings} />
