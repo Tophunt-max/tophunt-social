@@ -3,6 +3,7 @@
  * The server decides which rows belong to a tab and every amount; these only
  * turn a row into a title and amount chips.
  */
+import type { EarningArtKey } from '@/assets/earning';
 import { ledgerLabel } from '@/src/lib/ledgerLabels';
 
 export type HistoryTab = 'all' | 'diamonds' | 'xp' | 'dpcoin' | 'spent' | 'conversion' | 'adjusted';
@@ -54,6 +55,50 @@ export function historyAmounts(item: RewardHistoryItem): { unit: AmountUnit; val
   if (item.dpcoin) out.push({ unit: 'dpcoin', value: item.dpcoin });
   return out;
 }
+
+/** Rewards Center artwork per ledger type (coin rows) and XP action (XP rows). */
+const COIN_ART: Record<string, EarningArtKey> = {
+  daily_reward: 'checkIn',
+  daily_task: 'dailyMission',
+  quest_reward: 'weeklyMission',
+  achievement_reward: 'achievement',
+  contest_reward: 'participation',
+  contest_win_reward: 'winnerCrown',
+  contest_entry_fee: 'contest',
+  contest_refund: 'contest',
+  contest_entry_refund: 'contest',
+  event_reward: 'eventGiftBox',
+  ad_reward: 'watchEarn',
+  xp_conversion: 'xpConvert',
+  referral_bonus: 'referralGift',
+  referral_clawback: 'referral',
+  gamification_reward: 'levelUp',
+  monthly_hall_of_fame_reward: 'topEarnerCrown',
+  signup_bonus: 'giftBox',
+  verification_bonus: 'giftBox',
+  promo_bonus: 'giftBox',
+};
+
+const XP_ART: Record<string, EarningArtKey> = {
+  vote: 'missionVote',
+  contest_entry: 'missionContest',
+  match_win: 'winnerCrown',
+  match_loss: 'participation',
+  daily_checkin: 'checkIn',
+  daily_task: 'dailyMission',
+  quest: 'weeklyMission',
+  achievement: 'achievement',
+  hall_of_fame: 'topEarnerCrown',
+};
+
+/** The artwork drawn next to a history row. */
+export function historyArt(item: RewardHistoryItem): EarningArtKey {
+  if (item.source === 'xp') return XP_ART[item.type] ?? 'xp';
+  return COIN_ART[item.type] ?? (item.diamonds ? 'diamond' : 'dpCoin');
+}
+
+/** A reversal or clawback row (drawn with a "Reversed" tag). */
+export const isReversedRow = (item: RewardHistoryItem) => item.type === 'reversal' || item.type.endsWith('_clawback');
 
 export function signed(value: number): string {
   const abs = Math.abs(value);

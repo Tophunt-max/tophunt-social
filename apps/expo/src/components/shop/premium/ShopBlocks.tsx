@@ -3,7 +3,7 @@
  * chips, skeletons, empty and error states.
  */
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@/src/lib/icons';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
@@ -52,6 +52,35 @@ export function Chip({ p, label, on, onPress, count, icon }: { p: TophuntPalette
         <View style={[styles.chip, { backgroundColor: p.card, borderColor: p.border, borderWidth: 1 }]}>{inner}</View>
       )}
     </TouchableOpacity>
+  );
+}
+
+export interface RailEntry {
+  key: string;
+  label: string;
+  icon?: string;
+  count?: number;
+  onPress: () => void;
+}
+
+/**
+ * One-tap category navigation of the Shop home: a horizontal row of chips.
+ * The caller passes only categories that really have something behind them
+ * (live listings, gifts switched on), so no chip leads to an empty screen.
+ */
+export function CategoryRail({ p, entries, pad }: { p: TophuntPalette; entries: RailEntry[]; pad: number }) {
+  if (!entries.length) return null;
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={[styles.rail, { paddingHorizontal: pad }]}
+      accessibilityLabel="Shop categories"
+    >
+      {entries.map((e) => (
+        <Chip key={e.key} p={p} label={e.label} icon={e.icon} count={e.count} on={false} onPress={e.onPress} />
+      ))}
+    </ScrollView>
   );
 }
 
@@ -121,6 +150,7 @@ const styles = StyleSheet.create({
   action: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingBottom: 2 },
   actionText: { fontFamily: TH.fonts.bold, fontSize: 13 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 14, borderRadius: TH.radii.pill },
+  rail: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   chipText: { fontFamily: TH.fonts.bold, fontSize: 13 },
   chipCount: { fontFamily: TH.fonts.semibold, fontSize: 11 },
   skelCard: { borderRadius: TH.radii.xl, borderWidth: 1, overflow: 'hidden' },

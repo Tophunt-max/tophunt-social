@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
   banner: { width: '100%', height: 140, borderRadius: 14, marginBottom: 12 },
   top: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  eventTitle: { color: RC.gold, fontFamily: 'Urbanist-Black', fontSize: 18, flexShrink: 1 },
+  eventTitle: { color: RC.gold, fontFamily: 'Urbanist-Bold', fontSize: 18, flexShrink: 1 },
   meta: { color: RC.muted, fontFamily: 'Urbanist-Medium', fontSize: 11.5 },
   joined: { color: RC.green, fontFamily: 'Urbanist-Bold', fontSize: 12 },
   task: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -144,5 +144,5 @@ const styles = StyleSheet.create({
   done: { color: RC.green, fontFamily: 'Urbanist-Bold', fontSize: 12 },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FFF' },
-  pillText: { color: '#FFF', fontFamily: 'Urbanist-Black', fontSize: 10 },
+  pillText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 10 },
 });

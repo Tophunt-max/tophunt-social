@@ -206,7 +206,7 @@ export default function CartScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  kicker: { fontFamily: 'Urbanist-Black', fontSize: 10, letterSpacing: 1.4 },
+  kicker: { fontFamily: 'Urbanist-Bold', fontSize: 10, letterSpacing: 1.4 },
   line: { flexDirection: 'row', gap: 12, padding: 12, borderRadius: 20, borderWidth: 1.5 },
   name: { fontFamily: 'Urbanist-Bold', fontSize: 14 },
   sub: { fontFamily: 'Urbanist-Medium', fontSize: 12 },
@@ -214,10 +214,10 @@ const styles = StyleSheet.create({
   variantText: { fontFamily: 'Urbanist-Bold', fontSize: 11 },
   warnRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   warn: { color: DANGER, fontFamily: 'Urbanist-Bold', fontSize: 12 },
-  lineTotal: { fontFamily: 'Urbanist-Black', fontSize: 15 },
+  lineTotal: { fontFamily: 'Urbanist-Bold', fontSize: 15 },
   bar: { position: 'absolute', left: 0, right: 0, bottom: 0, gap: 8, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1 },
-  total: { fontFamily: 'Urbanist-Black', fontSize: 24 },
+  total: { fontFamily: 'Urbanist-Bold', fontSize: 24 },
   emptyBox: { alignItems: 'center', gap: 10, marginTop: 50, paddingHorizontal: 12 },
   emptyIcon: { width: 72, height: 72, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  emptyTitle: { fontFamily: 'Urbanist-Black', fontSize: 20 },
+  emptyTitle: { fontFamily: 'Urbanist-Bold', fontSize: 20 },
 });
