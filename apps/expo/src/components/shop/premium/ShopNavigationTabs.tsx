@@ -81,12 +81,22 @@ export function ShopNavigationTabs({
 /**
  * Phone tab bar (design mock: full width, h 35 ≈ 40 pt, white track with a
  * soft shadow): segments share the width by content; the active one is a
- * violet gradient pill (SHOP_VIOLET_GRAD) with white icon and text, the
+ * gradient pill (`activeGrad`: SHOP_VIOLET_GRAD, BRAND_BUTTON on the Digital
+ * tab) with white icon and text, the
  * others dark text and icons with thin dividers between inactive neighbours.
  */
 export function ShopNavigationTabsMobile({
-  p, u, width, tab, onTab, onCollection,
-}: { p: TophuntPalette; u: number; width: number; tab: ShopTab; onTab: (t: ShopTab) => void; onCollection: () => void }) {
+  p, u, width, tab, onTab, onCollection, activeGrad = SHOP_VIOLET_GRAD,
+}: {
+  p: TophuntPalette;
+  u: number;
+  width: number;
+  tab: ShopTab;
+  onTab: (t: ShopTab) => void;
+  onCollection: () => void;
+  /** Fill of the active pill: violet by default, brand pink (BRAND_BUTTON) on the Digital tab. */
+  activeGrad?: readonly [string, string];
+}) {
   const T = MOCK_M.tabs;
   const fs = mfont(T.text, u);
   const h = px(T.h, u);
@@ -120,7 +130,7 @@ export function ShopNavigationTabsMobile({
             {divider ? <View style={[styles.divLine, { top: h * 0.28, bottom: h * 0.28, backgroundColor: shopBorder(p) }]} pointerEvents="none" /> : null}
             {on ? (
               <LinearGradient
-                colors={SHOP_VIOLET_GRAD}
+                colors={activeGrad as [string, string]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={[styles.inner, { margin: inset, borderRadius: (h - inset * 2) / 2, gap: px(4, u), paddingHorizontal: px(8, u) }]}

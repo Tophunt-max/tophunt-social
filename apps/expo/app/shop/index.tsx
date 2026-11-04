@@ -43,6 +43,7 @@ import {
   type DealCardContent,
   type ShortcutCard,
 } from '@/src/components/shop/premium/ShopHomeMobile';
+import { DigitalHomeMobile, DigitalHomeSkeleton } from '@/src/components/shop/premium/DigitalHomeMobile';
 import { CategoryRail, Chip, EmptyState, ErrorState, SectionHeader as BlockHeader, ShopSkeleton, type RailEntry } from '@/src/components/shop/premium/ShopBlocks';
 import { BottomNav } from '@/src/components/home/BottomNav';
 import { useAuth } from '@/src/hooks/useAuth';
@@ -83,10 +84,11 @@ import {
   type ShopNav,
   type ShopTab,
 } from '@/src/lib/shopModel';
+import { digitalShelves, isDefaultDigitalFilter, specialCards, type ShelfType, type SpecialCard } from '@/src/lib/digitalHomeModel';
 import { useInventory } from '@/src/services/gamification';
 import { useGiftCatalog, useGiftHistory, useMonetizationConfig, useShopCollections, useStore, useWishlist, type StoreItemView } from '@/src/services/monetization';
 import { useCart, useShopProducts } from '@/src/services/shop';
-import { BRAND, TH, asExplorePalette, gridCellWidth, gridColumns, rarityToken, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';
+import { BRAND, BRAND_BUTTON, TH, asExplorePalette, gridCellWidth, gridColumns, rarityToken, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';
 
 const GAP = 12;
 
@@ -135,7 +137,8 @@ const PageGlow = React.memo(function PageGlow({ width, height, heroBottom }: { w
  * mock, u = width / 340 (MOCK_M, premium/ShopHomeMobile.tsx); wider screens
  * the 748 px desktop mock, u = contentW / 748 (MOCK, ShopHomeSections.tsx).
  * See premium/mock.ts), Digital
- * (full catalogue with filters), Physical (products), and My Collection (a
+ * (on phones without a filter: the Digital home of premium/DigitalHomeMobile.tsx;
+ * with a filter, or on wide screens: the full catalogue with filters), Physical (products), and My Collection (a
  * link to /shop/collection). `/shop?tab=digital` and `/shop?tab=physical`
  * open on that tab.
  *
@@ -174,6 +177,8 @@ export default function ShopScreen() {
     if (params.tab) setTabState(parseShopTab(params.tab, cfg.store.enabled, cfg.shop.enabled));
   }, [params.tab, cfg.store.enabled, cfg.shop.enabled]);
   const [filter, setFilter] = useState<DigitalFilter>(NO_FILTER);
+  // Phone Digital tab: the full catalogue was asked for ("Sab digital items dekho") without a filter.
+  const [browseAll, setBrowseAll] = useState(false);
   const [category, setCategory] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -230,6 +235,9 @@ export default function ShopScreen() {
   const wishIds = wishlist.data;
   const effective = useMemo(() => withWishlist(filter, wishIds), [filter, wishIds]);
   const shown = useMemo(() => filterDigital(digital, effective), [digital, effective]);
+  // Phone Digital tab home: real shelves and category cards (src/lib/digitalHomeModel.ts).
+  const shelves = useMemo(() => digitalShelves(digital), [digital]);
+  const specials = useMemo(() => specialCards(digital, { enabled: cfg.gifts.enabled, list: gifts.data ?? null }), [digital, cfg.gifts.enabled, gifts.data]);
 
   const allProducts = useMemo(() => products.data ?? [], [products.data]);
   const productCats = useMemo(() => [...new Set(allProducts.map((x) => x.category))], [allProducts]);
@@ -271,6 +279,7 @@ export default function ShopScreen() {
       if (type !== 'GO_BACK' && type !== 'POP') return;
       e.preventDefault();
       setFilter(NO_FILTER);
+      setBrowseAll(false);
       setCategory(null);
       setTab('shop');
     });
@@ -281,7 +290,16 @@ export default function ShopScreen() {
   }, [navigation, tab, setTab]);
   const openDigital = useCallback((f: Partial<DigitalFilter>) => {
     setFilter({ ...NO_FILTER, ...f });
+    setBrowseAll(false);
     setTab('digital');
+  }, [setTab]);
+  /** Tab bar tap: the Digital tab opens on its home (no filter); the other tabs as before. */
+  const onTabBar = useCallback((t: ShopTab) => {
+    if (t === 'digital') {
+      setFilter(NO_FILTER);
+      setBrowseAll(false);
+    }
+    setTab(t);
   }, [setTab]);
   const openItem = useCallback((id: string) => router.push(`/shop/item/${encodeURIComponent(id)}` as any), [router]);
   const openProduct = useCallback((id: string) => router.push(`/shop/${encodeURIComponent(id)}` as any), [router]);
@@ -292,6 +310,17 @@ export default function ShopScreen() {
     else if (nav.kind === 'physical') setTab('physical');
     else router.push(nav.path as any);
   }, [openDigital, setTab, router]);
+  const onShelfAll = useCallback((type: ShelfType) => openDigital({ type }), [openDigital]);
+  const onSpecial = useCallback((c: SpecialCard) => {
+    if (c.target?.kind === 'type') openDigital({ type: c.target.type });
+    else if (c.target?.kind === 'gifts') router.push('/wallet/gifts' as any);
+    else if (c.state === 'soon') emitToast(`${c.title} jaldi aa raha hai`, 'info');
+  }, [openDigital, router]);
+  const onBrowseAll = useCallback(() => {
+    setFilter(NO_FILTER);
+    setBrowseAll(true);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, []);
   const canAfford = (coins: number) => !live || bal.dpcoin >= coins;
   const short = (i: StoreItemView) => isShort(bal.dpcoin, i.priceCoins, live);
   // Back only when there is somewhere to go: native always (BackButton falls back to /home), web only with history.
@@ -367,6 +396,34 @@ export default function ShopScreen() {
   ) : !digital.length ? (
     <View style={{ paddingHorizontal: pad }}><EmptyState p={p} icon="sparkles" text="Abhi koi digital item sale par nahi hai." /></View>
   ) : null;
+
+  // "Special Collections → Explore Now": the admin collections, else the featured items, else the full catalogue.
+  const onExplore = adminCols.length
+    ? () => router.push('/shop/collections' as any)
+    : featured.length
+      ? () => openDigital({ ids: featured.map((i) => i.itemId) })
+      : onBrowseAll;
+  const showDigitalHome = mobile && !browseAll && isDefaultDigitalFilter(filter);
+  const digitalHome = cfg.store.enabled && store.isLoading ? (
+    <View style={{ paddingHorizontal: margin }}><DigitalHomeSkeleton p={p} u={uM} inner={inner} /></View>
+  ) : digitalState ?? (
+    <View style={{ paddingHorizontal: margin }}>
+      <DigitalHomeMobile
+        p={p}
+        u={uM}
+        inner={inner}
+        now={now}
+        viewer={viewer}
+        shelves={shelves}
+        specials={specials}
+        onOpenItem={openItem}
+        onAll={onShelfAll}
+        onSpecial={onSpecial}
+        onExplore={onExplore}
+        onBrowseAll={onBrowseAll}
+      />
+    </View>
+  );
 
   const icon = px(MOCK.sectionIcon, u);
   const heroBottom = MOCK.hero.y + MOCK.hero.h;
@@ -625,9 +682,10 @@ export default function ShopScreen() {
                 onWallet={() => router.push('/wallet' as any)}
                 onOrders={() => router.push('/shop/orders' as any)}
                 onCart={() => router.push('/shop/cart' as any)}
+                {...(tab === 'digital' ? { title: 'Digital Shop', subtitle: 'Exclusive • Premium • Upgrade', accent: 'digital' as const } : null)}
               />
               <View style={{ marginTop: px(MOCK_M.tabs.y - MOCK_M.title.y - MOCK_M.title.h, uM) }}>
-                <ShopNavigationTabsMobile p={p} u={uM} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
+                <ShopNavigationTabsMobile p={p} u={uM} width={inner} tab={tab} onTab={onTabBar} onCollection={openCollection} activeGrad={tab === 'digital' ? BRAND_BUTTON : undefined} />
               </View>
             </View>
           ) : (
@@ -645,7 +703,7 @@ export default function ShopScreen() {
               onCart={() => router.push('/shop/cart' as any)}
             />
             <View style={{ marginTop: gapY(MOCK.title.y + MOCK.title.h, MOCK.tabs.y, u) }}>
-              <ShopNavigationTabs p={p} u={u} width={inner} tab={tab} onTab={setTab} onCollection={openCollection} />
+              <ShopNavigationTabs p={p} u={u} width={inner} tab={tab} onTab={onTabBar} onCollection={openCollection} />
             </View>
             {tab === 'shop' && rail.length ? (
               <View style={{ marginTop: px(12, u), marginHorizontal: -margin }}>
@@ -656,6 +714,8 @@ export default function ShopScreen() {
           )}
           {tab === 'shop' ? (
             mobile ? homeMobile : home
+          ) : tab === 'digital' && showDigitalHome ? (
+            digitalHome
           ) : tab === 'digital' ? (
             digitalState ?? (
               <DigitalCatalogue

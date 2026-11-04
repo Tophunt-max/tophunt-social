@@ -96,7 +96,8 @@ export interface CategoryCard<T extends ShopItem = ShopItem> extends CategoryDef
   sample: T;
 }
 
-const byRarityThenPrice = (a: ShopItem, b: ShopItem) =>
+/** Rarest first, then the higher price, then id (stable). */
+export const byRarityThenPrice = (a: ShopItem, b: ShopItem) =>
   rarityRankOf(b.rarity) - rarityRankOf(a.rarity) || b.priceCoins - a.priceCoins || a.itemId.localeCompare(b.itemId);
 
 /** One card per item type present in the store, with its live count. Unknown types follow, with a generic label. */
