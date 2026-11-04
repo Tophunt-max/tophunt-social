@@ -8,7 +8,10 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View, type St
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import LottieView from 'lottie-react-native';
-import { EARNING_ANIMATIONS, EARNING_ART, type EarningArtKey } from '@/assets/earning';
+import { CURRENCY_ART, EARNING_ANIMATIONS, EARNING_ART, type CurrencyArtKey, type EarningArtKey } from '@/assets/earning';
+import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
+import { CoinIcon } from '@/src/components/ui/CoinIcon';
+import { GamificationIcon } from '@/src/components/gamification/GamificationIcon';
 import { SparkleBurst } from '@/src/components/gamification/SparkleBurst';
 import { Image } from 'expo-image';
 import { AppImage } from '@/src/components/ui/AppImage';
@@ -45,7 +48,28 @@ export const PURPLE_GRAD: [string, string] = ['#A855F7', '#6D28D9'];
  * fails to load the slot stays on the bundled art. Uploads are fetched as a
  * resized variant for the slot (AppImage `displayWidth`), never full size.
  */
+const isCurrency = (k: EarningArtKey): k is CurrencyArtKey => (CURRENCY_ART as readonly string[]).includes(k);
+
+/** The app-wide currency icons, so 💎 / XP / 🪙 look the same here as in the wallet, contests and shop. */
+function CurrencyArt({ name, size }: { name: CurrencyArtKey; size: number }) {
+  if (name === 'dpCoin') return <CoinIcon size={size} />;
+  if (name === 'xp') return <GamificationIcon assetKey="xp.star" size={size} />;
+  const icon = <DiamondIcon size={name === 'diamondGlow' ? size * 0.86 : size} />;
+  return name === 'diamondGlow' ? <View style={styles.diamondGlow}>{icon}</View> : icon;
+}
+
 export function Art({ name, size, style }: { name: EarningArtKey; size: number; style?: StyleProp<ViewStyle> }) {
+  if (isCurrency(name)) {
+    return (
+      <View style={[{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }, style]} pointerEvents="none">
+        <CurrencyArt name={name} size={size} />
+      </View>
+    );
+  }
+  return <BundledArt name={name} size={size} style={style} />;
+}
+
+function BundledArt({ name, size, style }: { name: Exclude<EarningArtKey, CurrencyArtKey>; size: number; style?: StyleProp<ViewStyle> }) {
   const url = safeArtUrl(useEarningAssets()?.[name]);
   const [failed, setFailed] = useState<string | null>(null);
   const bundled = EARNING_ART[name];
@@ -201,6 +225,7 @@ export function StateNote({ text, action, onAction }: { text: string; action?: s
 }
 
 const styles = StyleSheet.create({
+  diamondGlow: { shadowColor: '#22D3EE', shadowOpacity: 0.9, shadowRadius: 10, shadowOffset: { width: 0, height: 0 } },
   neonOuter: {
     borderRadius: 20, borderWidth: 1.5, overflow: 'hidden', padding: 14,
     shadowOpacity: 0.55, shadowRadius: 14, shadowOffset: { width: 0, height: 0 }, elevation: 6,

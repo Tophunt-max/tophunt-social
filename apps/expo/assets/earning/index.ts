@@ -15,10 +15,6 @@
  */
 import type { ImageSourcePropType } from 'react-native';
 
-const Diamond: ImageSourcePropType = require('./currencies/diamond.webp');
-const DiamondGlow: ImageSourcePropType = require('./currencies/diamond-glow.webp');
-const Xp: ImageSourcePropType = require('./currencies/xp.webp');
-const DpCoin: ImageSourcePropType = require('./currencies/dp-coin.webp');
 const Sparkle: ImageSourcePropType = require('./currencies/reward-sparkle.webp');
 
 const RewardsCrown: ImageSourcePropType = require('./branding/rewards-crown.webp');
@@ -75,10 +71,6 @@ const TopEarnerCrown: ImageSourcePropType = require('./leaderboard/top-earner-cr
 const WatchEarnIllustration: ImageSourcePropType = require('./illustrations/watch-earn.webp');
 
 export const EARNING_ART = {
-  diamond: Diamond,
-  diamondGlow: DiamondGlow,
-  xp: Xp,
-  dpCoin: DpCoin,
   sparkle: Sparkle,
   rewardsCrown: RewardsCrown,
   levelWings: LevelWings,
@@ -125,7 +117,18 @@ export const EARNING_ART = {
   watchEarnIllustration: WatchEarnIllustration,
 } satisfies Record<string, ImageSourcePropType>;
 
-export type EarningArtKey = keyof typeof EARNING_ART;
+/**
+ * Currency slots. Not artwork files and not replaceable from the admin panel:
+ * `Art` draws the app-wide icons for them (DiamondIcon, the XP star,
+ * CoinIcon), the same ones the wallet, contests and shop use.
+ */
+export const CURRENCY_ART = ['diamond', 'diamondGlow', 'xp', 'dpCoin'] as const;
+export type CurrencyArtKey = (typeof CURRENCY_ART)[number];
+
+/** Bundled artwork keys (replaceable from Earning Management → Assets). */
+export type BundledArtKey = keyof typeof EARNING_ART;
+/** Every key `Art` can draw. */
+export type EarningArtKey = BundledArtKey | CurrencyArtKey;
 
 /** Claim-burst Lottie (native). Web draws SparkleBurst instead. */
 export const EARNING_ANIMATIONS = {
