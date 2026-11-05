@@ -28,7 +28,7 @@ function schedule(b: ShopBundle): string {
   return `${b.startsAt ? fmtDateTime(b.startsAt) : "now"} → ${b.endsAt ? fmtDateTime(b.endsAt) : "no end"}`;
 }
 
-/** Shopping → Bundles: sets of catalogue items sold together for Diamonds. */
+/** Shop → Bundles: sets of catalogue items sold together for Diamonds. */
 export function BundlesTab() {
   const qc = useQueryClient();
   const { user } = useAuth();

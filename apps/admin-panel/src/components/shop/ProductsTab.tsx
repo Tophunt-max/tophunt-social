@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/Badge";
 import { fmtNumber } from "@/lib/format";
 import { Button, Card, Notice, Num, Text, Toggle, field, inr } from "@/components/monetization/shared";
 import { ImageField } from "@/components/shop/ShopHomeTab";
+import { ShopStatusPill } from "@/components/shop/ShopSettingsCards";
 
 /**
  * An image URL safe to put in <img src>: parsed, https only, re-serialised by
@@ -26,21 +27,7 @@ function safeImageSrc(raw: string): string | null {
 export function ProductsTab() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["shop-products"], queryFn: api.monetization.shopProducts });
-  const cfgQ = useQuery({ queryKey: ["monetization-config"], queryFn: api.monetization.config });
-  const [open, setOpen] = useState<boolean | null>(null);
   const [editing, setEditing] = useState<any | "new" | null>(null);
-  useEffect(() => {
-    if (cfgQ.data && open === null) setOpen(cfgQ.data.effective.shop.enabled);
-  }, [cfgQ.data, open]);
-  const toggle = useMutation({
-    mutationFn: (v: boolean) => api.saveAppSettings({ monetization: { shop: { enabled: v } } }),
-    onSuccess: (_r, v) => {
-      setOpen(v);
-      toast.success(v ? "Shop is open in the app" : "Shop closed");
-      qc.invalidateQueries({ queryKey: ["monetization-config"] });
-    },
-    onError: (e) => toast.error(describeError(e)),
-  });
   const rate = q.data?.dpCoinInr ?? 1;
 
   return (
@@ -50,7 +37,7 @@ export function ProductsTab() {
         subtitle={`Prices are set in ₹. DP coin price = (₹ price + ₹ delivery) ÷ ₹${rate} per DP coin, rounded up (Coin Economy → Coin value).`}
         action={
           <div className="flex items-center gap-4">
-            {open !== null && <Toggle label="Shop open" checked={open} onChange={(v) => toggle.mutate(v)} />}
+            <ShopStatusPill kind="shop" />
             <Button onClick={() => setEditing("new")}>New product</Button>
           </div>
         }
@@ -85,8 +72,22 @@ export function ProductsTab() {
         />
       </Card>
       {editing && <ProductDialog product={editing === "new" ? null : editing} rate={rate} onClose={() => setEditing(null)} onDone={() => qc.invalidateQueries({ queryKey: ["shop-products"] })} />}
-      <PhysicalHomeCard products={q.data?.products ?? []} physical={cfgQ.data?.effective?.shop?.physical} configLoaded={!!cfgQ.data} onSaved={() => qc.invalidateQueries({ queryKey: ["monetization-config"] })} />
     </div>
+  );
+}
+
+/** Shop → Storefront: the app Physical tab's Categories row and Exclusive Collection, with the live product list they point at. */
+export function PhysicalStorefront() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["shop-products"], queryFn: api.monetization.shopProducts });
+  const cfgQ = useQuery({ queryKey: ["monetization-config"], queryFn: api.monetization.config });
+  return (
+    <PhysicalHomeCard
+      products={q.data?.products ?? []}
+      physical={cfgQ.data?.effective?.shop?.physical}
+      configLoaded={!!cfgQ.data}
+      onSaved={() => qc.invalidateQueries({ queryKey: ["monetization-config"] })}
+    />
   );
 }
 

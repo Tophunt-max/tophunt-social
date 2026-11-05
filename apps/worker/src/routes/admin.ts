@@ -726,7 +726,7 @@ adminRoute.post("/rewards", async (c) => {
   // as stored (never overwritten) and a curve change is refused here.
   for (const k of ["xpThreshold", "xpIncrement"] as const) {
     if (body?.[k] !== undefined && Number(body[k]) !== Number(existing[k] ?? 500)) {
-      throw httpsError("invalid-argument", `${k} is edited in Gamification → Rules, where it is validated.`);
+      throw httpsError("invalid-argument", `${k} is edited in Earning → XP & Levels → Rules, where it is validated.`);
     }
   }
   const { progression: _ignoredProgression, ...rest } = body ?? {};

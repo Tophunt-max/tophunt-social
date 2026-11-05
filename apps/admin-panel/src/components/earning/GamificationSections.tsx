@@ -1,15 +1,12 @@
 import { useEffect, useState } from "react";
-import { XpRewardsTab } from "@/components/gamification/XpRewardsTab";
-import { EventsTab } from "@/components/gamification/EventsTab";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, describeError } from "@/lib/api";
 import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
-import { PageHeader, fmtDateTime, fmtNumber } from "@/lib/format";
+import { fmtDateTime, fmtNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { Link } from "wouter";
 import { isFullAdminRole, useAuth } from "@/lib/auth";
-import { useTabParam } from "@/lib/useTabParam";
 import { RARITIES } from "@/lib/shopArt";
 import {
   MilestonesEditor, QuestsEditor, RanksEditor, fillMilestoneRows,
@@ -17,50 +14,24 @@ import {
 } from "@/components/gamification/ProgressionEditors";
 
 /**
- * Gamification admin: XP rules, levels, achievements, cosmetics, seasons,
- * user inspection with audited corrections, review flags and analytics.
+ * Earning section building blocks (formerly the single Gamification page):
+ * XP analytics and rules, achievements, Earning reward items, seasons, and
+ * player tools (user inspection with audited corrections, review flags,
+ * reward grants). The Earning pages (pages/earning) compose them.
  *
  * Every rule is validated again by the Worker (routes/adminGamification.ts);
  * the forms here only make it easier to get right. Writes that move XP or
  * coins ask for a recent sign-in, and budget-linked rewards ask for the
  * approval password (handled by lib/api.ts `req`).
  */
-const TABS = ["overview", "rules", "achievements", "events", "xp-rewards", "catalog", "seasons", "grants", "users", "flags"] as const;
-type Tab = (typeof TABS)[number];
 
 const field = "w-full px-3 py-2 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 const btn = "gradient-purple text-white text-sm font-semibold px-4 py-2 rounded-xl disabled:opacity-50";
 const btn2 = "bg-secondary text-foreground text-sm font-medium px-3 py-1.5 rounded-lg disabled:opacity-50";
 const card = "bg-card border border-border rounded-2xl p-5";
 
-export default function GamificationPage() {
-  const [tab, setTab] = useTabParam<Tab>(TABS, "overview");
-  return (
-    <div>
-      <PageHeader title="Gamification" subtitle="XP, levels, achievements, cosmetics, quests and seasons" />
-      <div className="flex flex-wrap gap-1 mb-5 bg-secondary/50 p-1 rounded-xl w-fit">
-        {TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-4 py-1.5 rounded-lg text-sm font-medium capitalize ${tab === t ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"}`}>
-            {t === "xp-rewards" ? "XP level rewards" : t}
-          </button>
-        ))}
-      </div>
-      {tab === "overview" && <Overview />}
-      {tab === "rules" && <Rules />}
-      {tab === "achievements" && <Achievements />}
-      {tab === "events" && <EventsTab />}
-      {tab === "xp-rewards" && <XpRewardsTab />}
-      {tab === "catalog" && <Catalog />}
-      {tab === "seasons" && <Seasons />}
-      {tab === "grants" && <Grants />}
-      {tab === "users" && <UserInspector />}
-      {tab === "flags" && <Flags />}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- overview
-function Overview() {
+export function Overview() {
   const { user } = useAuth();
   // Older servers do not report a role; the Worker still enforces it.
   const full = !user?.role || isFullAdminRole(user.role);
@@ -153,7 +124,7 @@ function Overview() {
 const ACTIONS = ["vote", "contest_entry", "match_win", "match_loss", "daily_checkin", "hall_of_fame", "daily_task", "quest", "achievement"];
 const VARIABLE = new Set(["daily_task", "quest", "achievement"]);
 
-function Rules() {
+export function Rules() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["gam", "config"], queryFn: api.gamification.config });
   const catalog = useQuery({ queryKey: ["gam", "catalog"], queryFn: api.gamification.catalog });
@@ -291,7 +262,7 @@ function Rules() {
 // ------------------------------------------------------------ achievements
 const EMPTY_ACH = { id: "", name: "", description: "", icon: "trophy", category: "general", rarity: "common", metric: "wins", threshold: 1, xpReward: 25, diamondReward: 0, itemId: "", repeatable: false, maxTiers: 1, active: true, hidden: false, sort: 0 };
 
-function Achievements() {
+export function Achievements() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["gam", "achievements"], queryFn: api.gamification.achievements });
   const cfg = useQuery({ queryKey: ["gam", "config"], queryFn: api.gamification.config });
@@ -361,11 +332,11 @@ function Achievements() {
 /** Frame designs the app draws (apps/expo/src/lib/gamificationAssets.ts). */
 const FRAME_KEYS = ["frame.starter", "frame.bronze", "frame.silver", "frame.gold", "frame.champion", "frame.legendary"];
 /** Which editor owns a catalogue row (Worker reward_catalog.managed_by, migration 0089). */
-const OWNER_LABEL: Record<string, string> = { earning: "Earning (here)", shop: "Shop", xp: "XP level rewards" };
-const OWNER_HREF: Record<string, string> = { shop: "/shopping?tab=digital", xp: "/gamification?tab=xp-rewards" };
+const OWNER_LABEL: Record<string, string> = { earning: "Earning (here)", shop: "Shop", xp: "Level Rewards" };
+const OWNER_HREF: Record<string, string> = { shop: "/shop/digital", xp: "/earning/level-rewards" };
 const EMPTY_ITEM = { id: "", type: "frame", name: "", description: "", rarity: "common", asset: { key: "frame.gold", colors: ["#FF4D67", "#8B5CF6"], animated: false }, active: true, sort: 0 };
 
-function Catalog() {
+export function Catalog() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["gam", "catalog"], queryFn: api.gamification.catalog });
   const [edit, setEdit] = useState<any>(null);
@@ -388,8 +359,8 @@ function Catalog() {
     <div className="space-y-4">
       <div className="rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm">
         Yahan sirf <b>Earning reward items</b> banao aur edit karo (achievement, season, milestone aur grant rewards).
-        Shop mein bikne wale items <Link href="/shopping?tab=digital" className="font-semibold text-primary underline">Shopping → Digital items</Link> mein,
-        aur XP level ke free items <span className="font-semibold">XP level rewards</span> tab mein manage hote hain. Server bhi yahi rule enforce karta hai.
+        Shop mein bikne wale items <Link href="/shop/digital" className="font-semibold text-primary underline">Shop → Digital Items</Link> mein,
+        aur XP level ke free items <Link href="/earning/level-rewards" className="font-semibold text-primary underline">Earning → Level Rewards</Link> mein manage hote hain. Server bhi yahi rule enforce karta hai.
       </div>
       <button className={btn} onClick={() => open({ ...EMPTY_ITEM })}>New reward item</button>
       {edit && (
@@ -452,7 +423,7 @@ function Catalog() {
 // ----------------------------------------------------------------- seasons
 const toLocal = (ms: number) => new Date(ms - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
-function Seasons() {
+export function Seasons() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["gam", "seasons"], queryFn: api.gamification.seasons });
   const blank = () => ({ name: "", description: "", startsAt: toLocal(Date.now() + 86400000), endsAt: toLocal(Date.now() + 29 * 86400000), topN: 100, rewards: '[{"fromRank":1,"toRank":3,"coins":0,"itemId":"collectible_season_top"}]' });
@@ -543,7 +514,7 @@ function Seasons() {
 }
 
 // ------------------------------------------------------------------- users
-function UserInspector() {
+export function UserInspector() {
   const qc = useQueryClient();
   const [uidInput, setUidInput] = useState("");
   const [uid, setUid] = useState<string | null>(null);
@@ -694,7 +665,7 @@ function GrantsTable({ rows, loading, showUser = true }: { rows: any[]; loading?
   );
 }
 
-function Grants() {
+export function Grants() {
   const { user } = useAuth();
   const full = !user?.role || isFullAdminRole(user.role);
   const [status, setStatus] = useState("claimable");
@@ -717,7 +688,7 @@ function Grants() {
 }
 
 // ------------------------------------------------------------------- flags
-function Flags() {
+export function Flags() {
   const qc = useQueryClient();
   const [status, setStatus] = useState("open");
   const q = useQuery({ queryKey: ["gam", "flags", status], queryFn: () => api.gamification.flags(status) });

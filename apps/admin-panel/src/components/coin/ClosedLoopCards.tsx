@@ -130,7 +130,7 @@ export function ShoppingSummaryCard() {
       ) : (
         <p className="text-sm text-muted-foreground">Loading…</p>
       )}
-      <a href="/shopping" className="text-sm font-semibold text-primary">Manage products and orders →</a>
+      <a href="/shop" className="text-sm font-semibold text-primary">Manage products and orders →</a>
     </Card>
   );
 }

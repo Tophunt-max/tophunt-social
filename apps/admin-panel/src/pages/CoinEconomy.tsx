@@ -30,10 +30,7 @@ import { useTabParam } from "@/lib/useTabParam";
 import { PageHeader, exportCsv, fmtDateTime, fmtNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { RewardLockingCard } from "@/components/coin/CoinCards";
-import { CoinAlertsCard, FreeRewardsBudgetCard } from "@/components/coin/AlertCards";
-import { AdsRewardCard, DailyLoginCard, DailyTasksCard, HallOfFameCard, RewardStatsCard, SignupBonusReviewCard, VerificationRewardCard } from "@/components/coin/EarnCards";
-import { ProgramSettings } from "@/pages/Referrals";
+import { useAppConfig } from "@/lib/useAppConfig";
 import Transactions from "@/pages/Transactions";
 import { CoinValuesCard, ShoppingSummaryCard } from "@/components/coin/ClosedLoopCards";
 import { CoinsLoop, DiamondTab, DpCoinTab, XpTab } from "@/components/coin/ThreeCoins";
@@ -41,22 +38,19 @@ import { EconomyGuardrailsCard, EconomyHealthCard } from "@/components/coin/Econ
 import { ClosedLoopTrend } from "@/components/coin/ClosedLoopTrend";
 
 /**
- * Coin Economy — the one place for everything coins: where every coin came from,
- * where it went, and every setting that creates or spends coins.
+ * Coin Economy (Finance): where every coin came from and where it went, coin
+ * values, budgets, the ledger and its health. Settings that decide what users
+ * EARN live in the Earning section, and what they can BUY in the Shop section:
  *
  *   Overview   the three coins at a glance, supply, flows, reconciliation, queues
- *   ⚡ XP       XP earned / converted, XP → Diamond rate and daily cap
- *   💎 Diamond  every earning source and its settings (all pay Diamonds), and
- *              contests: Diamond entry fees → DP coin prizes (per-contest P&L)
- *   🪙 DP coin  won vs spent, where it can be spent (shop, digital items, gifts),
- *              the monthly shop budget (the spend limit) and shop fraud rules
+ *   ⚡ XP       XP earned / converted (rates: Earning → XP & Levels)
+ *   💎 Diamond  Diamonds earned and spent, contests: Diamond entry fees → DP coin
+ *              prizes (per-contest P&L). Reward amounts: Earning → Free Rewards
+ *   🪙 DP coin  won vs spent (switches, budget, fraud rules: Shop → Settings)
  *   Coin value ₹ per DP coin / Diamond (prices shop products)
  *   Budgets    one promo budget per offer, approval password
  *   Ledger     every coin transaction, and one user's full statement
  *   Health     coin-ledger integrity checks
- *
- * Each settings card saves only its own keys, through the same Worker routes
- * (validation, audit log) the old pages used; those pages now link here.
  *
  * Worker: lib/coinEconomy.ts, lib/promoBudget.ts, lib/approvalPassword.ts.
  */
@@ -126,11 +120,7 @@ export default function CoinEconomy() {
         </div>
       )}
       {tab === "xp" && <XpTab />}
-      {tab === "diamond" && (
-        <DiamondTab contests={<ContestsPnl />}>
-          <EarnTab />
-        </DiamondTab>
-      )}
+      {tab === "diamond" && <DiamondTab contests={<ContestsPnl />} />}
       {tab === "dpcoin" && <DpCoinTab />}
       {tab === "values" && <ValuesTab />}
       {tab === "budgets" && <Budgets />}
@@ -148,99 +138,23 @@ export default function CoinEconomy() {
   );
 }
 
-// ─── Shared settings plumbing ────────────────────────────────────────────────
-
-/** appConfig for the settings cards, plus the same per-card save App Control used. */
-function useAppConfig() {
-  const qc = useQueryClient();
-  const query = useQuery({ queryKey: ["app-settings"], queryFn: api.appSettings });
-  const save = useMutation({
-    mutationFn: (patch: Record<string, unknown>) => api.saveAppSettings(patch),
-    onSuccess: () => {
-      toast.success("Saved — users ke app me turant live");
-      qc.invalidateQueries({ queryKey: ["app-settings"] });
-    },
-    onError: (e) => toast.error(describeError(e)),
-  });
-  return { data: query.data, isLoading: query.isLoading, save };
-}
-
 function PendingQueues() {
   const { data } = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const items = [
-    { label: "Shop orders fraud review", n: Number((data as any)?.pendingShopReview ?? 0), href: "/shopping?tab=orders" },
-    { label: "Shop orders pack / ship karne hain", n: Number((data as any)?.pendingShopOrders ?? 0), href: "/shopping?tab=orders" },
+    { label: "Shop orders fraud review", n: Number((data as any)?.pendingShopReview ?? 0), href: "/shop/orders?status=review" },
+    { label: "Shop orders pack / ship karne hain", n: Number((data as any)?.pendingShopOrders ?? 0), href: "/shop/orders" },
     { label: "Prize claims pending", n: Number((data as any)?.pendingPrizeClaims ?? 0), href: "/prize-claims" },
   ];
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       {items.map((i) => (
-        <Link key={i.href} href={i.href}>
+        <Link key={i.label} href={i.href}>
           <div className={`rounded-2xl border p-4 cursor-pointer hover:shadow-sm ${i.n > 0 ? "border-amber-300 bg-amber-50" : "border-border bg-card"}`}>
             <p className="text-2xl font-bold text-foreground">{fmtNumber(i.n)}</p>
             <p className="text-sm text-muted-foreground">{i.label} →</p>
           </div>
         </Link>
       ))}
-    </div>
-  );
-}
-
-// ─── Earn ────────────────────────────────────────────────────────────────────
-
-const EARN_TYPES: { type: string; label: string }[] = [
-  { type: "signup_bonus", label: "Signup bonus (turant)" },
-  { type: "verification_bonus", label: "Signup bonus (email + mobile verify)" },
-  { type: "referral_bonus", label: "Referral" },
-  { type: "daily_reward", label: "Daily login" },
-  { type: "daily_task", label: "Daily tasks" },
-  { type: "ad_reward", label: "Rewarded ads" },
-  { type: "monthly_hall_of_fame_reward", label: "Hall of Fame" },
-  { type: "admin_adjustment", label: "Admin adjustment" },
-];
-
-function EarnTab() {
-  const { data, isLoading, save } = useAppConfig();
-  const rewards = useQuery({ queryKey: ["rewards"], queryFn: api.rewards });
-  const referrals = useQuery({ queryKey: ["referrals", "", ""], queryFn: () => api.referrals({}) });
-  const since = useState(() => Date.now() - 30 * 24 * 60 * 60 * 1000)[0];
-  const month = useQuery({ queryKey: ["coin-economy", "30d"], queryFn: () => api.coinEconomy({ from: since }) });
-  if (isLoading || !data) return <p className="text-sm text-muted-foreground py-10 text-center">Loading…</p>;
-  const byType = new Map((month.data?.types ?? []).map((t) => [t.type, t]));
-  return (
-    <div className="space-y-6">
-      <Card title="Free rewards: pichhle 30 din me kitna diya">
-        <Table
-          data={EARN_TYPES}
-          keyFn={(t) => t.type}
-          columns={[
-            { key: "s", header: "Source", render: (t) => <span className="font-medium text-foreground">{t.label}</span> },
-            { key: "l", header: "💎 Diamond", className: "text-right", render: (t) => fmtNumber(byType.get(t.type)?.diamondIn ?? 0) },
-            { key: "c", header: "🪙 DP coin", className: "text-right", render: (t) => fmtNumber(byType.get(t.type)?.dpIn ?? 0) },
-            { key: "n", header: "Entries", className: "text-right", render: (t) => fmtNumber(byType.get(t.type)?.count ?? 0) },
-            // Only DP coins buy shop goods, so only they carry a ₹ value.
-            { key: "r", header: "DP coin ≈ ₹", className: "text-right", render: (t) => inr((byType.get(t.type)?.dpIn ?? 0) * (month.data?.payoutRate ?? 0)) },
-          ]}
-        />
-      </Card>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <RewardLockingCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
-        <FreeRewardsBudgetCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
-        <CoinAlertsCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} />
-        <VerificationRewardCard data={data} />
-        <SignupBonusReviewCard />
-        <DailyLoginCard rewards={rewards.data} />
-        <DailyTasksCard rewards={rewards.data} />
-        <RewardStatsCard />
-        <AdsRewardCard data={data} />
-        <HallOfFameCard rewards={rewards.data} />
-      </div>
-      <div>
-        <ProgramSettings program={referrals.data?.program} />
-        <p className="mt-2 text-xs text-muted-foreground">
-          Referral ki queue aur approvals: <Link href="/referrals" className="underline">Referral Program</Link>.
-        </p>
-      </div>
     </div>
   );
 }

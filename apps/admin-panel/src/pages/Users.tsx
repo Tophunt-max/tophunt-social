@@ -418,7 +418,7 @@ function UserShopping({ uid }: { uid: string }) {
         ) : (
           <div className="space-y-1">
             {d.orders.map((o: any) => (
-              <a key={o.id} href={`/shopping?tab=orders`} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 hover:bg-secondary/40">
+              <a key={o.id} href="/shop/orders" className="flex items-center justify-between rounded-lg border border-border px-3 py-2 hover:bg-secondary/40">
                 <span className="truncate">{o.title ?? o.id} · {fmtNumber(o.totalCoins)} DP coin</span>
                 <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
                   {o.status}{o.reviewStatus === "pending" ? " · needs review" : ""}{o.riskFlags.length ? ` · ${o.riskFlags.map((f: string) => d.riskLabels[f] ?? f).join(", ")}` : ""}

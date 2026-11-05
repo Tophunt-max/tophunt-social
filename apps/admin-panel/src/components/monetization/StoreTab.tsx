@@ -12,6 +12,7 @@ import { RARITY_COLOR, artSource, tierOf } from "@/lib/shopArt";
 import { Button, Card, Notice, Text, Toggle, field, fromLocalInput, toLocalInput } from "./shared";
 import { ItemPreview } from "./ItemPreview";
 import { ITEM_KINDS, StoreItemDialog, TYPE_LABEL } from "./StoreItemDialog";
+import { ShopStatusPill } from "@/components/shop/ShopSettingsCards";
 
 type StatusFilter = "" | "on_sale" | "hidden" | "unlisted";
 
@@ -24,7 +25,8 @@ export function StoreTab() {
   const [status, setStatus] = useState("");
   const purchases = useQuery({ queryKey: ["mon-purchases", status], queryFn: () => api.monetization.purchases(status || undefined) });
   const cfgQ = useQuery({ queryKey: ["monetization-config"], queryFn: api.monetization.config });
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  // Read-only here: the switch lives in Shop → Settings (ShopSwitchesCard).
+  const enabled: boolean | null = cfgQ.data ? !!cfgQ.data.effective.store.enabled : null;
   const [editing, setEditing] = useState<any>(null);
   const [creating, setCreating] = useState(false);
   const { user } = useAuth();
@@ -33,20 +35,6 @@ export function StoreTab() {
   const [type, setType] = useState("");
   const [listFilter, setListFilter] = useState<StatusFilter>("");
   const [q, setQ] = useState("");
-
-  useEffect(() => {
-    if (cfgQ.data && enabled === null) setEnabled(cfgQ.data.effective.store.enabled);
-  }, [cfgQ.data, enabled]);
-
-  const saveEnabled = useMutation({
-    mutationFn: (v: boolean) => api.saveAppSettings({ monetization: { store: { enabled: v } } }),
-    onSuccess: (_r, v) => {
-      setEnabled(v);
-      toast.success(v ? "Store opened" : "Store closed");
-      qc.invalidateQueries({ queryKey: ["monetization-config"] });
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
 
   // One-tap on sale / hide: re-saves the listing as it is, with only `active` flipped.
   const quickToggle = useMutation({
@@ -90,17 +78,17 @@ export function StoreTab() {
   return (
     <div className="space-y-5">
       <Card
-        title="Digital store"
+        title="Digital items"
         subtitle="Create, edit and sell frames, themes, badges, titles, stickers, collectibles and effects for DP coin, with your own WebP artwork."
         action={
           <div className="flex flex-col items-end gap-2">
             <Button onClick={() => setCreating(true)} disabled={!full}>+ New item</Button>
-            {enabled !== null && <Toggle label="Store open" checked={enabled} onChange={(v) => saveEnabled.mutate(v)} />}
+            <ShopStatusPill kind="store" />
           </div>
         }
       >
         {enabled === false && (
-          <Notice tone="warning">The store is closed: users see "Digital items jaldi aa rahe hain" in the Shop. Turn on "Store open" to sell the listed items.</Notice>
+          <Notice tone="warning">The store is closed: users see "Digital items jaldi aa rahe hain" in the Shop. Open it in Shop → Settings to sell the listed items.</Notice>
         )}
         <Notice>Only permanent ownership is sold today. Every item is cosmetic and changes no vote, fee, prize or ranking. No random or paid loot boxes.</Notice>
 
@@ -450,7 +438,7 @@ function StoreItemCard({ r, onEdit, onToggle, toggling }: { r: any; onEdit: () =
           {l?.updatedAt ? <Detail k="Last changed" v={fmtDateTime(l.updatedAt)} wide /> : null}
         </dl>
         {freeXp ? (
-          <Notice>Free XP level reward, earned by reaching its level. Edit it under Gamification → XP level rewards; it cannot be sold for DP coin.</Notice>
+          <Notice>Free XP level reward, earned by reaching its level. Edit it under Earning → Level Rewards; it cannot be sold for DP coin.</Notice>
         ) : (
           <div className="flex gap-2 mt-auto pt-1">
             <Button onClick={onEdit}>{l ? "Edit item" : "Edit & list for sale"}</Button>

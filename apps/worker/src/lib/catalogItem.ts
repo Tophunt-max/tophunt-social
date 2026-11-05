@@ -175,9 +175,9 @@ export type CatalogOwner = "shop" | "earning" | "xp";
 
 /** Where an owner's items are edited, for refusal messages. */
 export const CATALOG_OWNER_EDITOR: Record<CatalogOwner, string> = {
-  shop: "Shopping → Digital items",
-  earning: "Gamification → Catalog",
-  xp: "Gamification → XP level rewards",
+  shop: "Shop → Digital Items",
+  earning: "Earning → Reward Items",
+  xp: "Earning → Level Rewards",
 };
 
 /** The row's owner, or null when the id is new. */

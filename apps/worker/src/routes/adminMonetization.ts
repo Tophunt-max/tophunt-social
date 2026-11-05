@@ -279,7 +279,7 @@ export function registerMonetizationRoutes(
       `SELECT r.id, r.managed_by, EXISTS (SELECT 1 FROM xp_cosmetic_unlocks x WHERE x.item_id = r.id AND x.collection = 'xp40') AS xp40
          FROM reward_catalog r WHERE r.id = ?`,
     ).bind(itemId).first<any>();
-    if (!item) throw httpsError("not-found", "Catalog item not found. Create it under Shopping → Digital items first.");
+    if (!item) throw httpsError("not-found", "Catalog item not found. Create it under Shop → Digital Items first.");
     if (item.xp40 || item.managed_by === "xp") throw httpsError("failed-precondition", "Free XP cosmetics cannot be listed for DP coin.");
     const v = validateListingInput(await c.req.json<any>().catch(() => ({})));
     const before = await c.env.DB.prepare(`SELECT * FROM store_listings WHERE item_id = ?`).bind(itemId).first<any>();
@@ -322,12 +322,12 @@ export function registerMonetizationRoutes(
     if (!ITEM_ID_RE.test(itemId)) throw httpsError("invalid-argument", "Item id: 2-40 lowercase letters, digits, _ or -.");
     const body = await c.req.json<any>().catch(() => ({}));
     const item = validateCatalogItemInput(c.env, body?.item ?? {});
-    if ((item.asset as any).collection === "xp40") throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification → XP Level Rewards.");
+    if ((item.asset as any).collection === "xp40") throw httpsError("failed-precondition", "Free XP cosmetics are managed under Earning → Level Rewards.");
     const before = await c.env.DB.prepare(
       `SELECT r.*, EXISTS (SELECT 1 FROM xp_cosmetic_unlocks x WHERE x.item_id = r.id AND x.collection = 'xp40') AS xp40
          FROM reward_catalog r WHERE r.id = ?`,
     ).bind(itemId).first<any>();
-    if (before?.xp40 || before?.managed_by === "xp") throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification → XP Level Rewards.");
+    if (before?.xp40 || before?.managed_by === "xp") throw httpsError("failed-precondition", "Free XP cosmetics are managed under Earning → Level Rewards.");
     if (body?.create === true && before) throw httpsError("already-exists", `An item with id "${itemId}" already exists. Pick another id.`);
     // XP rows are refused above; an Earning reward item edited here moves to
     // the Shop (listed or not), like the listing route (lib/catalogItem.ts CatalogOwner).

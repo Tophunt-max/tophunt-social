@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, type ComponentType } from "react";
-import { Switch, Route, Redirect, useLocation } from "wouter";
+import { Switch, Route, Redirect, useLocation, useSearch } from "wouter";
+import { LEGACY_PATHS, legacyTarget } from "@/lib/legacyRoutes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { Layout } from "@/components/Layout";
@@ -57,7 +58,29 @@ const Leaderboard = lazyWithReload(() => import("@/pages/Leaderboard"));
 const Transactions = lazyWithReload(() => import("@/pages/Transactions"));
 const CoinEconomy = lazyWithReload(() => import("@/pages/CoinEconomy"));
 const Monetization = lazyWithReload(() => import("@/pages/Monetization"));
-const Shopping = lazyWithReload(() => import("@/pages/Shopping"));
+// SHOP section: one chunk for all its pages (pages/shop).
+const shopPage = (name: keyof typeof import("@/pages/shop")) =>
+  lazyWithReload(() => import("@/pages/shop").then((m) => ({ default: m[name] as ComponentType<unknown> })));
+const ShopDashboardPage = shopPage("ShopDashboardPage");
+const ShopOrdersPage = shopPage("ShopOrdersPage");
+const ShopProductsPage = shopPage("ShopProductsPage");
+const ShopDigitalPage = shopPage("ShopDigitalPage");
+const ShopCollectionsPage = shopPage("ShopCollectionsPage");
+const ShopBundlesPage = shopPage("ShopBundlesPage");
+const ShopStorefrontPage = shopPage("ShopStorefrontPage");
+const ShopGiftsPage = shopPage("ShopGiftsPage");
+const ShopSettingsPage = shopPage("ShopSettingsPage");
+// EARNING section (pages/earning), plus its pages that have their own modules.
+const earningPage = (name: keyof typeof import("@/pages/earning")) =>
+  lazyWithReload(() => import("@/pages/earning").then((m) => ({ default: m[name] as ComponentType<unknown> })));
+const EarningFreeRewardsPage = earningPage("EarningFreeRewardsPage");
+const EarningXpPage = earningPage("EarningXpPage");
+const EarningLevelRewardsPage = earningPage("EarningLevelRewardsPage");
+const EarningAchievementsPage = earningPage("EarningAchievementsPage");
+const EarningSeasonsPage = earningPage("EarningSeasonsPage");
+const EarningCatalogPage = earningPage("EarningCatalogPage");
+const EarningEventsPage = earningPage("EarningEventsPage");
+const EarningPlayersPage = earningPage("EarningPlayersPage");
 const Posts = lazyWithReload(() => import("@/pages/Posts"));
 const Stories = lazyWithReload(() => import("@/pages/Stories"));
 const Comments = lazyWithReload(() => import("@/pages/Comments"));
@@ -71,10 +94,8 @@ const AccountDeletions = lazyWithReload(() => import("@/pages/AccountDeletions")
 const Notifications = lazyWithReload(() => import("@/pages/Notifications"));
 const Announcements = lazyWithReload(() => import("@/pages/Announcements"));
 const Rewards = lazyWithReload(() => import("@/pages/Rewards"));
-const Gamification = lazyWithReload(() => import("@/pages/Gamification"));
 const Referrals = lazyWithReload(() => import("@/pages/Referrals"));
 const EarningDashboard = lazyWithReload(() => import("@/pages/EarningDashboard"));
-const EarningEvents = lazyWithReload(() => import("@/pages/EarningEvents"));
 const EarningAssets = lazyWithReload(() => import("@/pages/EarningAssets"));
 const EarningAudit = lazyWithReload(() => import("@/pages/EarningAudit"));
 const ExplorePage = lazyWithReload(() => import("@/pages/Explore"));
@@ -90,6 +111,21 @@ const SystemHealth = lazyWithReload(() => import("@/pages/SystemHealth"));
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: false } },
 });
+
+/** An old URL (lib/legacyRoutes.ts) → its new page, replacing the history entry. */
+function LegacyRedirect() {
+  const [path] = useLocation();
+  const search = useSearch();
+  return <Redirect to={legacyTarget(path, search) ?? "/dashboard"} replace />;
+}
+
+/** A page that is still real, unless the URL names one of its moved tabs (then it redirects before mounting). */
+function LegacyOr({ page: Page }: { page: ComponentType<unknown> }) {
+  const [path] = useLocation();
+  const search = useSearch();
+  const target = legacyTarget(path, search);
+  return target ? <Redirect to={target} replace /> : <Page />;
+}
 
 function PageLoader() {
   return (
@@ -126,9 +162,35 @@ function ProtectedApp() {
           <Route path="/prize-claims" component={PrizeClaims} />
           <Route path="/leaderboard" component={Leaderboard} />
           <Route path="/transactions" component={Transactions} />
-          <Route path="/coin-economy" component={CoinEconomy} />
-          <Route path="/monetization" component={Monetization} />
-          <Route path="/shopping" component={Shopping} />
+          <Route path="/coin-economy">{() => <LegacyOr page={CoinEconomy} />}</Route>
+          <Route path="/monetization">{() => <LegacyOr page={Monetization} />}</Route>
+          {/* SHOP */}
+          <Route path="/shop" component={ShopDashboardPage} />
+          <Route path="/shop/orders" component={ShopOrdersPage} />
+          <Route path="/shop/products" component={ShopProductsPage} />
+          <Route path="/shop/digital" component={ShopDigitalPage} />
+          <Route path="/shop/collections" component={ShopCollectionsPage} />
+          <Route path="/shop/bundles" component={ShopBundlesPage} />
+          <Route path="/shop/storefront" component={ShopStorefrontPage} />
+          <Route path="/shop/gifts" component={ShopGiftsPage} />
+          <Route path="/shop/settings" component={ShopSettingsPage} />
+          {/* EARNING */}
+          <Route path="/earning" component={EarningDashboard} />
+          <Route path="/earning/free-rewards" component={EarningFreeRewardsPage} />
+          <Route path="/earning/xp" component={EarningXpPage} />
+          <Route path="/earning/level-rewards" component={EarningLevelRewardsPage} />
+          <Route path="/earning/achievements" component={EarningAchievementsPage} />
+          <Route path="/earning/seasons" component={EarningSeasonsPage} />
+          <Route path="/earning/catalog" component={EarningCatalogPage} />
+          <Route path="/earning/events" component={EarningEventsPage} />
+          <Route path="/earning/referrals" component={Referrals} />
+          <Route path="/earning/assets" component={EarningAssets} />
+          <Route path="/earning/players" component={EarningPlayersPage} />
+          <Route path="/earning/audit" component={EarningAudit} />
+          {/* Old Shopping / Gamification / Earning URLs (bookmarks, older notifications) */}
+          {LEGACY_PATHS.filter((p) => p !== "/coin-economy" && p !== "/monetization").map((p) => (
+            <Route key={p} path={p} component={LegacyRedirect} />
+          ))}
           <Route path="/posts" component={Posts} />
           <Route path="/stories" component={Stories} />
           <Route path="/comments" component={Comments} />
@@ -143,12 +205,6 @@ function ProtectedApp() {
           <Route path="/notifications" component={Notifications} />
           <Route path="/announcements" component={Announcements} />
           <Route path="/rewards" component={Rewards} />
-          <Route path="/gamification" component={Gamification} />
-          <Route path="/referrals" component={Referrals} />
-          <Route path="/earning-dashboard" component={EarningDashboard} />
-          <Route path="/earning-events" component={EarningEvents} />
-          <Route path="/earning-assets" component={EarningAssets} />
-          <Route path="/earning-audit" component={EarningAudit} />
           <Route path="/explore" component={ExplorePage} />
           <Route path="/app-control" component={AppControl} />
           <Route path="/app-settings" component={AppSettings} />

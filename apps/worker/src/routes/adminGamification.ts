@@ -253,8 +253,8 @@ export function registerGamificationRoutes(
       throw httpsError(
         "invalid-argument",
         b.asset.tier === "premium"
-          ? "Premium items are Shop items. Create them under Shopping → Digital items."
-          : "XP level rewards are created under Gamification → XP level rewards.",
+          ? "Premium items are Shop items. Create them under Shop → Digital Items."
+          : "XP level rewards are created under Earning → Level Rewards.",
       );
     }
     assertCatalogOwner(await catalogOwnerOf(c.env, id), "earning");

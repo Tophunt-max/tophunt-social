@@ -189,7 +189,7 @@ export async function handleMonetizationAction(action: string, ctx: Ctx): Promis
         ctx.waitUntil(
           env.DB.prepare(
             `INSERT INTO admin_notifications (id, title, message, link, created_at) VALUES (?, ?, ?, ?, ?)`,
-          ).bind(crypto.randomUUID(), "New shop order", `${order.items.length} item(s), ${order.totalCoins} DP coin`, "/shopping", Date.now()).run().catch(() => undefined),
+          ).bind(crypto.randomUUID(), "New shop order", `${order.items.length} item(s), ${order.totalCoins} DP coin`, "/shop/orders", Date.now()).run().catch(() => undefined),
         );
         ctx.purgeProfile();
       }

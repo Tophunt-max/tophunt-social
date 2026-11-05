@@ -10,7 +10,7 @@ import { ItemPreview } from "@/components/monetization/StoreTab";
 import { Button, Card, Notice, Text, Toggle, field, fromLocalInput, toLocalInput } from "@/components/monetization/shared";
 
 /**
- * Shopping → Shop home: the two admin-managed blocks at the top of the app's
+ * Shop → Storefront: the two admin-managed blocks at the top of the app's
  * Shop home, kept on their own tab because the Digital items tab is already
  * the listing grid + featured drop + purchases, and these blocks also point at
  * physical products.
