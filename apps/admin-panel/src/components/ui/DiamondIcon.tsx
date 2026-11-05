@@ -5,7 +5,7 @@ import xpUrl from "../../../../expo/assets/images/currency/xp.webp?url";
 
 /**
  * The app-wide currency artwork, the same WebPs the app draws
- * (apps/expo/assets/images/currency, built by apps/expo/scripts/gen-currency-webp.mjs):
+ * (apps/expo/assets/images/currency):
  *
  *   DiamondIcon  Diamond, the play-only balance (users.locked_coins): contest entry fees, earned free.
  *   CoinIcon     DP coin (dpcoin − locked_coins): won in contests, spent in the shop.

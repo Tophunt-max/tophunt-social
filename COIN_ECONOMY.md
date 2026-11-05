@@ -102,7 +102,7 @@ sources in `apps/expo/design/earning/` (`scripts/gen-earning-assets.py`) by `scr
 adds glow, drop shadow and sheen; the app bundles no SVG for this artwork. 💎 Diamond, ⚡ XP and 🪙 DP coin are not
 Rewards Center artwork: the Rewards Center draws the app-wide icons (`DiamondIcon`, `XpIcon`, `CoinIcon`) like every
 other screen, and they can't be replaced from the panel. Those three draw `apps/expo/assets/images/currency/{diamond,xp,dp-coin}.webp`
-(192 px, built from the source PNGs in `apps/expo/design/currency/` by `scripts/gen-currency-webp.mjs`); the
+(192 px square, transparent; to change one, replace its WebP with one of the same size); the
 admin panel's `DiamondIcon` / `CoinIcon` / `XpIcon` import the same files. Admins can replace any other piece (below).
 
 ### Rewards Center Diamonds (missions, achievements, contests)

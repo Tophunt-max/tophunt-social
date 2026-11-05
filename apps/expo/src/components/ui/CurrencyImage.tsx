@@ -4,9 +4,10 @@ import { Image } from 'expo-image';
 
 /**
  * The app-wide currency artwork: 💎 Diamond, 🪙 DP coin and ⚡ XP. One
- * transparent 192 px WebP each (assets/images/currency), built from the source
- * PNGs in design/currency by scripts/gen-currency-webp.mjs. DiamondIcon,
- * CoinIcon and XpIcon draw these, so every screen shows the same three icons.
+ * transparent 192 px WebP each (assets/images/currency, lossy q82 with
+ * full-quality alpha). DiamondIcon, CoinIcon and XpIcon draw these, so every
+ * screen shows the same three icons. To change one, replace its WebP with a
+ * square transparent WebP of the same size.
  *
  * 192 px covers the largest slot (64 pt, the result-screen medallion) at 3x.
  * Sources are static `require`s, so Metro bundles them and expo-image decodes
