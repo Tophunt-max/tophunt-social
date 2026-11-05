@@ -2,9 +2,11 @@
  * PHONE layout of the Shop "Physical" tab (design mock), shown when the tab
  * is opened without a category: the "Physical Rewards" hero with the yellow
  * Explore Rewards button, the trust row (Free Shipping, Secure Packaging,
- * Easy Replacement, Genuine Products), the Featured Rewards row (4 product
- * cards with a HOT / NEW / POPULAR / LIMITED pill, a saved heart and the pink
- * DP price pill), the Categories row (6 tiles) and the "Redeem & Get Real
+ * Easy Replacement, Genuine Products), the Featured Rewards, Trending
+ * Products (real most-ordered) and Exclusive Collection (admin picks) rows
+ * of product cards (a HOT / NEW / POPULAR / LIMITED pill, a saved heart and
+ * the pink DP price pill), the Categories row (6 tiles; the admin's uploaded
+ * images when managed, else outline icons) and the "Redeem & Get Real
  * Rewards" banner. Picking a category / "View All" / Explore opens the full
  * products catalogue (app/shop/index.tsx).
  *
@@ -21,6 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Svg, { Path } from 'react-native-svg';
 import Heart from 'lucide-react-native/icons/heart';
+import TrendingUp from 'lucide-react-native/icons/trending-up';
 import Shirt from 'lucide-react-native/icons/shirt';
 import Headphones from 'lucide-react-native/icons/headphones';
 import Watch from 'lucide-react-native/icons/watch';
@@ -257,7 +260,7 @@ function CatIcon({ icon, size }: { icon: PhysCatIcon; size: number }) {
   return <Package size={size} color={BRAND} />;
 }
 
-/** Categories row: 6 white tiles, a pink outline icon and the category name. */
+/** Categories row: 6 white tiles — the admin's uploaded image when there is one, else the pink outline icon — and the category name. */
 export function CategoryTilesM({ p, u, inner, cats, onPick }: { p: TophuntPalette; u: number; inner: number; cats: PhysicalCategory[]; onPick: (key: string) => void }) {
   const C = PHYS_M.cat;
   const gap = px(C.gap, u);
@@ -265,6 +268,7 @@ export function CategoryTilesM({ p, u, inner, cats, onPick }: { p: TophuntPalett
   const h = px(C.h, u);
   const r = px(C.radius, u);
   const fs = mfont(C.label, u);
+  const icon = px(C.icon, u);
   return (
     <View style={[styles.row, { gap }]}>
       {cats.map((c) => (
@@ -276,7 +280,11 @@ export function CategoryTilesM({ p, u, inner, cats, onPick }: { p: TophuntPalett
           accessibilityLabel={`${c.label}: ${c.count} products. Dekho`}
           style={[styles.catTile, { width: w, height: h, borderRadius: r, gap: px(2, u), backgroundColor: p.card, borderColor: shopBorder(p) }, lavenderShadow(p)]}
         >
-          <CatIcon icon={c.icon} size={px(C.icon, u)} />
+          {c.imageUrl ? (
+            <AppImage source={{ uri: c.imageUrl }} displayWidth={Math.round(icon)} style={{ width: icon, height: icon, borderRadius: icon * 0.3 }} contentFit="cover" transition={0} accessibilityLabel={c.label} />
+          ) : (
+            <CatIcon icon={c.icon} size={icon} />
+          )}
           <Text style={[styles.catLabel, { fontSize: fs, lineHeight: fs * 1.2, color: p.text }]} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{c.label}</Text>
         </TouchableOpacity>
       ))}
@@ -352,13 +360,19 @@ export interface PhysicalHomeProps {
   now: number;
   /** Featured shelf (physicalHomeModel.featuredProducts: in-stock featured only). */
   featured: ShopProduct[];
-  /** Category tiles (physicalHomeModel.physicalCategories). */
+  /** Trending shelf (physicalHomeModel.trendingProducts: the server's most-ordered ids). */
+  trending: ShopProduct[];
+  /** Exclusive Collection shelf (physicalHomeModel.exclusiveProducts: the admin's picks). */
+  exclusive: ShopProduct[];
+  /** Category tiles (physicalHomeModel.resolveCategories: the admin's tiles, else derived). */
   cats: PhysicalCategory[];
   savedIds: string[];
   onToggleSaved: (id: string) => void;
   onOpenProduct: (id: string) => void;
-  /** "View All" of Featured Rewards: the full products catalogue. */
+  /** "View All" of a shelf: the full products catalogue. */
   onAllFeatured: () => void;
+  onAllTrending: () => void;
+  onAllExclusive: () => void;
   onAllCategories: () => void;
   onCategory: (key: string) => void;
   /** Hero CTA and the Redeem banner. */
@@ -366,12 +380,19 @@ export interface PhysicalHomeProps {
 }
 
 /** The Physical tab body, top to bottom exactly as the design mock. An empty shelf hides its section. */
-export function PhysicalHomeMobile({ p, u, inner, now, featured, cats, savedIds, onToggleSaved, onOpenProduct, onAllFeatured, onAllCategories, onCategory, onExplore }: PhysicalHomeProps) {
+export function PhysicalHomeMobile({ p, u, inner, now, featured, trending, exclusive, cats, savedIds, onToggleSaved, onOpenProduct, onAllFeatured, onAllTrending, onAllExclusive, onAllCategories, onCategory, onExplore }: PhysicalHomeProps) {
   const gap = px(MOCK_M.gap, u);
   const head = px(MOCK_M.head, u);
   const icon = px(MOCK_M.section.icon, u);
   const featGap = px(PHYS_M.feat.gap, u);
   const featW = cellWidth(inner, PHYS_M.feat.cols, featGap);
+  const productRow = (items: ShopProduct[]) => (
+    <View style={[styles.row, { gap: featGap, marginTop: head }]}>
+      {items.map((prod) => (
+        <ProductCardM key={prod.id} p={p} product={prod} now={now} u={u} width={featW} saved={savedIds.includes(prod.id)} onOpen={onOpenProduct} onToggleSaved={onToggleSaved} />
+      ))}
+    </View>
+  );
   return (
     <View>
       <View style={{ marginTop: gap }}>
@@ -385,11 +406,14 @@ export function PhysicalHomeMobile({ p, u, inner, now, featured, cats, savedIds,
       {featured.length ? (
         <View style={{ marginTop: gap }}>
           <SectionHeaderM p={p} u={u} icon={<FlameIcon size={icon} />} title="Featured Rewards" action={{ label: 'View All', onPress: onAllFeatured }} />
-          <View style={[styles.row, { gap: featGap, marginTop: head }]}>
-            {featured.map((prod) => (
-              <ProductCardM key={prod.id} p={p} product={prod} now={now} u={u} width={featW} saved={savedIds.includes(prod.id)} onOpen={onOpenProduct} onToggleSaved={onToggleSaved} />
-            ))}
-          </View>
+          {productRow(featured)}
+        </View>
+      ) : null}
+
+      {trending.length ? (
+        <View style={{ marginTop: gap }}>
+          <SectionHeaderM p={p} u={u} icon={<TrendingUp size={icon} color={BRAND} />} title="Trending Products" action={{ label: 'View All', onPress: onAllTrending }} />
+          {productRow(trending)}
         </View>
       ) : null}
 
@@ -399,6 +423,13 @@ export function PhysicalHomeMobile({ p, u, inner, now, featured, cats, savedIds,
           <View style={{ marginTop: head }}>
             <CategoryTilesM p={p} u={u} inner={inner} cats={cats} onPick={onCategory} />
           </View>
+        </View>
+      ) : null}
+
+      {exclusive.length ? (
+        <View style={{ marginTop: gap }}>
+          <SectionHeaderM p={p} u={u} icon={<CrownIcon size={icon} />} title="Exclusive Collection" action={{ label: 'View All', onPress: onAllExclusive }} />
+          {productRow(exclusive)}
         </View>
       ) : null}
 

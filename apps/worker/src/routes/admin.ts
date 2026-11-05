@@ -74,7 +74,7 @@ import {
   validateContestInput,
 } from "../lib/contestAdmin";
 import { normalizePrizeType, publicPrize, resolveMatchPrize } from "../lib/prizes";
-import { EXPLORE_BANNER_PREFIX, ONBOARDING_IMAGE_PREFIX, PRODUCT_IMAGE_PREFIX, SHOP_BANNER_PREFIX, SHOP_ITEM_ART_PREFIX, EARNING_ASSET_PREFIX } from "../lib/mediaCategories";
+import { EXPLORE_BANNER_PREFIX, ONBOARDING_IMAGE_PREFIX, PRODUCT_IMAGE_PREFIX, SHOP_BANNER_PREFIX, SHOP_CATEGORY_PREFIX, SHOP_ITEM_ART_PREFIX, EARNING_ASSET_PREFIX } from "../lib/mediaCategories";
 import { sanitizeOnboardingSlides } from "../lib/onboardingConfig";
 import { formatDeliveryAddress, summariseDeliveryAddress } from "../lib/deliveryAddress";
 import {
@@ -279,6 +279,7 @@ const SENSITIVE_ADMIN_ROUTES: Array<[method: string, path: RegExp]> = [
   ["*", /^\/monetization\/(gifts|store|ads|advertisers|campaigns|shop|collections|bundles)(\/.*)?$/],
   // Shop home artwork goes straight onto the Shop's first screen.
   ["POST", /^\/media\/shop-banner$/],
+  ["POST", /^\/media\/shop-category$/],
   // Digital item artwork is drawn on every profile and list row that equips it.
   ["POST", /^\/media\/shop-item-art$/],
   // Special events pay Diamonds.
@@ -1095,6 +1096,21 @@ adminRoute.post("/media/shop-banner", async (c) => {
   const body = await readAdminImageBody(c);
   const uploaded = await uploadToR2(c.env, fileType, SHOP_BANNER_PREFIX, body, [fileType]);
   await logAudit(c, "shop.banner.upload", "shop-banner", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
+  return c.json(uploaded);
+});
+
+/**
+ * Category tile image of the Physical tab (appConfig.monetization.shop
+ * .physical.categories, lib/shopHomeConfig.ts). Same intake as the Shop
+ * banner: declared type + length checked before the body is read, exact-type
+ * byte check in uploadToR2, 5 MB cap, JPEG / PNG / WebP, audited.
+ */
+adminRoute.post("/media/shop-category", async (c) => {
+  requireFullAdmin(c);
+  const fileType = assertAdminImageUpload(c);
+  const body = await readAdminImageBody(c);
+  const uploaded = await uploadToR2(c.env, fileType, SHOP_CATEGORY_PREFIX, body, [fileType]);
+  await logAudit(c, "shop.category.upload", "shop-category", uploaded.fileKey, { publicUrl: uploaded.publicUrl });
   return c.json(uploaded);
 });
 
