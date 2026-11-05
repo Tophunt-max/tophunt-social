@@ -4,9 +4,14 @@ import { Image } from 'expo-image';
 
 /**
  * The app-wide currency artwork: 💎 Diamond, 🪙 DP coin and ⚡ XP. One
- * transparent 192 px WebP each (assets/images/currency, built from the PNGs
- * in assets/images by scripts/gen-currency-webp.mjs). DiamondIcon, CoinIcon
- * and XpIcon draw these, so every screen shows the same three icons.
+ * transparent 192 px WebP each (assets/images/currency), built from the source
+ * PNGs in design/currency by scripts/gen-currency-webp.mjs. DiamondIcon,
+ * CoinIcon and XpIcon draw these, so every screen shows the same three icons.
+ *
+ * 192 px covers the largest slot (64 pt, the result-screen medallion) at 3x.
+ * Sources are static `require`s, so Metro bundles them and expo-image decodes
+ * them from the app bundle on native (no network) and from hashed, immutable
+ * URLs on web.
  */
 export const CURRENCY_IMAGES = {
   diamond: require('@/assets/images/currency/diamond.webp'),
@@ -16,17 +21,39 @@ export const CURRENCY_IMAGES = {
 
 export type CurrencyImageKind = keyof typeof CURRENCY_IMAGES;
 
-const LABEL: Record<CurrencyImageKind, string> = { diamond: 'Diamond', dpCoin: 'DP coin', xp: 'XP' };
+/** Opacity for a greyed-out icon (disabled / not affordable). The artwork is full colour, so it can't be tinted. */
+export const MUTED_OPACITY = 0.45;
 
-export function CurrencyImage({ kind, size, style }: { kind: CurrencyImageKind; size: number; style?: StyleProp<ViewStyle> }) {
+export interface CurrencyImageProps {
+  kind: CurrencyImageKind;
+  size: number;
+  style?: StyleProp<ViewStyle>;
+  /** Greyed-out look for disabled or unaffordable states. */
+  muted?: boolean;
+  /**
+   * Spoken label. Omit it (the default) when the icon sits next to text that
+   * already names the currency, or inside an element with its own label: the
+   * icon is then hidden from screen readers so it isn't read twice.
+   */
+  accessibilityLabel?: string;
+}
+
+export function CurrencyImage({ kind, size, style, muted = false, accessibilityLabel }: CurrencyImageProps) {
+  const labelled = !!accessibilityLabel;
   return (
     <Image
       source={CURRENCY_IMAGES[kind]}
-      style={[{ width: size, height: size }, style as StyleProp<ImageStyle>]}
+      style={[{ width: size, height: size }, muted && { opacity: MUTED_OPACITY }, style as StyleProp<ImageStyle>]}
       contentFit="contain"
       transition={0}
       cachePolicy="memory"
-      accessibilityLabel={LABEL[kind]}
+      priority="high"
+      accessible={labelled}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole={labelled ? 'image' : undefined}
+      accessibilityElementsHidden={!labelled}
+      importantForAccessibility={labelled ? 'yes' : 'no-hide-descendants'}
+      alt={accessibilityLabel ?? ''}
     />
   );
 }

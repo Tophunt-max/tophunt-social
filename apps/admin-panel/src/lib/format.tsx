@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 export function fmtDate(v: string | number | null | undefined): string {
   if (!v) return "—";
@@ -62,9 +63,9 @@ export function PageHeader({
   return (
     <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
       <div className="min-w-0">
-        <h2 className="text-lg sm:text-xl font-bold text-foreground">{title}</h2>
+        <h2 className="text-lg sm:text-xl font-bold text-foreground"><CurrencyText>{title}</CurrencyText></h2>
         {subtitle && (
-          <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
+          <p className="text-sm text-muted-foreground mt-0.5"><CurrencyText>{subtitle}</CurrencyText></p>
         )}
       </div>
       {action && <div className="flex items-center gap-2 flex-wrap">{action}</div>}

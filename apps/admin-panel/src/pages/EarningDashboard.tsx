@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, LineChart, Line } from "recharts";
 import { Download, Users, RotateCcw } from "lucide-react";
-import { CoinIcon, DiamondIcon, XpIcon } from "@/components/ui/DiamondIcon";
+import { CurrencyText, CoinIcon, DiamondIcon, XpIcon } from "@/components/ui/DiamondIcon";
 import { api, describeError, type EarningAnalytics } from "@/lib/api";
 import { PageHeader, fmtNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -97,8 +97,8 @@ export default function EarningDashboard() {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(d: string) => d.slice(5)} />
                   <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Legend />
+                  <Tooltip formatter={(v: any, name: any) => [v, <CurrencyText key="n">{String(name)}</CurrencyText>]} />
+                  <Legend formatter={(v: any) => <CurrencyText>{String(v)}</CurrencyText>} />
                   <Bar dataKey="diamonds" name="💎 Earned" fill="#06b6d4" />
                   <Bar dataKey="reversed" name="💎 Reversed" fill="#f43f5e" />
                   <Bar dataKey="dpcoin" name="🪙 DP won" fill="#f59e0b" />
@@ -155,7 +155,7 @@ export default function EarningDashboard() {
               />
             </div>
             <div>
-              <h3 className="font-bold text-foreground mb-2">Top earners (💎 from rewards)</h3>
+              <h3 className="font-bold text-foreground mb-2"><CurrencyText>Top earners (💎 from rewards)</CurrencyText></h3>
               <Table
                 data={a.topEarners}
                 keyFn={(r) => r.uid}

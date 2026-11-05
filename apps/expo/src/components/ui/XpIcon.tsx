@@ -12,10 +12,14 @@ export interface XpIconProps {
   /** Ignored (the artwork is full colour). Kept so existing callers compile. */
   color?: string;
   style?: StyleProp<ViewStyle>;
+  /** Greyed-out look (disabled / not affordable). */
+  muted?: boolean;
+  /** Spoken label; omit when nearby text already names the currency (the icon is then hidden from screen readers). */
+  accessibilityLabel?: string;
 }
 
-export function XpIcon({ size = 16, style }: XpIconProps) {
-  return <CurrencyImage kind="xp" size={size} style={style} />;
+export function XpIcon({ size = 16, style, muted, accessibilityLabel }: XpIconProps) {
+  return <CurrencyImage kind="xp" size={size} style={style} muted={muted} accessibilityLabel={accessibilityLabel} />;
 }
 
 export default XpIcon;

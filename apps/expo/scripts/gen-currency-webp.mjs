@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
  * Builds the app-wide currency icons (💎 Diamond, 🪙 DP coin, ⚡ XP) from the
- * source PNGs in apps/expo/assets/images:
- *   Diamond.png → currency/diamond.webp
- *   DP Coin.png → currency/dp-coin.webp
- *   XP.png      → currency/xp.webp
+ * source PNGs in apps/expo/design/currency (not bundled) into
+ * apps/expo/assets/images/currency (bundled):
+ *   diamond.png → diamond.webp
+ *   dp-coin.png → dp-coin.webp
+ *   xp.png      → xp.webp
  * Each is trimmed of transparent margin, centred on a square transparent canvas
  * (SIZE px, enough for the largest slot, ~60 pt, at 3x) and saved as lossy WebP
  * with full-quality alpha. DiamondIcon, CoinIcon and XpIcon draw these files.
@@ -28,13 +29,13 @@ try {
 }
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(HERE, '..', 'assets', 'images');
+const SRC = path.join(HERE, '..', 'design', 'currency');
 const OUT = path.join(HERE, '..', 'assets', 'images', 'currency');
 const SIZE = 192;
 const JOBS = [
-  ['Diamond.png', 'diamond.webp'],
-  ['DP Coin.png', 'dp-coin.webp'],
-  ['XP.png', 'xp.webp'],
+  ['diamond.png', 'diamond.webp'],
+  ['dp-coin.png', 'dp-coin.webp'],
+  ['xp.png', 'xp.webp'],
 ];
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -46,5 +47,5 @@ for (const [src, out] of JOBS) {
     .toFile(path.join(OUT, out));
   const before = fs.statSync(path.join(SRC, src)).size;
   const after = fs.statSync(path.join(OUT, out)).size;
-  console.log(`${src} (${(before / 1024).toFixed(0)} KB) → currency/${out} (${(after / 1024).toFixed(1)} KB)`);
+  console.log(`${src} (${(before / 1024).toFixed(0)} KB) → assets/images/currency/${out} (${(after / 1024).toFixed(1)} KB)`);
 }

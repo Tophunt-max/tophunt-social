@@ -7,6 +7,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { toast } from "@/lib/toast";
 import { PageHeader, fmtDateTime, fmtNumber, truncate } from "@/lib/format";
 import { AlertTriangle, Clock, Trash2, Undo2, CheckCircle2 } from "lucide-react";
+import { CoinIcon } from "@/components/ui/DiamondIcon";
 
 /**
  * Account deletions.
@@ -159,7 +160,7 @@ export default function AccountDeletions() {
           value={fmtNumber(stats?.cancelled)}
         />
         <StatTile
-          icon={<span className="text-xs font-bold text-muted-foreground">🪙</span>}
+          icon={<CoinIcon size={16} alt="" />}
           label="Forfeited (DP coin + Diamond)"
           value={fmtNumber(stats?.forfeitedCoinsTotal)}
         />
