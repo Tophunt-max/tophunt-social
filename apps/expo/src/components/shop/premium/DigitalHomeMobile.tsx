@@ -159,7 +159,7 @@ export const DarkShelfCard = React.memo(function DarkShelfCard({
         </Pressable>
         <TagPill tag={tag} u={u} height={D.tagH} size={D.tag} style={{ position: 'absolute', top: pad, left: pad }} />
         <View style={[styles.foot, { top: footTop, left: pad, right: pad, height: pillH }]}>
-          <View style={[styles.pricePill, { height: pillH, borderRadius: pillH / 2, paddingHorizontal: px(4, u) }]} pointerEvents="none">
+          <View style={{ height: pillH, justifyContent: 'center' }} pointerEvents="none">
             <Price item={item} u={u} size={D.price} coin={D.coin} color={WHITE} />
           </View>
           <WishlistHeart itemId={item.itemId} name={item.name} size={px(D.heart, u)} bubble={false} color={WHITE} hitSlop={heartSlop(px(D.heart, u))} />
@@ -472,7 +472,7 @@ const styles = StyleSheet.create({
   foot: { position: 'absolute', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   pricePill: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0, backgroundColor: 'rgba(0,0,0,0.45)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
   price: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, minWidth: 0 },
-  priceText: { fontFamily: TH.fonts.bold, flexShrink: 1 },
+  priceText: { fontFamily: TH.fonts.bold, flexShrink: 1, textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 2, textShadowOffset: { width: 0, height: 1 } },
   special: { flex: 1, flexDirection: 'row', alignItems: 'center', overflow: 'hidden' },
   specialTitle: { color: '#FFF', fontFamily: TH.fonts.bold },
   specialSub: { color: '#EBDDFF', fontFamily: TH.fonts.medium, marginTop: 1 },

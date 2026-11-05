@@ -114,6 +114,20 @@ export function cosmeticArt(item: WithAsset, kind?: ArtKind): CosmeticArt | null
   return hit;
 }
 
+/**
+ * Whether a title plate's artwork already shows the title text (textOnPlate
+ * on the bundled plates; admin uploads are complete plates). Plates without
+ * text get it drawn by the app.
+ */
+export function titlePlateHasText(item: WithAsset): boolean {
+  if (uploadedArt(item)) return true;
+  const key = item?.asset?.key;
+  if (typeof key !== 'string') return true;
+  const t = SHOP_DIGITAL_ART[key];
+  if (!t || t.kind !== 'title') return true;
+  return t.textOnPlate !== false;
+}
+
 export function cosmeticTier(item: WithAsset): CosmeticTier {
   const t = item?.asset?.tier;
   if (t === 'premium' || t === 'xp') return t;

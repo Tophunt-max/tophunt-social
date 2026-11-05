@@ -6,7 +6,10 @@ export type FxMotion = 'spin' | 'pulse' | 'twinkle' | 'flicker' | 'drift';
 export interface ShopArt {
   kind: ShopArtKind;
   source: ImageSourcePropType;
+  /** Title plates only: the title text is part of the artwork. */
+  textOnPlate?: boolean;
   /** Transparent effect artwork, animated by CosmeticFx. Frames only. */
+  /** Title plates: false when the plate artwork has no title text baked in (the app draws it). */
   Fx?: ImageSourcePropType;
   fx?: FxMotion;
 }
@@ -48,10 +51,10 @@ export const SHOP_DIGITAL_ART: Record<string, ShopArt> = {
   'shop.badge_cosmic_patron': { kind: 'badge', source: require('./badges/cosmic_patron.webp'), Fx: require('./badges/fx/cosmic_patron.webp'), fx: 'spin' },
   'shop.badge_royal_founder': { kind: 'badge', source: require('./badges/royal_founder.webp'), Fx: require('./badges/fx/royal_founder.webp'), fx: 'twinkle' },
 
-  'shop.title_style_icon': { kind: 'title', source: require('./titles/style_icon.webp'), Fx: require('./titles/fx/style_icon.webp'), fx: 'drift' },
-  'shop.title_trend_boss': { kind: 'title', source: require('./titles/trend_boss.webp'), Fx: require('./titles/fx/trend_boss.webp'), fx: 'drift' },
-  'shop.title_hunt_master': { kind: 'title', source: require('./titles/hunt_master.webp'), Fx: require('./titles/fx/hunt_master.webp'), fx: 'drift' },
-  'shop.title_dragon_lord': { kind: 'title', source: require('./titles/dragon_lord.webp'), Fx: require('./titles/fx/dragon_lord.webp'), fx: 'drift' },
-  'shop.title_starlight_icon': { kind: 'title', source: require('./titles/starlight_icon.webp'), Fx: require('./titles/fx/starlight_icon.webp'), fx: 'twinkle' },
-  'shop.title_sovereign': { kind: 'title', source: require('./titles/sovereign.webp'), Fx: require('./titles/fx/sovereign.webp'), fx: 'drift' },
+  'shop.title_style_icon': { kind: 'title', textOnPlate: false, source: require('./titles/style_icon.webp'), Fx: require('./titles/fx/style_icon.webp'), fx: 'drift' },
+  'shop.title_trend_boss': { kind: 'title', textOnPlate: false, source: require('./titles/trend_boss.webp'), Fx: require('./titles/fx/trend_boss.webp'), fx: 'drift' },
+  'shop.title_hunt_master': { kind: 'title', textOnPlate: false, source: require('./titles/hunt_master.webp'), Fx: require('./titles/fx/hunt_master.webp'), fx: 'drift' },
+  'shop.title_dragon_lord': { kind: 'title', textOnPlate: true, source: require('./titles/dragon_lord.webp'), Fx: require('./titles/fx/dragon_lord.webp'), fx: 'drift' },
+  'shop.title_starlight_icon': { kind: 'title', textOnPlate: true, source: require('./titles/starlight_icon.webp'), Fx: require('./titles/fx/starlight_icon.webp'), fx: 'twinkle' },
+  'shop.title_sovereign': { kind: 'title', textOnPlate: true, source: require('./titles/sovereign.webp'), Fx: require('./titles/fx/sovereign.webp'), fx: 'drift' },
 };
