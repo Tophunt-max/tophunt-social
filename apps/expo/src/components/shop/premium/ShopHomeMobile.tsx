@@ -114,7 +114,7 @@ function GhostButton({ label, onPress, u, height, size, a11y }: { label: string;
 }
 
 /** Round white-translucent arrow at the bottom-right of a gradient card (decorative: the card is the button). */
-function ArrowCircle({ u, size }: { u: number; size: number }) {
+export function ArrowCircle({ u, size }: { u: number; size: number }) {
   const d = px(size, u);
   return (
     <View style={[styles.arrowCircle, { width: d, height: d, borderRadius: d / 2 }]} pointerEvents="none">

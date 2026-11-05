@@ -788,3 +788,71 @@ export const HeroWaves = React.memo(function HeroWaves({ width, height }: TileAr
     </Svg>
   );
 });
+
+// ------------------------------------------------------------------ phone Digital tab (design mock) art
+
+/** Small cyan faceted diamond with a white glint, scattered around title / banner art (24×24, decorative). */
+export function DiamondSparkle({ size }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" pointerEvents="none">
+      <Defs>
+        <LinearGradient id="sa-dsp" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#CFFAFE" />
+          <Stop offset="0.5" stopColor="#22D3EE" />
+          <Stop offset="1" stopColor="#0E7490" />
+        </LinearGradient>
+      </Defs>
+      <Path d="M6 8 L9.5 4 H14.5 L18 8 L12 20 Z" fill="url(#sa-dsp)" stroke="#ECFEFF" strokeWidth={0.7} strokeLinejoin="round" />
+      <Path d="M6 8 H18 M9.5 4 L12 8 L14.5 4 M12 8 V20" fill="none" stroke="#ECFEFF" strokeWidth={0.6} opacity={0.75} />
+      <Path d={spark(19.5, 4, 2.6)} fill="#FFFFFF" opacity={0.95} />
+    </Svg>
+  );
+}
+
+/** Gold shield with a violet inset and star ("Badges Collection" section icon, 24×24). */
+export function BadgeIcon({ size }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Defs>
+        <LinearGradient id="sa-bi" x1="0" y1="0" x2="0" y2="1">{goldStops()}</LinearGradient>
+        <LinearGradient id="sa-bi-in" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#8B5CF6" />
+          <Stop offset="1" stopColor="#4C1D95" />
+        </LinearGradient>
+      </Defs>
+      <Path d="M12 1.5 L20.5 4.8 V11.5 C20.5 16.6 16.9 20.6 12 22.5 C7.1 20.6 3.5 16.6 3.5 11.5 V4.8 Z" fill="url(#sa-bi)" stroke="#92400E" strokeWidth={0.7} />
+      <Path d="M12 4.6 L17.6 6.8 V11.6 C17.6 15.1 15.3 17.9 12 19.4 C8.7 17.9 6.4 15.1 6.4 11.6 V6.8 Z" fill="url(#sa-bi-in)" />
+      <Star5 cx={12} cy={11.8} r={4} fill="#FFD24A" />
+    </Svg>
+  );
+}
+
+/** Gold trophy cup ("Titles Collection" section icon, 24×24). */
+export function TrophyIcon({ size }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Defs>
+        <LinearGradient id="sa-tro" x1="0" y1="0" x2="0" y2="1">{goldStops()}</LinearGradient>
+      </Defs>
+      <Path d="M6.5 5 H3.5 C3.5 9 5 11 7.5 11.4 M17.5 5 H20.5 C20.5 9 19 11 16.5 11.4" fill="none" stroke="url(#sa-tro)" strokeWidth={1.8} strokeLinecap="round" />
+      <Path d="M6 3 H18 V8.5 C18 12.2 15.4 14.8 12 14.8 C8.6 14.8 6 12.2 6 8.5 Z" fill="url(#sa-tro)" stroke="#92400E" strokeWidth={0.7} />
+      <Rect x={10.6} y={14.6} width={2.8} height={3.6} fill="#D97706" />
+      <Rect x={7.5} y={18} width={9} height={3.2} rx={1} fill="url(#sa-tro)" stroke="#92400E" strokeWidth={0.6} />
+      <Path d="M8.6 5 L8.8 9.4" stroke="#FFFBEB" strokeWidth={1.1} strokeLinecap="round" opacity={0.85} />
+    </Svg>
+  );
+}
+
+/** Small violet crown ("Special Collections" banner, 24×18). */
+export function VioletCrownIcon({ size }: IconProps) {
+  return (
+    <Svg width={size} height={(size * 36) / 48} viewBox="0 2 48 36">
+      <Defs>
+        <LinearGradient id="sa-vcr" x1="0" y1="0" x2="0" y2="1">{purpleStops({ light: '#DDD6FE', mid: '#8B5CF6', dark: '#5B21B6' })}</LinearGradient>
+      </Defs>
+      <Path d={CROWN} fill="url(#sa-vcr)" stroke="#4C1D95" strokeWidth={1} strokeLinejoin="round" />
+      <Rect x={8} y={30} width={32} height={5} rx={1.5} fill="#6D28D9" />
+      <Circle cx={24} cy={24} r={3} fill="#F472B6" />
+    </Svg>
+  );
+}

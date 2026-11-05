@@ -15,8 +15,8 @@ import { useMonetizationConfig, useToggleWishlist, useWishlist } from '@/src/ser
 import { TH } from '@/src/theme/tophunt';
 
 export function WishlistHeart({
-  itemId, name, size = 16, style, color = '#FFFFFF', bubble = true,
-}: { itemId: string; name?: string; size?: number; style?: StyleProp<ViewStyle>; color?: string; bubble?: boolean }) {
+  itemId, name, size = 16, style, color = '#FFFFFF', bubble = true, hitSlop = 8,
+}: { itemId: string; name?: string; size?: number; style?: StyleProp<ViewStyle>; color?: string; bubble?: boolean; hitSlop?: number }) {
   const { user } = useAuth();
   const cfg = useMonetizationConfig();
   const enabled = !!user && cfg.store.enabled;
@@ -43,7 +43,7 @@ export function WishlistHeart({
   return (
     <TouchableOpacity
       onPress={onPress}
-      hitSlop={8}
+      hitSlop={hitSlop}
       activeOpacity={0.8}
       disabled={list.isLoading}
       accessibilityRole="button"

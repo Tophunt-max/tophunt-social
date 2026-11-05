@@ -11,7 +11,7 @@ import { useAppConfig } from '@/src/services/appSettings';
 import { BRAND, SHOP_NAVY, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import images from '@/assets/images';
 import { FONT_FLOOR, MOCK, MOCK_M, font, mfont, px } from './mock';
-import { Laurel, LaurelSprig, PinkBagIcon, ShopBagArt } from './ShopArt';
+import { DiamondSparkle, Laurel, LaurelSprig, PinkBagIcon, ShopBagArt } from './ShopArt';
 
 /**
  * The app's own header logo, exactly as the Home header draws it: the admin
@@ -188,11 +188,21 @@ function NavyPill({ kind, value, live, height, fontSize, icon, padX, gap, onPres
  * Phone header (design mock, scaled by u = width / 340): the app's own logo
  * (same as Home), the dark navy DP coin and Diamond pills (tap → wallet) and
  * the cart with its pink count badge; under it the title block: pink bag icon,
- * "Shop", the tagline with a violet laurel sprig, and the decorative 3D bag on
+ * the title ("Shop" by default), the tagline with a violet laurel sprig, and
+ * the decorative 3D bag (with cyan diamond sparkles for accent 'digital') on
  * the right (not touchable, drawn under the header row). Orders are reached
  * from the Orders card further down the page.
  */
-export function ShopHeaderMobile({ p, u, inner, live, dpcoin, diamonds, cartCount, onCart, onWallet }: HeaderProps) {
+export function ShopHeaderMobile({
+  p, u, inner, live, dpcoin, diamonds, cartCount, onCart, onWallet,
+  title = 'Shop', subtitle = 'Collect • Customize • Upgrade', accent = 'shop',
+}: HeaderProps & {
+  /** Title block text (the Digital tab shows "Digital Shop / Exclusive • Premium • Upgrade"). */
+  title?: string;
+  subtitle?: string;
+  /** Art on the right: the 3D bag ('shop'), or the bag with cyan diamond sparkles ('digital'). */
+  accent?: 'shop' | 'digital';
+}) {
   const H = MOCK_M.header;
   const T = MOCK_M.title;
   const pillH = px(H.pillH, u);
@@ -206,6 +216,13 @@ export function ShopHeaderMobile({ p, u, inner, live, dpcoin, diamonds, cartCoun
     <View style={{ width: inner }}>
       <View style={[styles.abs, { right: -px(6, u), top: px(T.artTop, u), width: art, height: art }]} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <ShopBagArt size={art} />
+        {accent === 'digital' ? (
+          <>
+            <View style={[styles.abs, { left: art * 0.02, top: art * 0.5 }]}><DiamondSparkle size={art * 0.17} /></View>
+            <View style={[styles.abs, { right: art * 0.0, top: art * 0.02 }]}><DiamondSparkle size={art * 0.14} /></View>
+            <View style={[styles.abs, { right: art * 0.04, top: art * 0.78 }]}><DiamondSparkle size={art * 0.12} /></View>
+          </>
+        ) : null}
       </View>
       <View style={[styles.row, { marginTop: px(H.rowTop, u), height: rowH, gap: px(H.gap, u) }]}>
         <BrandLogo maxWidth={inner * 0.3} maxHeight={rowH + px(6, u)} />
@@ -219,10 +236,10 @@ export function ShopHeaderMobile({ p, u, inner, live, dpcoin, diamonds, cartCoun
       <View style={[styles.row, { marginTop: px(T.y - H.h, u), height: px(T.h, u), gap: px(8, u), paddingRight: art * 0.8 }]}>
         <PinkBagIcon size={px(T.bag, u)} outline />
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.title, { fontSize: titleFs, lineHeight: titleFs * 1.15, color: p.text }]} accessibilityRole="header" numberOfLines={1}>Shop</Text>
+          <Text style={[styles.title, { fontSize: titleFs, lineHeight: titleFs * 1.15, color: p.text }]} accessibilityRole="header" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{title}</Text>
           <View style={[styles.row, { gap: px(3, u) }]}>
             <Text style={[styles.tagline, { fontSize: tagFs, color: p.sub }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-              Collect • Customize • Upgrade
+              {subtitle}
             </Text>
             <LaurelSprig width={px(T.laurel * 0.5, u)} height={px(T.laurel, u)} />
           </View>

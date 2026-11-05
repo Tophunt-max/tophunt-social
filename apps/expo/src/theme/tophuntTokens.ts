@@ -69,6 +69,18 @@ export const SHOP_ACCENT_GRADS: Record<'violet' | 'blue' | 'plum' | 'pink' | 'pu
   purple: ['#3B0764', '#6D28D9'],
   gold: ['#92400E', '#D97706'],
 };
+/** Phone Digital tab category cards (VS, Victory, Profile FX, Gifts): violet / magenta, in order. */
+export const SHOP_DIGITAL_CAT_GRADS: [string, string][] = [
+  ['#6D28D9', '#C026D3'],
+  ['#9333EA', '#DB2777'],
+  ['#4C1D95', '#8B5CF6'],
+  ['#BE185D', '#A855F7'],
+];
+/** Phone Digital tab "Special Collections" banner: white → lavender → pink glow (light), deep violet (dark). */
+export const SHOP_SPECIAL_GRAD_LIGHT: [string, string, string] = ['#FFFFFF', '#F1EAFF', '#FFE0EE'];
+export const SHOP_SPECIAL_GRAD_DARK: [string, string, string] = ['#2B1259', '#4C1D95', '#7E22CE'];
+/** Green "FREE" tag (price 0). */
+export const SHOP_TAG_FREE: [string, string] = ['#22C55E', '#16A34A'];
 /** "Shop Bundles" cards: rich violet → magenta. */
 export const SHOP_BUNDLE_GRAD: [string, string, string] = ['#4C1D95', '#7E22CE', '#C026D3'];
 
