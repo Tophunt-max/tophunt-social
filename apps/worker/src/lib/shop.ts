@@ -73,6 +73,8 @@ export interface ProductView {
   compareAtCoins: number | null;
   returnDays: number;
   featured: boolean;
+  /** Listing time (ms): the only "new" signal the app shows a NEW tag from. */
+  createdAt: number;
   variants: { id: string; label: string; inStock: boolean; stock: number }[];
 }
 
@@ -141,9 +143,31 @@ export async function listProducts(env: Env, opts: { category?: string | null; p
       compareAtCoins: compareAtCoinsOf(p.compare_at_inr_paise, Number(p.price_inr_paise), Number(p.shipping_inr_paise), dpCoinInr),
       returnDays: Number(p.return_days),
       featured: !!p.featured,
+      createdAt: Number(p.created_at),
       variants: (byProduct.get(p.id) ?? []).map((v) => ({ id: v.id, label: v.label, stock: Number(v.stock), inStock: Number(v.stock) > 0 })),
     }))
     .filter((p) => p.variants.length > 0);
+}
+
+/** Days an order counts towards "Trending Products". */
+export const TRENDING_DAYS = 30;
+
+/**
+ * Product ids ordered by units sold in the last TRENDING_DAYS days (cancelled /
+ * returned orders do not count), most sold first. The only honest "trending"
+ * signal: real orders, not an admin flag.
+ */
+export async function trendingProductIds(env: Env, limit = 8): Promise<string[]> {
+  const since = Date.now() - TRENDING_DAYS * 86_400_000;
+  const rows = await env.DB.prepare(
+    `SELECT i.product_id AS id, SUM(i.qty) AS q
+     FROM shop_order_items i JOIN shop_orders o ON o.id = i.order_id
+     WHERE o.created_at >= ? AND o.status NOT IN ('cancelled', 'returned')
+     GROUP BY i.product_id ORDER BY q DESC, i.product_id ASC LIMIT ?`,
+  )
+    .bind(since, limit)
+    .all<any>();
+  return (rows.results ?? []).map((r) => String(r.id));
 }
 
 export interface CartLine {

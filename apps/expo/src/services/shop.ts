@@ -24,6 +24,8 @@ export interface ShopProduct {
   compareAtCoins?: number | null;
   returnDays: number;
   featured: boolean;
+  /** Listing time (ms); older servers omit it, so a NEW tag needs it present. */
+  createdAt?: number;
   variants: ShopVariant[];
 }
 
@@ -67,10 +69,19 @@ export const SHOP_KEYS = {
   xp: ['earning', 'xp-conversion'] as const,
 };
 
+export interface ShopProductsResult {
+  products: ShopProduct[];
+  /** Product ids by units sold in the last 30 days (worker shop.ts trendingProductIds); older servers send none. */
+  trending: string[];
+}
+
 export function useShopProducts(enabled: boolean) {
   return useQuery({
     queryKey: SHOP_KEYS.products,
-    queryFn: async () => ((await callApi('getShopProducts')) as { products: ShopProduct[] }).products,
+    queryFn: async () => {
+      const body = (await callApi('getShopProducts')) as { products: ShopProduct[]; trending?: string[] };
+      return { products: body.products, trending: body.trending ?? [] };
+    },
     enabled,
     staleTime: 30_000,
   });
@@ -191,6 +202,44 @@ AsyncStorage.getItem(CART_KEY)
 useCart.subscribe((s) => {
   if (!cartHydrated) return;
   AsyncStorage.setItem(CART_KEY, JSON.stringify({ lines: s.lines })).catch(() => {});
+});
+
+// ------------------------------------------------------------------ saved products (Physical tab hearts)
+
+/**
+ * Products the viewer hearted on the Physical tab. Device-local (like the
+ * cart): the server wishlist accepts digital store items only. Persisted
+ * manually for the same import.meta reason as the cart above.
+ */
+interface SavedProductsState {
+  ids: string[];
+  toggle: (productId: string) => void;
+}
+
+const SAVED_KEY = 'tophunt-shop-saved';
+
+export const useSavedProducts = create<SavedProductsState>()((set) => ({
+  ids: [],
+  toggle: (productId) =>
+    set((s) => ({ ids: s.ids.includes(productId) ? s.ids.filter((x) => x !== productId) : [productId, ...s.ids].slice(0, 200) })),
+}));
+
+let savedHydrated = false;
+AsyncStorage.getItem(SAVED_KEY)
+  .then((raw) => {
+    try {
+      const v = raw ? JSON.parse(raw) : null;
+      const ids = Array.isArray(v?.ids) ? v.ids.filter((x: unknown) => typeof x === 'string').slice(0, 200) : [];
+      if (ids.length && useSavedProducts.getState().ids.length === 0) useSavedProducts.setState({ ids });
+    } catch { /* a broken blob just starts empty */ }
+  })
+  .catch(() => {})
+  .finally(() => {
+    savedHydrated = true;
+  });
+useSavedProducts.subscribe((s) => {
+  if (!savedHydrated) return;
+  AsyncStorage.setItem(SAVED_KEY, JSON.stringify({ ids: s.ids })).catch(() => {});
 });
 
 /** Re-price the cart against the current catalogue; drops lines that are gone. */

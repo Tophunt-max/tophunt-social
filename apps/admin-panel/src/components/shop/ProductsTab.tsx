@@ -7,6 +7,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Badge } from "@/components/ui/Badge";
 import { fmtNumber } from "@/lib/format";
 import { Button, Card, Notice, Num, Text, Toggle, field, inr } from "@/components/monetization/shared";
+import { ImageField } from "@/components/shop/ShopHomeTab";
 
 /**
  * An image URL safe to put in <img src>: parsed, https only, re-serialised by
@@ -84,7 +85,150 @@ export function ProductsTab() {
         />
       </Card>
       {editing && <ProductDialog product={editing === "new" ? null : editing} rate={rate} onClose={() => setEditing(null)} onDone={() => qc.invalidateQueries({ queryKey: ["shop-products"] })} />}
+      <PhysicalHomeCard products={q.data?.products ?? []} physical={cfgQ.data?.effective?.shop?.physical} configLoaded={!!cfgQ.data} onSaved={() => qc.invalidateQueries({ queryKey: ["monetization-config"] })} />
     </div>
+  );
+}
+
+/** Same limits as the Worker (lib/shopHomeConfig.ts PHYSICAL_LIMITS). */
+const MAX_CATEGORIES = 12;
+const MAX_EXCLUSIVE = 12;
+const CATEGORY_KEY_RE = /^[a-z0-9_-]{2,40}$/;
+
+interface CatDraft {
+  key: string;
+  label: string;
+  imageUrl: string;
+  sort: number;
+}
+
+/**
+ * The app Physical tab's admin-managed blocks: the Categories row (tiles with
+ * an uploaded image, in sort order) and the Exclusive Collection (picked
+ * products, shown in this order). Saved into appConfig.monetization.shop
+ * .physical; an empty list hides the block in the app (categories then fall
+ * back to the derived icon tiles).
+ */
+function PhysicalHomeCard({ products, physical, configLoaded, onSaved }: { products: any[]; physical: any; configLoaded: boolean; onSaved: () => void }) {
+  const [cats, setCats] = useState<CatDraft[] | null>(null);
+  const [exclusive, setExclusive] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (configLoaded && cats === null) setCats((physical?.categories ?? []).map((c: any) => ({ key: c.key, label: c.label, imageUrl: c.imageUrl ?? "", sort: c.sort ?? 0 })));
+    if (configLoaded && exclusive === null) setExclusive([...(physical?.exclusive ?? [])]);
+  }, [configLoaded, physical, cats, exclusive]);
+
+  const knownKeys = [...new Set(products.map((p) => String(p.category)))].filter(Boolean);
+  const problems: string[] = [];
+  if (cats) {
+    const seen = new Set<string>();
+    for (const [i, c] of cats.entries()) {
+      if (!CATEGORY_KEY_RE.test(c.key)) problems.push(`Category ${i + 1}: the key must be 2-40 lowercase letters, digits, - or _ (the product's category).`);
+      if (seen.has(c.key)) problems.push(`Category "${c.key}" is listed twice.`);
+      seen.add(c.key);
+      if (c.label.trim().length < 2 || c.label.trim().length > 40) problems.push(`Category "${c.key || i + 1}": the label must be 2-40 characters.`);
+    }
+  }
+  const saveCats = useMutation({
+    mutationFn: (rows: CatDraft[]) => api.saveAppSettings({ monetization: { shop: { physical: { categories: rows.map((r) => ({ key: r.key.trim(), label: r.label.trim(), imageUrl: r.imageUrl.trim() || null, sort: Math.max(0, Math.floor(Number(r.sort) || 0)) })) } } } }),
+    onSuccess: () => {
+      toast.success("Categories saved. The Physical tab shows them in sort order.");
+      onSaved();
+    },
+    onError: (e) => toast.error(describeError(e)),
+  });
+  const saveExclusive = useMutation({
+    mutationFn: (ids: string[]) => api.saveAppSettings({ monetization: { shop: { physical: { exclusive: ids } } } }),
+    onSuccess: () => {
+      toast.success("Exclusive Collection saved");
+      onSaved();
+    },
+    onError: (e) => toast.error(describeError(e)),
+  });
+
+  if (cats === null || exclusive === null) return null;
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const setCat = (i: number, patch: Partial<CatDraft>) => setCats((rows) => (rows ?? []).map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const addable = products.filter((p) => !exclusive.includes(p.id));
+
+  return (
+    <>
+      <Card
+        title="Physical tab categories"
+        subtitle="The Categories row of the app's Physical tab: a tile per product category with its own image, in sort order. A category with nothing on sale is hidden in the app; with no categories here the app derives tiles from the products."
+        action={<Button onClick={() => cats.length < MAX_CATEGORIES && setCats([...cats, { key: knownKeys.find((k) => !cats.some((c) => c.key === k)) ?? "general", label: "", imageUrl: "", sort: (cats[cats.length - 1]?.sort ?? -1) + 1 }])} disabled={cats.length >= MAX_CATEGORIES}>Add category</Button>}
+      >
+        {cats.length ? (
+          <div className="grid sm:grid-cols-2 gap-4">
+            {cats.map((c, i) => (
+              <div key={i} className="rounded-xl border border-border p-3 space-y-3">
+                <ImageField label={`Tile image (${c.label || c.key || `category ${i + 1}`})`} hint="Square image reads best. JPEG, PNG or WebP, max 5 MB." value={c.imageUrl} onChange={(v) => setCat(i, { imageUrl: v })} aspect="1/1" uploadFn={api.uploadShopCategory} />
+                <div className="grid grid-cols-[1fr_1fr_80px] gap-2 items-end">
+                  <label className="block">
+                    <span className="text-xs text-muted-foreground mb-1 block">Category key</span>
+                    <input className={field} list="physical-cat-keys" value={c.key} onChange={(e) => setCat(i, { key: e.target.value.toLowerCase() })} placeholder="t-shirts" />
+                  </label>
+                  <Text label="Label" value={c.label} onChange={(v) => setCat(i, { label: v })} />
+                  <Num label="Sort" value={c.sort} onChange={(v) => setCat(i, { sort: v })} />
+                </div>
+                <div className="flex justify-end">
+                  <button className="text-red-600 text-xs font-semibold" onClick={() => setCats(cats.filter((_, j) => j !== i))}>Remove</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No categories yet — the app derives the tiles from the products (pink outline icons).</p>
+        )}
+        <datalist id="physical-cat-keys">{knownKeys.map((k) => <option key={k} value={k} />)}</datalist>
+        {problems.length ? <Notice tone="warning">{problems[0]}</Notice> : null}
+        <div className="flex justify-end mt-3">
+          <Button onClick={() => saveCats.mutate(cats)} disabled={saveCats.isPending || !!problems.length}>{saveCats.isPending ? "Saving…" : "Save categories"}</Button>
+        </div>
+      </Card>
+
+      <Card
+        title="Exclusive Collection"
+        subtitle="The app's Physical tab shows these products as the Exclusive Collection shelf, in this order (out-of-stock products are hidden in the app)."
+      >
+        {exclusive.length ? (
+          <ul className="space-y-2">
+            {exclusive.map((id, i) => {
+              const p = byId.get(id);
+              return (
+                <li key={id} className="flex items-center gap-3 rounded-xl border border-border px-3 py-2">
+                  <span className="text-xs font-bold text-muted-foreground w-5">{i + 1}.</span>
+                  {p?.images?.[0] ? <img src={p.images[0]} alt="" className="w-9 h-9 rounded-lg object-cover" /> : <div className="w-9 h-9 rounded-lg bg-secondary" />}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold truncate">{p?.title ?? id}</p>
+                    <p className="text-xs text-muted-foreground">{id}{p ? ` · ${fmtNumber(p.priceCoins)} DP coin` : " · not on sale anymore"}</p>
+                  </div>
+                  <button className="text-muted-foreground disabled:opacity-30 px-1" disabled={i === 0} onClick={() => { const next = [...exclusive]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; setExclusive(next); }} aria-label="Move up">▲</button>
+                  <button className="text-muted-foreground disabled:opacity-30 px-1" disabled={i === exclusive.length - 1} onClick={() => { const next = [...exclusive]; [next[i + 1], next[i]] = [next[i], next[i + 1]]; setExclusive(next); }} aria-label="Move down">▼</button>
+                  <button className="text-red-600 text-xs font-semibold px-1" onClick={() => setExclusive(exclusive.filter((x) => x !== id))}>Remove</button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">No products picked — the app hides the Exclusive Collection shelf.</p>
+        )}
+        <div className="flex items-center gap-2 mt-3">
+          <select
+            className={field}
+            value=""
+            onChange={(e) => {
+              const id = e.target.value;
+              if (id && !exclusive.includes(id) && exclusive.length < MAX_EXCLUSIVE) setExclusive([...exclusive, id]);
+            }}
+          >
+            <option value="">{addable.length ? "Add a product…" : "All products are picked"}</option>
+            {addable.map((p) => <option key={p.id} value={p.id}>{p.title} · {fmtNumber(p.priceCoins)} DP</option>)}
+          </select>
+          <Button onClick={() => saveExclusive.mutate(exclusive)} disabled={saveExclusive.isPending}>{saveExclusive.isPending ? "Saving…" : "Save collection"}</Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-2">{exclusive.length}/{MAX_EXCLUSIVE} picked.</p>
+      </Card>
+    </>
   );
 }
 

@@ -17,7 +17,7 @@ import { recordAdEvents } from "./adMetrics";
 import { adsSuppressedUntil, ivtCheck } from "./adStats";
 import { recordCampaignEvent } from "./sponsored";
 import { createNotification } from "./notify";
-import { listProducts, loadOrder, placeOrder, transitionOrder } from "./shop";
+import { listProducts, loadOrder, placeOrder, transitionOrder, trendingProductIds } from "./shop";
 import { convertXp, xpConversionStatus } from "./xpConversion";
 import { parseMonetizationConfig } from "./monetizationConfig";
 import { getAppConfig } from "./settings";
@@ -177,7 +177,8 @@ export async function handleMonetizationAction(action: string, ctx: Ctx): Promis
       await assertShopOpen(env);
       const category = typeof body.category === "string" && /^[a-z0-9_-]{2,40}$/.test(body.category) ? body.category : null;
       const productId = typeof body.productId === "string" && body.productId.length <= 64 ? body.productId : null;
-      return { products: await listProducts(env, { category, productId }) };
+      const trending = productId ? [] : await trendingProductIds(env);
+      return { products: await listProducts(env, { category, productId }), trending };
     }
 
     case "placeShopOrder": {

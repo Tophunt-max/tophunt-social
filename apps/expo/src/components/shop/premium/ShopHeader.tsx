@@ -11,7 +11,7 @@ import { useAppConfig } from '@/src/services/appSettings';
 import { BRAND, SHOP_NAVY, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import images from '@/assets/images';
 import { FONT_FLOOR, MOCK, MOCK_M, font, mfont, px } from './mock';
-import { DiamondSparkle, Laurel, LaurelSprig, PinkBagIcon, ShopBagArt } from './ShopArt';
+import { CubeLine, DiamondSparkle, Laurel, LaurelSprig, PinkBagIcon, ShopBagArt } from './ShopArt';
 
 /**
  * The app's own header logo, exactly as the Home header draws it: the admin
@@ -198,11 +198,11 @@ export function ShopHeaderMobile({
   p, u, inner, live, dpcoin, diamonds, cartCount, onCart, onWallet,
   title = 'Shop', subtitle = 'Collect • Customize • Upgrade', accent = 'shop',
 }: HeaderProps & {
-  /** Title block text (the Digital tab shows "Digital Shop / Exclusive • Premium • Upgrade"). */
+  /** Title block text (the Digital tab shows "Digital Shop / Exclusive • Premium • Upgrade", the Physical tab "Physical Shop / Redeem • Collect • Get Delivered"). */
   title?: string;
   subtitle?: string;
-  /** Art on the right: the 3D bag ('shop'), or the bag with cyan diamond sparkles ('digital'). */
-  accent?: 'shop' | 'digital';
+  /** Art on the right: the 3D bag ('shop'), or the bag with cyan diamond sparkles ('digital'); the title icon: the pink bag, or the pink cube ('physical'). */
+  accent?: 'shop' | 'digital' | 'physical';
 }) {
   const H = MOCK_M.header;
   const T = MOCK_M.title;
@@ -235,7 +235,7 @@ export function ShopHeaderMobile({
         </View>
       </View>
       <View style={[styles.row, { marginTop: px(T.y - H.h, u), height: px(T.h, u), gap: px(8, u), paddingRight: art * 0.8 }]}>
-        <PinkBagIcon size={px(T.bag, u)} outline />
+        {accent === 'physical' ? <CubeLine size={px(T.bag, u)} color={BRAND} /> : <PinkBagIcon size={px(T.bag, u)} outline />}
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.title, { fontSize: titleFs, lineHeight: titleFs * 1.15, color: p.text }]} accessibilityRole="header" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{title}</Text>
           <View style={[styles.row, { gap: px(3, u) }]}>

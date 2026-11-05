@@ -414,6 +414,10 @@ const uploadExploreBanner = (file: File, onProgress?: UploadProgressHandler) =>
 const uploadShopBanner = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/shop-banner", file, onProgress, "Shop image upload failed. Check your connection and try again.");
 
+/** Physical tab category tile image (Worker POST /admin/media/shop-category). */
+const uploadShopCategory = (file: File, onProgress?: UploadProgressHandler) =>
+  uploadBinary("/admin/media/shop-category", file, onProgress, "Category image upload failed. Check your connection and try again.");
+
 /** Digital item artwork, WebP only (Worker POST /admin/media/shop-item-art). */
 const uploadShopItemArt = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/shop-item-art", file, onProgress, "Artwork upload failed. Check your connection and try again.");
@@ -1086,6 +1090,7 @@ export const api = {
   uploadOnboardingImage,
   uploadExploreBanner,
   uploadShopBanner,
+  uploadShopCategory,
   uploadShopItemArt,
   onboardingStats: (days = 30) => get<OnboardingStats>(`/admin/onboarding/stats?days=${days}`),
   verificationReward: () => get<any>("/admin/verification-reward"),

@@ -79,6 +79,15 @@ export const SHOP_DIGITAL_CAT_GRADS: [string, string][] = [
 /** Phone Digital tab "Special Collections" banner: white → lavender → pink glow (light), deep violet (dark). */
 export const SHOP_SPECIAL_GRAD_LIGHT: [string, string, string] = ['#FFFFFF', '#F1EAFF', '#FFE0EE'];
 export const SHOP_SPECIAL_GRAD_DARK: [string, string, string] = ['#2B1259', '#4C1D95', '#7E22CE'];
+/** Phone Physical tab Featured Rewards tag pills (design mock): HOT red, NEW violet, POPULAR pink, LIMITED deep violet. */
+export const SHOP_PRODUCT_TAG_GRADS: Record<'hot' | 'new' | 'popular' | 'limited', [string, string]> = {
+  hot: ['#FF6B81', '#F43F5E'],
+  new: ['#A78BFA', '#8B5CF6'],
+  popular: ['#F472B6', '#EC4899'],
+  limited: ['#8B5CF6', '#7C3AED'],
+};
+/** Phone Physical tab "Redeem & Get Real Rewards" banner: pink → magenta → violet. */
+export const SHOP_REDEEM_GRAD: [string, string, string] = ['#EC4899', '#D946EF', '#7C3AED'];
 /** Green "FREE" tag (price 0). */
 export const SHOP_TAG_FREE: [string, string] = ['#22C55E', '#16A34A'];
 /** "Shop Bundles" cards: rich violet → magenta. */
