@@ -410,25 +410,30 @@ export default function ShopScreen() {
     : featured.length
       ? () => router.push('/shop/featured' as any)
       : onBrowseAll;
-  const showDigitalHome = mobile && !browseAll && isDefaultDigitalFilter(filter);
+  // The Digital home (design mock) on every screen size; on wide screens it is a centred phone-width column.
+  const showDigitalHome = !browseAll && isDefaultDigitalFilter(filter);
+  const dColW = mobile ? inner : Math.min(inner, 520);
+  const dU = mobile ? uM : mobileScale(dColW);
   const digitalHome = cfg.store.enabled && store.isLoading ? (
-    <View style={{ paddingHorizontal: margin }}><DigitalHomeSkeleton p={p} u={uM} inner={inner} /></View>
+    <View style={{ paddingHorizontal: margin, alignItems: 'center' }}><DigitalHomeSkeleton p={p} u={dU} inner={dColW} /></View>
   ) : digitalState ?? (
-    <View style={{ paddingHorizontal: margin }}>
-      <DigitalHomeMobile
-        p={p}
-        u={uM}
-        inner={inner}
-        now={now}
-        viewer={viewer}
-        shelves={shelves}
-        specials={specials}
-        onOpenItem={openItem}
-        onAll={onShelfAll}
-        onSpecial={onSpecial}
-        onExplore={onExplore}
-        onBrowseAll={onBrowseAll}
-      />
+    <View style={{ paddingHorizontal: margin, alignItems: 'center' }}>
+      <View style={{ width: dColW }}>
+        <DigitalHomeMobile
+          p={p}
+          u={dU}
+          inner={dColW}
+          now={now}
+          viewer={viewer}
+          shelves={shelves}
+          specials={specials}
+          onOpenItem={openItem}
+          onAll={onShelfAll}
+          onSpecial={onSpecial}
+          onExplore={onExplore}
+          onBrowseAll={onBrowseAll}
+        />
+      </View>
     </View>
   );
 

@@ -1,7 +1,6 @@
 /**
  * PHONE layout of the Shop "Digital" tab (design mock), shown when the tab
- * is opened without a filter: Premium Themes, Avatar Frames, Badges
- * Collection, Titles Collection, the 2×2 category cards (VS Effects, Victory
+ * is opened without a filter: Premium Themes, Badges Collection, Titles Collection, the 2×2 category cards (VS Effects, Victory
  * Animations, Profile Effects, Virtual Gifts), the "Special Collections"
  * banner and a link to the full catalogue. A filtered Digital tab (wishlist,
  * ids, rarity, discounts, type, search) keeps the DigitalCatalogue.
@@ -20,8 +19,7 @@ import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-nativ
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { CosmeticPreview } from '@/src/components/gamification/RewardBits';
-import { CosmeticTitleChip, ThemeBackdrop } from '@/src/components/gamification/CosmeticBits';
+import { ThemeBackdrop } from '@/src/components/gamification/CosmeticBits';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
 import { Ionicons } from '@/src/lib/icons';
 import { cosmeticTier } from '@/src/lib/cosmeticArt';
@@ -42,11 +40,11 @@ import {
   type TophuntPalette,
 } from '@/src/theme/tophunt';
 import { MOCK_M, cellWidth, mfont, px } from './mock';
-import { ProductPreview } from './ProductPreview';
+import { ItemArt } from './ProductPreview';
 import { BadgeIcon, DiamondSparkle, FlameIcon, TileArt, TrophyIcon, VioletCrownIcon, WingedCrownArt } from './ShopArt';
 import { ArrowCircle, SectionHeaderM } from './ShopHomeMobile';
 import { WishlistHeart } from './WishlistHeart';
-import { ArtStage, lavenderShadow, shopBorder } from './surface';
+import { lavenderShadow, shopBorder } from './surface';
 
 const WHITE = TH.colors.white;
 
@@ -55,9 +53,9 @@ export const DIGITAL_M = {
   /** Themes / Frames: 4 dark cards (≈ width / 4 × 100 pt on a 390 phone). */
   dark: { cols: 4, gap: 6, h: 88, radius: 10.5, name: 8.5, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 10 },
   /** Badges: 5 cards, art ≈ 44 pt. */
-  badge: { cols: 5, gap: 5, h: 100, radius: 10, art: 38, name: 8, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
+  badge: { cols: 5, gap: 5, h: 100, radius: 10, art: 42, name: 8, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
   /** Titles: 4 cards with the title plate on a small dark stage. */
-  title: { cols: 4, gap: 6, h: 84, radius: 10, plateH: 30, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
+  title: { cols: 4, gap: 6, h: 92, radius: 10, plateH: 30, name: 7.5, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
   /** 2 × 2 gradient category cards (≈ half width × 70 pt). */
   special: { cols: 2, gap: 7, h: 61, radius: 12, artW: 40, artH: 34, title: 10.5, sub: 7.5, price: 8.5, coin: 9, arrow: 18 },
   /** "Special Collections" banner (≈ 90 pt). */
@@ -123,8 +121,8 @@ const isPremiumArt = (i: StoreItemView) => cosmeticTier(i) === 'premium';
 // ------------------------------------------------------------------ Themes / Frames (dark cards)
 
 /**
- * Dark card of the Premium Themes / Avatar Frames rows: the theme art fills
- * the card (a frame is drawn on the viewer's avatar instead), tag top-left,
+ * Dark card of the Premium Themes row: the theme art fills
+ * the card (any other type shows its own artwork, never the viewer's photo), tag top-left,
  * white name, dark price pill bottom-left and a white heart bottom-right.
  */
 export const DarkShelfCard = React.memo(function DarkShelfCard({
@@ -153,7 +151,7 @@ export const DarkShelfCard = React.memo(function DarkShelfCard({
             </>
           ) : (
             <View style={[styles.abs, { top: artTop, left: (width - artSize) / 2 }]}>
-              <ProductPreview item={item} viewer={viewer} width={artSize} height={artSize} radius={px(6, u)} bare />
+              <ItemArt item={item} width={artSize} height={artSize} />
             </View>
           )}
           <Text style={[styles.abs, styles.darkName, { top: nameTop, left: pad, right: pad, fontSize: nameFs, lineHeight: nameFs * 1.2 }]} numberOfLines={1}>{item.name}</Text>
@@ -205,11 +203,7 @@ export const BadgeShelfCard = React.memo(function BadgeShelfCard({
     <LightCard p={p} u={u} width={width} height={px(B.h, u)} radius={B.radius} a11y={`${item.name}, ${tag.label}, ${priceA11y(item)}. Details kholo`} onPress={() => onOpen(item.itemId)}>
       <View style={[styles.col, { paddingTop: px(5, u), paddingBottom: px(4, u), paddingHorizontal: px(3, u), gap: px(3, u) }]}>
         <TagPill tag={tag} u={u} height={B.tagH} size={B.tag} />
-        <ArtStage width={d} height={d} radius={d / 2}>
-          <View style={[styles.center, { width: d, height: d }]}>
-            <CosmeticPreview item={{ id: item.itemId, type: item.type, name: item.name, rarity: item.rarity, asset: item.asset }} size={d * 0.8} />
-          </View>
-        </ArtStage>
+        <ItemArt item={item} width={d} height={d} />
         <Text style={[styles.cardName, { fontSize: nameFs, lineHeight: nameFs * 1.15, minHeight: nameFs * 1.15 * 2, color: ink }]} numberOfLines={2}>{item.name}</Text>
         <View style={[styles.rowCenter, { gap: px(2, u), alignSelf: 'stretch', justifyContent: 'center' }]}>
           <View style={{ flexShrink: 1, minWidth: 0 }}><Price item={item} u={u} size={B.price} coin={B.coin} color={ink} /></View>
@@ -234,11 +228,8 @@ export const TitleShelfCard = React.memo(function TitleShelfCard({
   return (
     <LightCard p={p} u={u} width={width} height={px(T.h, u)} radius={T.radius} a11y={`Title ${text}: ${item.name}, ${tag.label}, ${priceA11y(item)}. Details kholo`} onPress={() => onOpen(item.itemId)}>
       <View style={[styles.col, { paddingVertical: px(5, u), paddingHorizontal: px(4, u), gap: px(4, u), justifyContent: 'space-between' }]}>
-        <ArtStage width={plateW} height={plateH} radius={px(7, u)}>
-          <View style={[styles.center, { width: plateW, height: plateH, paddingHorizontal: px(3, u) }]}>
-            <CosmeticTitleChip title={{ id: item.itemId, name: item.name, rarity: item.rarity, text, asset: item.asset } as any} compact />
-          </View>
-        </ArtStage>
+        <ItemArt item={item} width={plateW} height={plateH} />
+        <Text style={[styles.cardName, { fontSize: mfont(T.name, u), lineHeight: mfont(T.name, u) * 1.2, color: ink }]} numberOfLines={1}>{text}</Text>
         <TagPill tag={tag} u={u} height={T.tagH} size={T.tag} />
         <View style={[styles.rowCenter, { gap: px(3, u), alignSelf: 'stretch', justifyContent: 'center' }]}>
           <View style={{ flexShrink: 1, minWidth: 0 }}><Price item={item} u={u} size={T.price} coin={T.coin} color={ink} /></View>
@@ -404,7 +395,7 @@ export interface DigitalHomeProps {
   onBrowseAll: () => void;
 }
 
-/** The Digital tab body on phones, top to bottom as the design mock (plus Avatar Frames after Premium Themes). */
+/** The Digital tab body, top to bottom exactly as the design mock. Cards show the item's own artwork (never the viewer's photo). */
 export function DigitalHomeMobile({ p, u, inner, now, viewer, shelves, specials, onOpenItem, onAll, onSpecial, onExplore, onBrowseAll }: DigitalHomeProps) {
   const icon = px(MOCK_M.section.icon, u);
   const gap = px(MOCK_M.gap, u);
@@ -428,13 +419,6 @@ export function DigitalHomeMobile({ p, u, inner, now, viewer, shelves, specials,
         <View style={{ marginTop: gap }}>
           <SectionHeaderM p={p} u={u} icon={<FlameIcon size={icon} />} title="Premium Themes" action={{ label: 'View All', onPress: () => onAll('theme') }} />
           {darkRow(shelves.theme)}
-        </View>
-      ) : null}
-
-      {shelves.frame.length ? (
-        <View style={{ marginTop: gap }}>
-          <SectionHeaderM p={p} u={u} icon={<TileArt tile="frame" width={icon * 1.2} height={icon} />} title="Avatar Frames" action={{ label: 'View All', onPress: () => onAll('frame') }} />
-          {darkRow(shelves.frame)}
         </View>
       ) : null}
 
