@@ -8,7 +8,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { toast } from "@/lib/toast";
 import { fmtDateTime, exportCsv } from "@/lib/format";
 import { Search, Ban, CheckCircle2, Trash2, Wallet, ShieldCheck, Eye, BadgeCheck, Star, Download, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
-import { DiamondIcon } from "@/components/ui/DiamondIcon";
+import { CurrencyText, DiamondIcon } from "@/components/ui/DiamondIcon";
 
 export default function UsersPage() {
   const qc = useQueryClient();
@@ -305,7 +305,7 @@ function UserDetail({ id, onClose, onDone }: { id: string; onClose: () => void; 
               </div>
               <div className="min-w-0">
                 <p className="font-bold text-foreground truncate flex items-center gap-1">{u.fullName || u.username} {u.verified && <BadgeCheck size={15} className="text-blue-500" />}</p>
-                <p className="text-xs text-muted-foreground truncate">Lv {u.level ?? 0} · 🪙 {fmtNumber(Math.max(0, Number(u.Dpcoin || 0) - Number(u.lockedCoins || 0)))} DP coin · 💎 {fmtNumber(Math.min(Number(u.Dpcoin || 0), Number(u.lockedCoins || 0)))} Diamond · {u.stats?.followersCount ?? 0} followers</p>
+                <p className="text-xs text-muted-foreground truncate"><CurrencyText>Lv {u.level ?? 0} · 🪙 {fmtNumber(Math.max(0, Number(u.Dpcoin || 0) - Number(u.lockedCoins || 0)))} DP coin · 💎 {fmtNumber(Math.min(Number(u.Dpcoin || 0), Number(u.lockedCoins || 0)))} Diamond · {u.stats?.followersCount ?? 0} followers</CurrencyText></p>
               </div>
               <div className="ml-auto flex gap-2">
                 <button onClick={() => flagMut.mutate({ verified: !u.verified })} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${u.verified ? "bg-blue-100 text-blue-700" : "bg-secondary text-foreground"}`}>{u.verified ? "Verified ✓" : "Verify"}</button>
@@ -364,9 +364,9 @@ function UserDetail({ id, onClose, onDone }: { id: string; onClose: () => void; 
                         const f = (n: number) => `${n >= 0 ? "+" : ""}${fmtNumber(n)}`;
                         return (
                           <>
-                            {c ? <span className={c >= 0 ? "text-green-600" : "text-red-600"}>{f(c)} 🪙</span> : null}
+                            {c ? <span className={c >= 0 ? "text-green-600" : "text-red-600"}><CurrencyText>{f(c)} 🪙</CurrencyText></span> : null}
                             {c && d ? " " : null}
-                            {d ? <span className={d >= 0 ? "text-cyan-700" : "text-red-600"}>{f(d)} 💎</span> : null}
+                            {d ? <span className={d >= 0 ? "text-cyan-700" : "text-red-600"}><CurrencyText>{f(d)} 💎</CurrencyText></span> : null}
                             {!c && !d ? "0" : null}
                           </>
                         );
@@ -397,8 +397,8 @@ function UserShopping({ uid }: { uid: string }) {
   if (q.isLoading || !d) return <p className="text-sm text-muted-foreground">Loading…</p>;
   const stat = (label: string, value: string) => (
     <div className="rounded-xl bg-secondary/50 p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="font-semibold text-foreground">{value}</p>
+      <p className="text-xs text-muted-foreground"><CurrencyText>{label}</CurrencyText></p>
+      <p className="font-semibold text-foreground"><CurrencyText>{value}</CurrencyText></p>
     </div>
   );
   return (

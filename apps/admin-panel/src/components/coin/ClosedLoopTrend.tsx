@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import { api } from "@/lib/api";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /**
  * Earning vs Shopping, per day (worker GET /admin/monetization/daily).
@@ -13,7 +14,7 @@ export function ClosedLoopTrend({ days = 14, title = "Earning vs Shopping" }: { 
     <div className="bg-card border border-border rounded-2xl p-5">
       <h3 className="font-bold text-foreground mb-1">{title}</h3>
       <p className="text-xs text-muted-foreground mb-4">
-        💎 Diamonds earned (free) · 🪙 DP coin won in contests · 🪙 DP coin spent on gifts, digital items and the shop (last {days} days)
+        <CurrencyText>💎 Diamonds earned (free) · 🪙 DP coin won in contests · 🪙 DP coin spent on gifts, digital items and the shop (last {days} days)</CurrencyText>
       </p>
       <div className="h-64">
         {q.isLoading ? (

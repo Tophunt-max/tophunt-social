@@ -20,10 +20,14 @@ export interface DiamondIconProps {
   /** Ignored (the artwork is full colour). Kept so existing callers compile. */
   color?: string;
   style?: StyleProp<ViewStyle>;
+  /** Greyed-out look (disabled / not affordable). */
+  muted?: boolean;
+  /** Spoken label; omit when nearby text already names the currency (the icon is then hidden from screen readers). */
+  accessibilityLabel?: string;
 }
 
-export function DiamondIcon({ size = 16, style }: DiamondIconProps) {
-  return <CurrencyImage kind="diamond" size={size} style={style} />;
+export function DiamondIcon({ size = 16, style, muted, accessibilityLabel }: DiamondIconProps) {
+  return <CurrencyImage kind="diamond" size={size} style={style} muted={muted} accessibilityLabel={accessibilityLabel} />;
 }
 
 export default DiamondIcon;

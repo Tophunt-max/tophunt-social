@@ -8,6 +8,7 @@ import { Table } from "@/components/ui/Table";
 import { Button, Card, Notice, Num, Toggle, inr } from "@/components/monetization/shared";
 import { ContestRewardsCard, XpConversionCard } from "@/components/coin/ClosedLoopCards";
 import { FraudRulesTab } from "@/components/shop/FraudRulesTab";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /**
  * Coin Economy around the three coins (worker GET /admin/monetization/coins):
@@ -42,7 +43,7 @@ export function useCoins(days = 30) {
 function Big({ emoji, title, value, sub, tone }: { emoji: string; title: string; value: string; sub: string; tone: string }) {
   return (
     <div className={`rounded-2xl p-4 text-white ${tone}`}>
-      <p className="text-sm font-semibold opacity-90">{emoji} {title}</p>
+      <p className="text-sm font-semibold opacity-90"><CurrencyText>{`${emoji} ${title}`}</CurrencyText></p>
       <p className="text-2xl font-bold mt-1">{value}</p>
       <p className="text-xs opacity-90 mt-1">{sub}</p>
     </div>
@@ -52,7 +53,7 @@ function Big({ emoji, title, value, sub, tone }: { emoji: string; title: string;
 const Arrow = ({ label }: { label: string }) => (
   <div className="hidden lg:flex flex-col items-center justify-center text-xs text-muted-foreground">
     <span className="text-xl">→</span>
-    <span>{label}</span>
+    <span><CurrencyText>{label}</CurrencyText></span>
   </div>
 );
 
@@ -81,8 +82,8 @@ export function CoinsLoop() {
 
 const Mini = ({ label, value }: { label: string; value: string }) => (
   <div className="rounded-xl border border-border bg-card p-3">
-    <p className="text-xs text-muted-foreground">{label}</p>
-    <p className="font-bold text-foreground">{value}</p>
+    <p className="text-xs text-muted-foreground"><CurrencyText>{label}</CurrencyText></p>
+    <p className="font-bold text-foreground"><CurrencyText>{value}</CurrencyText></p>
   </div>
 );
 
@@ -148,7 +149,7 @@ export function DiamondTab({ children, contests }: { children: ReactNode; contes
         {children}
       </div>
       <div>
-        <p className="font-bold text-foreground mb-3">Contests: 💎 entry → 🪙 prize</p>
+        <p className="font-bold text-foreground mb-3"><CurrencyText>Contests: 💎 entry → 🪙 prize</CurrencyText></p>
         {contests}
       </div>
     </div>

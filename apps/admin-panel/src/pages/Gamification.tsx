@@ -15,6 +15,7 @@ import {
   MilestonesEditor, QuestsEditor, RanksEditor, fillMilestoneRows,
   type MilestoneRow, type QuestRow, type RankRow,
 } from "@/components/gamification/ProgressionEditors";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /**
  * Gamification admin: XP rules, levels, achievements, cosmetics, seasons,
@@ -516,7 +517,7 @@ function Seasons() {
           { key: "name", header: "Season", render: (s: any) => <div><p className="font-medium">{s.name}</p><p className="text-xs text-muted-foreground">{fmtDateTime(s.starts_at)} → {fmtDateTime(s.ends_at)}</p></div> },
           { key: "status", header: "Status", render: (s: any) => <Badge>{s.status}</Badge> },
           { key: "top", header: "Top N", render: (s: any) => <span>{s.top_n}</span> },
-          { key: "rewards", header: "Rewards", render: (s: any) => <span className="text-xs">{s.rewards.map((r: any) => `#${r.fromRank}-${r.toRank}: ${r.coins ? `${r.coins}💎 ` : ""}${r.itemId ?? ""}`).join(" · ") || "—"}</span> },
+          { key: "rewards", header: "Rewards", render: (s: any) => <span className="text-xs"><CurrencyText>{s.rewards.map((r: any) => `#${r.fromRank}-${r.toRank}: ${r.coins ? `${r.coins}💎 ` : ""}${r.itemId ?? ""}`).join(" · ") || "—"}</CurrencyText></span> },
           { key: "act", header: "", render: (s: any) => (
             <div className="flex gap-2">
               {["scheduled", "active"].includes(s.status) && <button className={btn2} onClick={() => startEdit(s)}>Edit</button>}

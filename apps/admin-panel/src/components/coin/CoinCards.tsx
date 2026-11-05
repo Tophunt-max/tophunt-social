@@ -1,5 +1,6 @@
 
 import { Lock, Save } from "lucide-react";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /**
  * Coin settings cards (free rewards are always Diamonds).
@@ -36,7 +37,7 @@ export function RewardLockingCard(_props: CardProps) {
     <Card icon={Lock} title="Free rewards: hamesha 💎 Diamond" tint="text-cyan-500">
       <p className="text-xs text-muted-foreground">
         Check-in, tasks, referral, verification, ads aur XP conversion ke reward sirf Diamond mein milte hain. Diamond se contest
-        khelte hain; 🪙 DP coin sirf contest jeetne par milta hai aur Shopping mein kharch hota hai.
+        khelte hain; <CurrencyText>🪙</CurrencyText> DP coin sirf contest jeetne par milta hai aur Shopping mein kharch hota hai.
       </p>
       <ul className="mt-2 text-xs list-disc pl-5">
         {REWARD_LOCK_ROWS.map((r) => <li key={r.key}>{r.label}: Diamond</li>)}
@@ -51,7 +52,7 @@ export function Card({ icon: Icon, title, tint, children, onSave, pending }: any
     <div className="bg-card border border-border rounded-2xl p-5">
       <div className="flex items-center justify-between mb-4 gap-3">
         <h3 className="font-bold text-foreground flex items-center gap-2">
-          <Icon size={16} className={tint} /> {title}
+          <Icon size={16} className={tint} /> <CurrencyText>{title}</CurrencyText>
         </h3>
         {onSave && (
           <button
@@ -71,7 +72,7 @@ export function Card({ icon: Icon, title, tint, children, onSave, pending }: any
 export function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button onClick={() => onChange(!checked)} className="flex items-center justify-between w-full py-1.5 text-left" type="button">
-      <span className="text-sm text-foreground">{label}</span>
+      <span className="text-sm text-foreground"><CurrencyText>{label}</CurrencyText></span>
       <span className={`relative w-10 h-6 rounded-full transition-colors flex-shrink-0 ${checked ? "bg-violet-500" : "bg-secondary"}`}>
         <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : ""}`} />
       </span>

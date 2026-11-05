@@ -8,6 +8,7 @@ import { Power, Megaphone, ArrowUpCircle, ToggleLeft, Coins, Radio, CalendarCloc
 import { AuthMethodsCard } from "@/components/AuthMethodsCard";
 import { Card, Toggle, field, label, type CardProps } from "@/components/coin/CoinCards";
 import { Link } from "wouter";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /**
  * App Control Center.
@@ -381,7 +382,7 @@ function FeaturesCard({ data, pending, onSave, confirm }: CardProps) {
             onClick={() => setFeatures({ ...features, ...p.features })}
             className="text-xs border border-border rounded-full px-3 py-1.5 hover:bg-secondary"
           >
-            {p.label}
+            <CurrencyText>{p.label}</CurrencyText>
           </button>
         ))}
       </div>

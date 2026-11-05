@@ -4,6 +4,7 @@ import { AlertTriangle, BarChart3, CalendarCheck, Crown, ListChecks, Plus, Shiel
 import { api } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { Card, Toggle, field, label } from "./CoinCards";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /**
  * Free-coin ("Earn") settings, one card per source, for the Coin Economy hub.
@@ -100,11 +101,11 @@ export function VerificationRewardCard({ data }: { data: any }) {
       <Toggle label="Enabled" checked={v.enabled} onChange={(x) => setV({ ...v, enabled: x })} />
       <div className="grid grid-cols-2 gap-3 mt-2">
         <div>
-          <label className={label}>Signup bonus: email + mobile verify ke baad (💎)</label>
+          <label className={label}><CurrencyText>Signup bonus: email + mobile verify ke baad (💎)</CurrencyText></label>
           <input type="number" min={0} className={field} value={v.completionReward} onChange={n("completionReward")} />
         </div>
         <div>
-          <label className={label}>Signup par turant, bina verify (💎)</label>
+          <label className={label}><CurrencyText>Signup par turant, bina verify (💎)</CurrencyText></label>
           <input type="number" min={0} className={field} value={v.registrationReward} onChange={n("registrationReward")} />
           {v.registrationReward > 0 && <p className="text-[11px] text-amber-600 mt-1">Fraud risk: fake accounts ko bhi milega. 0 rakho.</p>}
         </div>
@@ -133,7 +134,7 @@ export function VerificationRewardCard({ data }: { data: any }) {
       <p className={hint}>
         Pakke niyam (kabhi nahi milta): wahi email / mobile / device pehle bonus le chuka ho, temporary email, blocked account. Account chhota ho to
         bonus baad mein apne aap milta hai (har ghante). IP / device shak ho to bonus review mein jaata hai: neeche approve ya reject karo. Bonus
-        hamesha 💎 Diamond hai aur free-rewards budget se katta hai. Badlav sirf naye signup par lagta hai.
+        hamesha <CurrencyText>💎</CurrencyText> Diamond hai aur free-rewards budget se katta hai. Badlav sirf naye signup par lagta hai.
       </p>
       {error && (
         <p className="text-xs text-red-600 mt-2 flex items-center gap-1.5"><AlertTriangle size={13} /> {error}</p>
@@ -148,7 +149,7 @@ export function VerificationRewardCard({ data }: { data: any }) {
           ] as const).map(([name, val]) => (
             <div key={name} className="rounded-xl bg-secondary py-2">
               <div className="text-sm font-bold text-foreground">{Number(val ?? 0).toLocaleString()}</div>
-              <div className="text-[11px] text-muted-foreground">{name}</div>
+              <div className="text-[11px] text-muted-foreground"><CurrencyText>{name}</CurrencyText></div>
             </div>
           ))}
         </div>
@@ -191,7 +192,7 @@ export function SignupBonusReviewCard() {
           <div key={i.uid} className="rounded-xl border border-border p-3 text-sm">
             <div className="flex justify-between gap-2">
               <span className="font-semibold text-foreground">@{i.username || i.uid}</span>
-              <span>{Number(i.coins).toLocaleString()} 💎</span>
+              <span><CurrencyText>{Number(i.coins).toLocaleString()} 💎</CurrencyText></span>
             </div>
             <div className="text-xs text-muted-foreground">
               {i.email || "—"} · {i.phone || "—"} · device par {i.deviceAccounts} account · IP par {i.ipAccounts}
@@ -584,9 +585,9 @@ export function RewardStatsCard() {
                 <tr>
                   <th className="text-left py-1">Din</th>
                   <th className="text-right">Check-in</th>
-                  <th className="text-right">💎 diye</th>
+                  <th className="text-right"><CurrencyText>💎 diye</CurrencyText></th>
                   <th className="text-right">Task claims</th>
-                  <th className="text-right">💎 diye</th>
+                  <th className="text-right"><CurrencyText>💎 diye</CurrencyText></th>
                 </tr>
               </thead>
               <tbody>

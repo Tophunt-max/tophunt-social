@@ -50,6 +50,7 @@ import {
   CircleDollarSign,
   ShoppingBag,
 } from "lucide-react";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /** Short beep via Web Audio API — no asset needed. */
 function playPing() {
@@ -173,7 +174,7 @@ function NavItem({ href, label, icon: Icon, active, onClick, badge }: any) {
         >
           <Icon size={15} className={active ? "text-white" : ""} />
         </div>
-        <span className="text-sm font-medium">{label}</span>
+        <span className="text-sm font-medium"><CurrencyText>{label}</CurrencyText></span>
         {hasBadge ? (
           <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center">
             {badge > 99 ? "99+" : badge}
@@ -419,7 +420,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </button>
           <div className="flex-1 min-w-0">
             <h1 className="font-bold text-base text-foreground">
-              {currentPage?.label || "Dashboard"}
+              <CurrencyText>{currentPage?.label || "Dashboard"}</CurrencyText>
             </h1>
             <p className="text-xs text-muted-foreground hidden sm:block">
               TopHunt Admin Console
