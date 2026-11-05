@@ -64,14 +64,14 @@ describe('catalogue ownership (migration 0089)', () => {
     expect(Number(wrongShop.n)).toBe(0);
   });
 
-  it('Gamification → Catalog refuses Shop items and XP level rewards', async () => {
+  it('Earning → Reward Items (Gamification catalog route) refuses Shop items and XP level rewards', async () => {
     const env = await setup();
     expect((await admin(env, 'PUT', '/monetization/store/items/shop_frame_x', { create: true, item: shopItem(), listing })).status).toBe(200);
     expect(await ownerOf(env, 'shop_frame_x')).toBe('shop');
 
     const shopEdit = await admin(env, 'PUT', '/gamification/catalog/shop_frame_x', { type: 'frame', name: 'Hijack', rarity: 'common', asset: { key: 'frame.gold' } });
     expect(shopEdit.status).toBe(412);
-    expect(JSON.stringify(shopEdit.body)).toMatch(/Shopping → Digital items/);
+    expect(JSON.stringify(shopEdit.body)).toMatch(/Shop → Digital Items/);
     // The Shop item is untouched.
     const row = await env.DB.prepare(`SELECT name, asset FROM reward_catalog WHERE id = 'shop_frame_x'`).first<any>();
     expect(row.name).toBe('Shop Frame');
@@ -80,10 +80,10 @@ describe('catalogue ownership (migration 0089)', () => {
     const xpId = ((await env.DB.prepare(`SELECT item_id FROM xp_cosmetic_unlocks LIMIT 1`).first<any>()) as any).item_id;
     const xpEdit = await admin(env, 'PUT', `/gamification/catalog/${xpId}`, { type: 'frame', name: 'Hijack', rarity: 'common', asset: { key: 'frame.gold' } });
     expect(xpEdit.status).toBe(412);
-    expect(JSON.stringify(xpEdit.body)).toMatch(/XP level rewards/);
+    expect(JSON.stringify(xpEdit.body)).toMatch(/Level Rewards/);
   });
 
-  it('Gamification → Catalog refuses to create Premium or XP-collection items', async () => {
+  it('Earning → Reward Items (Gamification catalog route) refuses to create Premium or XP-collection items', async () => {
     const env = await setup();
     const premium = await admin(env, 'PUT', '/gamification/catalog/new_premium', { type: 'frame', name: 'P', rarity: 'rare', asset: { tier: 'premium', key: 'frame.gold' } });
     expect(premium.status).toBe(400);

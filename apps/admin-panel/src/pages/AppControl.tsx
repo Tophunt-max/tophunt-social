@@ -104,9 +104,9 @@ export default function AppControl() {
         <FeaturesCard data={data} pending={save.isPending} onSave={(p) => save.mutate(p)} confirm={confirm} />
         <Card icon={Coins} title="DP coin aur Diamond settings" tint="text-pink-500">
           <p className="text-sm text-muted-foreground">
-            Coin ki ₹ value, earning ke rewards aur XP → Diamond{" "}
-            <Link href="/coin-economy" className="font-semibold text-foreground underline">Coin Economy</Link> mein hain
-            (Earning aur Coin value tabs). Products, orders aur fraud rules: <Link href="/shopping" className="font-semibold text-foreground underline">Shopping</Link>.
+            Earning ke rewards aur XP → Diamond: <Link href="/earning/free-rewards" className="font-semibold text-foreground underline">Earning</Link>.
+            Coin ki ₹ value aur budgets: <Link href="/coin-economy?tab=values" className="font-semibold text-foreground underline">Coin Economy</Link>.
+            Products, orders, shop switches aur fraud rules: <Link href="/shop" className="font-semibold text-foreground underline">Shop</Link>.
           </p>
         </Card>
       </div>

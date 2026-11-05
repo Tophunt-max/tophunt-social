@@ -38,7 +38,7 @@ const hint = "text-[11px] text-muted-foreground mt-1";
 
 /** Keys this form owns. Anything else is shown in the Advanced JSON section. */
 const MANAGED_KEYS = [
-  // The signup bonus is edited in Coin Economy → Diamond (paid after
+  // The signup bonus is edited in Earning → Free Rewards (paid after
   // verification); the referral reward on the Referrals page. Never re-posted here.
   "rewardSettings",
   // Owned by the Referrals page.
@@ -72,7 +72,7 @@ const MANAGED_KEYS = [
   "announcement",
   "features",
   "authMethods",
-  // Free-reward locking: owned by Coin Economy → Earn.
+  // Free-reward locking: owned by Earning → Free Rewards.
   "rewardLocking",
   // Coin values (₹ per DP coin / Diamond) are owned ONLY by the Coin Economy hub.
   // Not editable here, and never re-posted from this page — a stale copy could
@@ -276,12 +276,14 @@ export default function AppSettings() {
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        {/* ---- Coins: owned by Coin Economy ---- */}
-        <Section icon={Coins} title="Coins & rewards" blurb="Ab sab ek jagah: Coin Economy.">
+        {/* ---- Coins: owned by the Earning, Shop and Finance sections ---- */}
+        <Section icon={Coins} title="Coins & rewards" blurb="Earning, Shop aur Coin Economy mein.">
           <p className="text-sm text-muted-foreground">
-            Signup bonus, referral, daily login, daily tasks, rewarded ads, Hall of Fame, coin value (₹) aur XP conversion{" "}
-            <Link href="/coin-economy" className="font-semibold text-foreground underline">Coin Economy</Link> (Earning aur Coin value
-            tabs) mein set hote hain. Products aur orders: Shopping.
+            Signup bonus, referral, daily login, daily tasks, rewarded ads aur Hall of Fame:{" "}
+            <Link href="/earning/free-rewards" className="font-semibold text-foreground underline">Earning → Free Rewards</Link>. XP conversion:{" "}
+            <Link href="/earning/xp?tab=diamonds" className="font-semibold text-foreground underline">Earning → XP &amp; Levels</Link>. Coin value (₹):{" "}
+            <Link href="/coin-economy?tab=values" className="font-semibold text-foreground underline">Coin Economy</Link>. Products aur orders:{" "}
+            <Link href="/shop" className="font-semibold text-foreground underline">Shop</Link>.
           </p>
         </Section>
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, describeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
@@ -21,15 +22,28 @@ const ACTION: Record<string, string> = {
   returned: "Accept return & refund", return_rejected: "Decline return",
 };
 
+/** Status filter chips; "" = All, "review" = held for fraud review. Kept in the URL as ?status= so alerts can link straight to a list. */
+const STATUS_FILTERS = ["review", "", "placed", "packed", "shipped", "return_requested", "delivered", "cancelled", "returned"] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number];
+
 export function OrdersTab() {
-  const [status, setStatus] = useState("");
+  const [params, setParams] = useSearchParams();
+  const raw = params.get("status") ?? "";
+  const status: StatusFilter = (STATUS_FILTERS as readonly string[]).includes(raw) ? (raw as StatusFilter) : "";
+  const setStatus = (s: StatusFilter) =>
+    setParams((prev) => {
+      const p = new URLSearchParams(prev);
+      if (s) p.set("status", s);
+      else p.delete("status");
+      return p;
+    }, { replace: true });
   const [openId, setOpenId] = useState<string | null>(null);
   const q = useQuery({ queryKey: ["shop-orders", status], queryFn: () => api.monetization.shopOrders(status || undefined) });
   const counts = q.data?.counts ?? {};
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2">
-        {["review", "", "placed", "packed", "shipped", "return_requested", "delivered", "cancelled", "returned"].map((s) => (
+        {STATUS_FILTERS.map((s) => (
           <button
             key={s || "all"}
             onClick={() => setStatus(s)}

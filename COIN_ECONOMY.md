@@ -17,9 +17,9 @@ Settings, Referrals, Rewards) link there, so each setting has one editor.
 | 🪙 DP coin (`dpcoin - locked_coins`) | Only by winning contests | **All shopping**: digital items, gifts, physical products. Never withdrawn (withdrawals retired) | 🪙 DP coin: won vs spent, shop/digital/gift switches, **monthly shop budget (₹)**, fraud rules |
 
 - Free rewards are always Diamonds; the server refuses `rewardLocking: false`. There is no Diamond → DP coin conversion.
-- **Shop Bundles** (admin: Shopping → Bundles, `lib/storeBundles.ts`) are the only Diamond spend besides contest
+- **Shop Bundles** (admin: Shop → Bundles, `lib/storeBundles.ts`) are the only Diamond spend besides contest
   entry: 2-12 catalogue items for a Diamond price, once per user. Contents are items only, so a bundle can never turn
-  Diamonds into DP coin. Shopping → Collections only groups items for the Shop home; it sells nothing itself.
+  Diamonds into DP coin. Shop → Collections only groups items for the Shop home; it sells nothing itself.
 - ₹ per coin: Coin Economy → Coin value (`coinPricing.dpCoinInr` prices products; `diamondInr` is for reports).
 - **Spend limit:** `monetization.shop.monthlyBudgetInr` caps the ₹ value of physical shop orders per calendar month
   (UTC), checked again inside the checkout transaction. Cancelled/returned orders free their share. 0 = no limit.
@@ -59,7 +59,7 @@ Edited in Coin Economy → Overview → "Economy limits". Every limit is 0 = off
 | `sameOpponentRewardsPerDay` | Completed matches between the same two players per UTC day that still give win/loss XP and a monthly win (Hall of Fame). Past the limit the prize is still paid. | `settleWinner` |
 
 Also:
-- `match_win` / `match_loss` XP have default daily caps of 300 / 60 (Gamification → XP rules can change them).
+- `match_win` / `match_loss` XP have default daily caps of 300 / 60 (Earning → XP & Levels → Rules can change them).
 - Hall of Fame Diamonds are charged to the free-rewards budget. If the budget has no room, that winner is not paid,
   the cron run fails (alert), the leaderboard is kept, and a re-run after raising the budget pays them once.
 - Economy health: `GET /admin/monetization/economy-health?days=30` reports active users, ad (per currency) and
@@ -111,15 +111,15 @@ account has an open abuse flag (released when the flag is reviewed).
 
 | Reward | Admin | How it pays |
 |---|---|---|
-| Weekly / monthly mission | Gamification → Rules → Quests, "Diamond" column (`quests[].coins`) | On `claimQuest`, in the same batch as the claim row and the XP (ledger id `quest:<id>:<period>:<uid>`). Over the cap: nothing recorded. Budget empty: the claim is kept and a retry pays once. |
-| Achievement | Gamification → Achievements, "Diamond reward (per tier)" (`achievement_definitions.diamond_reward`, migration 0085) | Each tier unlocked by progress (not a backfill) creates a `reward_grants` row `achievement:<id>:<tier>:<uid>`; the user claims it in Rewards Center. |
+| Weekly / monthly mission | Earning → XP & Levels → Rules → Quests, "Diamond" column (`quests[].coins`) | On `claimQuest`, in the same batch as the claim row and the XP (ledger id `quest:<id>:<period>:<uid>`). Over the cap: nothing recorded. Budget empty: the claim is kept and a retry pays once. |
+| Achievement | Earning → Achievements, "Diamond reward (per tier)" (`achievement_definitions.diamond_reward`, migration 0085) | Each tier unlocked by progress (not a backfill) creates a `reward_grants` row `achievement:<id>:<tier>:<uid>`; the user claims it in Rewards Center. |
 | Contest participation / runner-up | Coin Economy → XP → "Contest rewards (Diamonds)" (`monetization.earning.contestRewards {enabled, participation, runnerUp, paidOnly}`) | Created inside the winner settlement batch (`contestSettlement.ts#settleWinner`), gated on that settlement: `contest:<match>:participation:<uid>` for both players and `contest:<match>:runner_up:<loser>`. Never for refunded/cancelled matches or farmed repeat pairs; with `paidOnly` (default) only for battles with an entry fee. Claimable even with the gamification experience off. |
 
 The contest **winner** still gets the DP coin prize only. "Special" in the Rewards Center is the Hall of Fame.
 
 ### Special events (`/earn/events`, migration 0086)
 
-Admin: Gamification → Events (`GET/PUT /admin/earning/events[/:id]`, `GET .../:id/participants`; saving is a
+Admin: Earning → Special Events (`GET/PUT /admin/earning/events[/:id]`, `GET .../:id/participants`; saving is a
 sensitive action). An event has a title, banner (shop-banner upload), start / end, eligibility (minimum level,
 minimum account age, verified only), an optional Diamond budget, and tasks. Each task uses a quest metric (`votes`, `entries`, `wins`, `checkins`,
 `active_days`, `xp`), a target and a 💎 Diamond reward.
@@ -159,19 +159,25 @@ minimum account age, verified only), an optional Diamond budget, and tasks. Each
   rule, tie-break (score, lifetime XP, account age, uid), 500-deep limit and block filter as the XP boards.
   The XP board also has a `day` (Today) period.
 
-### Earning Management (admin panel group)
+### Earning (admin panel group)
 
-One sidebar group, "Earning Management", holds every Rewards Center control:
+One sidebar group, **EARNING** (`/earning/*`, admin-panel `pages/earning`), holds every Rewards Center control.
+What users can buy is the separate **SHOP** group (`/shop/*`: orders, products, digital items, bundles,
+storefront, gifts, and Settings for the switches, monthly budget and fraud rules). Coin Economy (Finance)
+only reports flows, coin values, budgets and the ledger. Old URLs (`/gamification?tab=…`, `/earning-*`,
+`/referrals`, `/shopping?tab=…`, `/coin-economy?tab=earn`) redirect (`lib/legacyRoutes.ts`).
 
 | Page | What it does |
 |---|---|
-| Earning Dashboard (`/earning-dashboard`, `GET /admin/earning/analytics?days=7\|30\|90`) | 💎 earned, 💎 reversed, 🪙 DP coin won, XP and distinct earners per reward day; totals by ledger type; special-event claims; top 20 earners. House accounts excluded (`lib/earningAnalytics.ts`). |
+| Earning Dashboard (`/earning`, `GET /admin/earning/analytics?days=7\|30\|90`) | 💎 earned, 💎 reversed, 🪙 DP coin won, XP and distinct earners per reward day; totals by ledger type; special-event claims; top 20 earners. House accounts excluded (`lib/earningAnalytics.ts`). |
 | CSV export (`GET /admin/earning/export?kind=daily\|ledger&days=`) | Daily summary per type plus XP (up to 90 days), or every earning ledger row (up to 31 days, 20,000 rows; `X-Truncated: 1` when cut). Text cells are formula-safe. Each export is audited (`earning.export`). |
-| Earn Settings (💎 Diamond) | Coin Economy → Diamond tab (check-in, tasks, ads, signup bonus, contest rewards). |
-| Special Events (`/earning-events`) | The event editor (also in Gamification → Events). |
-| Gamification, Referral Program | Moved into the group unchanged. |
-| Earning Assets (`/earning-assets`) | Every artwork key with its bundled WebP and who changed it last. Pick a WebP or PNG; the panel checks it (1 MB, square within 2%, 128-2048 px, transparent) and shows a preview at the app's sizes (24/40/58/92 pt) next to what is live; **Publish** uploads it (`POST /admin/media/earning-asset`, which enforces the same rules from the file header, stored under `earning-assets/`) and switches the slot (`PUT /admin/earning/assets/:key {url}`; the object must exist in R2). **Reset** brings the bundled art back (`{url: null}`); **History** (`GET .../:key/history`) restores an earlier upload. Saved in `appConfig.earningAssets`, delivered by `/read/app-config` and the realtime config push, so no app update is needed. In the app the bundled art is the placeholder while an upload loads and the fallback if it fails; uploads load as a resized variant. Only known keys and our own `earning-assets/` URLs are accepted; the full App Settings save ignores this field. Upload and save need a recent sign-in and are audited (`earning.asset.upload / update / reset`). |
-| Audit & Alerts (`/earning-audit`) | `GET /admin/earning/audit`: admin actions on events, artwork, gamification, referrals, budgets, wallet adjustments and reward settings, paged. `GET /admin/earning/notifications`: admin alerts that link to an earning page. The 6-hourly coin alerts also flag a special event whose Diamond budget is 80%+ claimed. |
+| Free Rewards (`/earning/free-rewards`) | Check-in, daily tasks, rewarded ads, signup and verification bonus, Hall of Fame, referral amounts, the free-rewards budget and its alerts. |
+| XP & Levels (`/earning/xp`) | XP analytics, XP rules and level curve, ranks, milestones, quests; the XP → 💎 Diamond conversion and contest rewards (`?tab=diamonds`). |
+| Level Rewards, Achievements, Seasons, Reward Items | `/earning/level-rewards`, `/earning/achievements`, `/earning/seasons`, `/earning/catalog` (catalogue rows owned by Earning, migration 0089). |
+| Special Events (`/earning/events`) | The event editor. |
+| Referral Program (`/earning/referrals`), Players & Flags (`/earning/players`) | Referral queue; user inspector, abuse flags, reward grants. |
+| Earning Assets (`/earning/assets`) | Every artwork key with its bundled WebP and who changed it last. Pick a WebP or PNG; the panel checks it (1 MB, square within 2%, 128-2048 px, transparent) and shows a preview at the app's sizes (24/40/58/92 pt) next to what is live; **Publish** uploads it (`POST /admin/media/earning-asset`, which enforces the same rules from the file header, stored under `earning-assets/`) and switches the slot (`PUT /admin/earning/assets/:key {url}`; the object must exist in R2). **Reset** brings the bundled art back (`{url: null}`); **History** (`GET .../:key/history`) restores an earlier upload. Saved in `appConfig.earningAssets`, delivered by `/read/app-config` and the realtime config push, so no app update is needed. In the app the bundled art is the placeholder while an upload loads and the fallback if it fails; uploads load as a resized variant. Only known keys and our own `earning-assets/` URLs are accepted; the full App Settings save ignores this field. Upload and save need a recent sign-in and are audited (`earning.asset.upload / update / reset`). |
+| Audit & Alerts (`/earning/audit`) | `GET /admin/earning/audit`: admin actions on events, artwork, gamification, referrals, budgets, wallet adjustments and reward settings, paged. `GET /admin/earning/notifications`: admin alerts that link to an earning page. The 6-hourly coin alerts also flag a special event whose Diamond budget is 80%+ claimed. |
 
 ## Daily check-in, daily tasks, referrals (admin controls)
 
@@ -192,7 +198,7 @@ One sidebar group, "Earning Management", holds every Rewards Center control:
 ## Go-live checklist
 
 1. Coin Economy → Budgets: set the approval password.
-2. App Settings: set **Admin alert email**. Coin Economy → Earn → "Aaj ki report abhi bhejo" and confirm the email arrives.
+2. App Settings: set **Admin alert email**. Earning → Free Rewards → "Aaj ki report abhi bhejo" and confirm the email arrives.
 3. Create a `free_rewards` budget and link it in Earn → Free rewards budget. Claim the daily reward with a test account and check the budget is charged.
 4. For a product contest: set the prize coin value, link a `product_prize` budget, play one match, and check Contests P&L.
 5. Health tab: every row shows OK and every reconciliation check is green.

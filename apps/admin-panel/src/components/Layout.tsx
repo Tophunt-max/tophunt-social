@@ -49,6 +49,19 @@ import {
   Search,
   CircleDollarSign,
   ShoppingBag,
+  Store,
+  PackageCheck,
+  LayoutGrid,
+  Boxes,
+  PanelsTopLeft,
+  Settings2,
+  Gem,
+  Zap,
+  Medal,
+  Award,
+  CalendarRange,
+  PackageOpen,
+  UserSearch,
 } from "lucide-react";
 
 /** Short beep via Web Audio API — no asset needed. */
@@ -84,17 +97,30 @@ const nav = [
   { href: "/matches", label: "Matches", icon: Swords, section: "contests" },
   { href: "/prize-claims", label: "Prize Claims", icon: Package, section: "contests", badgeKey: "pendingPrizeClaims" },
   { href: "/leaderboard", label: "Leaderboard", icon: Crown, section: "contests" },
-  // Earning Management: everything the Rewards Center pays out, in one group.
-  { href: "/earning-dashboard", label: "Earning Dashboard", icon: TrendingUp, section: "earning" },
-  { href: "/coin-economy?tab=diamond", label: "Earn Settings (💎 Diamond)", icon: Sparkles, section: "earning" },
-  { href: "/earning-events", label: "Special Events", icon: CalendarDays, section: "earning" },
-  { href: "/gamification", label: "Gamification (XP & Levels)", icon: Sparkles, section: "earning" },
-  { href: "/referrals", label: "Referral Program", icon: UserPlus, section: "earning" },
-  { href: "/earning-assets", label: "Earning Assets", icon: ImagePlus, section: "earning" },
-  { href: "/earning-audit", label: "Audit & Alerts", icon: ClipboardList, section: "earning" },
-  // Closed loop: Earning (Diamond) → contests → DP coin → Shopping.
-  { href: "/shopping", label: "Shopping", icon: ShoppingBag, section: "finance", badgeKey: "pendingShopOrders" },
-  // Coin hub: coin values, earning, ledger, budgets and reports in one place.
+  // SHOP: everything users spend DP coin on (pages/shop). Switches, budget and fraud rules only in Settings.
+  { href: "/shop", label: "Shop Dashboard", icon: Store, section: "shop" },
+  { href: "/shop/orders", label: "Orders", icon: PackageCheck, section: "shop", badgeKey: "pendingShopOrders" },
+  { href: "/shop/products", label: "Physical Products", icon: ShoppingBag, section: "shop" },
+  { href: "/shop/digital", label: "Digital Items", icon: Sparkles, section: "shop" },
+  { href: "/shop/collections", label: "Collections", icon: LayoutGrid, section: "shop" },
+  { href: "/shop/bundles", label: "Bundles", icon: Boxes, section: "shop" },
+  { href: "/shop/storefront", label: "Storefront", icon: PanelsTopLeft, section: "shop" },
+  { href: "/shop/gifts", label: "Virtual Gifts", icon: Gift, section: "shop" },
+  { href: "/shop/settings", label: "Shop Settings", icon: Settings2, section: "shop" },
+  // EARNING: everything users get without paying (pages/earning).
+  { href: "/earning", label: "Earning Dashboard", icon: TrendingUp, section: "earning" },
+  { href: "/earning/free-rewards", label: "Free Rewards", icon: Gem, section: "earning" },
+  { href: "/earning/xp", label: "XP & Levels", icon: Zap, section: "earning" },
+  { href: "/earning/level-rewards", label: "Level Rewards", icon: Medal, section: "earning" },
+  { href: "/earning/achievements", label: "Achievements", icon: Award, section: "earning" },
+  { href: "/earning/seasons", label: "Seasons", icon: CalendarRange, section: "earning" },
+  { href: "/earning/events", label: "Special Events", icon: CalendarDays, section: "earning" },
+  { href: "/earning/catalog", label: "Reward Items", icon: PackageOpen, section: "earning" },
+  { href: "/earning/referrals", label: "Referral Program", icon: UserPlus, section: "earning" },
+  { href: "/earning/assets", label: "Earning Assets", icon: ImagePlus, section: "earning" },
+  { href: "/earning/players", label: "Players & Flags", icon: UserSearch, section: "earning" },
+  { href: "/earning/audit", label: "Audit & Alerts", icon: ClipboardList, section: "earning" },
+  // FINANCE: where coins came from and went (no shop or earning settings here).
   { href: "/coin-economy", label: "Coin Economy", icon: Scale, section: "finance" },
   { href: "/monetization", label: "Monetization", icon: CircleDollarSign, section: "finance" },
   { href: "/posts", label: "Posts", icon: Image, section: "content" },
@@ -129,8 +155,10 @@ const nav = [
 export const MODERATOR_PAGES = new Set([
   "/dashboard", "/analytics", "/users", "/matches", "/posts", "/stories", "/comments",
   "/blog", "/reports", "/support", "/moderation",
-  // Read-only inspection and review flags; XP / coin writes are full-admin on the server.
-  "/gamification",
+  // The pages of the former Gamification page, which moderators could open:
+  // read-only inspection and review flags; XP / coin writes are full-admin on the server.
+  "/earning/xp", "/earning/level-rewards", "/earning/achievements", "/earning/seasons",
+  "/earning/events", "/earning/catalog", "/earning/players",
 ]);
 /**
  * Pages only a superadmin may use. The raw Rewards JSON editor bypasses the
@@ -147,7 +175,8 @@ const canSee = (role: string | null | undefined, href: string) => {
 const sections: Record<string, string> = {
   main: "OVERVIEW",
   contests: "CONTESTS",
-  earning: "EARNING MANAGEMENT",
+  shop: "SHOP",
+  earning: "EARNING",
   finance: "FINANCE",
   content: "CONTENT",
   moderation: "MODERATION",

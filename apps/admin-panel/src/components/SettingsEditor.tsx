@@ -59,7 +59,7 @@ export function SettingsEditor({ title, subtitle, queryKey, load, save, omitKeys
     }
     const blocked = parsed && typeof parsed === "object" ? Object.keys(parsed).filter((k) => omitKeys?.includes(k)) : [];
     if (blocked.length) {
-      setErr(omitHint ? omitHint(blocked) : `${blocked.join(", ")} yahan edit nahi hota. Coin Economy → Earn me badlo.`);
+      setErr(omitHint ? omitHint(blocked) : `${blocked.join(", ")} yahan edit nahi hota. Earning → Free Rewards me badlo.`);
       return;
     }
     setErr(null);

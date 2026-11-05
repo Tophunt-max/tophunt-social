@@ -9,7 +9,7 @@ import { SegTabs } from "@/components/finance/bits";
 import { Notice } from "@/components/monetization/shared";
 
 /**
- * Earning Management → Audit & Alerts.
+ * Earning → Audit & Alerts.
  *  - Audit: admin actions that change what users earn or reverse it (events,
  *    artwork, gamification, referrals, budgets, wallet adjustments, reward
  *    settings, CSV exports), newest first, paged.

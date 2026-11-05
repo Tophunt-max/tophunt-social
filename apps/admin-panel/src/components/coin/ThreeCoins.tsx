@@ -1,22 +1,23 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode } from "react";
 import { Link } from "wouter";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, describeError } from "@/lib/api";
-import { toast } from "@/lib/toast";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { fmtNumber } from "@/lib/format";
 import { Table } from "@/components/ui/Table";
-import { Button, Card, Notice, Num, Toggle, inr } from "@/components/monetization/shared";
-import { ContestRewardsCard, XpConversionCard } from "@/components/coin/ClosedLoopCards";
-import { FraudRulesTab } from "@/components/shop/FraudRulesTab";
+import { Card, inr } from "@/components/monetization/shared";
 
 /**
  * Coin Economy around the three coins (worker GET /admin/monetization/coins):
  *
- *   ⚡ XP  ──convert──▶  💎 Diamond  ──contest entry──▶  win  ──▶  🪙 DP coin  ──▶  Shopping
+ *   ⚡ XP  ──convert──▶  💎 Diamond  ──contest entry──▶  win  ──▶  🪙 DP coin  ──▶  Shop
  *
  * XP is earned by playing and never goes down. Diamonds are earned free and only
  * pay contest entries. DP coin is only won, and only spent: gifts, digital items
  * and physical products. No ₹ comes in or goes out.
+ *
+ * These tabs are the finance view (what came in and went out). The settings
+ * behind them live in their own sections: Earning (rewards, XP rate) and
+ * Shop → Settings (switches, monthly budget, fraud rules).
  */
 
 const TYPE_LABEL: Record<string, string> = {
@@ -100,24 +101,23 @@ export function XpTab() {
           <Mini label="Conversions (30 din)" value={`${fmtNumber(data.xp.period.conversions)} → ${fmtNumber(data.xp.period.diamonds)} 💎`} />
         </div>
       )}
-      <div className="grid gap-6 lg:grid-cols-2 items-start">
-        <XpConversionCard />
-        <ContestRewardsCard />
-        <Card title="XP kaise milta hai" subtitle="XP comes from playing: votes, contests, wins, daily activity. Levels and the XP rules are in Gamification.">
-          <p className="text-sm text-muted-foreground">
-            Converting never lowers a user&apos;s XP, level or leaderboard rank: TopHunt tracks the converted part separately.
-          </p>
-          <Link href="/gamification" className="text-sm font-semibold text-primary">XP rules and levels → Gamification</Link>
-        </Card>
-      </div>
+      <Card title="XP settings" subtitle="XP comes from playing: votes, contests, wins, daily activity. The XP rules, levels and the XP → 💎 Diamond rate are set in Earning.">
+        <p className="text-sm text-muted-foreground">
+          Converting never lowers a user&apos;s XP, level or leaderboard rank: TopHunt tracks the converted part separately.
+        </p>
+        <div className="flex flex-wrap gap-4 text-sm font-semibold">
+          <Link href="/earning/xp?tab=rules" className="text-primary">XP rules and levels →</Link>
+          <Link href="/earning/xp?tab=diamonds" className="text-primary">XP → 💎 Diamond and contest rewards →</Link>
+        </div>
+      </Card>
     </div>
   );
 }
 
 // ─── 💎 Diamond ──────────────────────────────────────────────────────────────
 
-/** Diamond report + every earning setting (passed in as `children`) + contests. */
-export function DiamondTab({ children, contests }: { children: ReactNode; contests: ReactNode }) {
+/** Diamond report + contests. The reward amounts that pay Diamonds are set in Earning → Free Rewards. */
+export function DiamondTab({ contests }: { contests: ReactNode }) {
   const { data } = useCoins(30);
   return (
     <div className="space-y-6">
@@ -143,10 +143,9 @@ export function DiamondTab({ children, contests }: { children: ReactNode; contes
           </Card>
         </>
       )}
-      <div>
-        <p className="font-bold text-foreground mb-3">Earning settings (sab Diamond dete hain)</p>
-        {children}
-      </div>
+      <Card title="Earning settings (sab Diamond dete hain)" subtitle="Signup bonus, daily login, daily tasks, rewarded ads, Hall of Fame, referral and the free-rewards budget.">
+        <Link href="/earning/free-rewards" className="text-sm font-semibold text-primary">Earning → Free Rewards →</Link>
+      </Card>
       <div>
         <p className="font-bold text-foreground mb-3">Contests: 💎 entry → 🪙 prize</p>
         {contests}
@@ -184,85 +183,14 @@ export function DpCoinTab() {
           </Card>
         </>
       )}
-      <div className="grid gap-6 lg:grid-cols-2 items-start">
-        <ShoppingSwitches />
-        <ShopBudgetCard meter={data?.shopBudget} />
-      </div>
-      <div>
-        <p className="font-bold text-foreground mb-3">Shop fraud rules</p>
-        <FraudRulesTab />
-      </div>
-      <p className="text-sm">
-        Products, orders and the digital catalogue: <Link href="/shopping" className="font-semibold text-primary">Shopping →</Link> · Gift
-        catalogue: <Link href="/monetization?tab=gifts" className="font-semibold text-primary">Monetization → Gifts →</Link>
-      </p>
+      <Card title="Where DP coin is spent: the Shop" subtitle="Open / closed switches, the monthly shop budget and the fraud rules are in Shop → Settings.">
+        <div className="flex flex-wrap gap-4 text-sm font-semibold">
+          <Link href="/shop/settings" className="text-primary">Shop → Settings →</Link>
+          <Link href="/shop" className="text-primary">Shop dashboard →</Link>
+          <Link href="/shop/gifts" className="text-primary">Virtual gifts →</Link>
+        </div>
+      </Card>
     </div>
   );
 }
 
-/** Where DP coin can be spent: physical shop, digital items, gifts. */
-function ShoppingSwitches() {
-  const qc = useQueryClient();
-  const cfgQ = useQuery({ queryKey: ["monetization-config"], queryFn: api.monetization.config });
-  const e = cfgQ.data?.effective;
-  const save = useMutation({
-    mutationFn: (patch: any) => api.saveAppSettings({ monetization: patch }),
-    onSuccess: () => {
-      toast.success("Saved. Apps pick it up within a minute.");
-      qc.invalidateQueries({ queryKey: ["monetization-config"] });
-    },
-    onError: (err) => toast.error(describeError(err)),
-  });
-  if (!e) return <Card title="DP coin kahan kharch ho sakta hai"><p className="text-sm text-muted-foreground">Loading…</p></Card>;
-  return (
-    <Card title="DP coin kahan kharch ho sakta hai" subtitle="Each switch takes effect for the next purchase.">
-      <Toggle label="🛍️ Physical shop open" checked={e.shop.enabled} onChange={(v) => save.mutate({ shop: { enabled: v } })} />
-      <Toggle label="✨ Digital items (frames, themes, badges)" checked={e.store.enabled} onChange={(v) => save.mutate({ store: { enabled: v } })} />
-      <Toggle label="🎁 Virtual gifts" checked={e.gifts.enabled} onChange={(v) => save.mutate({ gifts: { enabled: v } })} />
-    </Card>
-  );
-}
-
-/**
- * The spend limit. Only physical products cost the platform real money, so the
- * ₹ value of shop orders per calendar month is capped (0 = no limit).
- */
-function ShopBudgetCard({ meter }: { meter?: { monthlyBudgetInr: number; spentThisMonthInr: number } }) {
-  const qc = useQueryClient();
-  const [v, setV] = useState<number | null>(null);
-  useEffect(() => {
-    if (meter && v === null) setV(meter.monthlyBudgetInr);
-  }, [meter, v]);
-  const save = useMutation({
-    mutationFn: () => api.saveAppSettings({ monetization: { shop: { monthlyBudgetInr: Number(v) } } }),
-    onSuccess: () => {
-      toast.success("Monthly shop budget saved");
-      qc.invalidateQueries({ queryKey: ["monetization-coins"] });
-      qc.invalidateQueries({ queryKey: ["monetization-config"] });
-    },
-    onError: (err) => toast.error(describeError(err)),
-  });
-  const budget = meter?.monthlyBudgetInr ?? 0;
-  const spent = meter?.spentThisMonthInr ?? 0;
-  const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
-  return (
-    <Card title="Kharche ki limit: shop ka mahine ka budget (₹)" subtitle="Physical products are the only real cost. Orders are refused once this month's ₹ value would pass the budget.">
-      <div className="space-y-1">
-        <div className="flex justify-between text-sm">
-          <span>Is mahine: {inr(spent)}</span>
-          <span className="text-muted-foreground">{budget > 0 ? `of ${inr(budget)}` : "no limit"}</span>
-        </div>
-        {budget > 0 && (
-          <div className="h-2 rounded-full bg-secondary overflow-hidden">
-            <div className={`h-full ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-green-500"}`} style={{ width: `${pct}%` }} />
-          </div>
-        )}
-      </div>
-      <Num label="Monthly budget (₹, 0 = no limit)" value={v ?? 0} onChange={setV} />
-      <Notice>Cancelled and returned orders give their share of the budget back. Digital items and gifts don&apos;t count: they cost nothing to deliver.</Notice>
-      <div className="flex justify-end">
-        <Button onClick={() => save.mutate()} disabled={save.isPending || v === null}>Save budget</Button>
-      </div>
-    </Card>
-  );
-}

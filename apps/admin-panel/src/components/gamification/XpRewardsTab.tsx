@@ -10,9 +10,9 @@ import { StoreItemDialog, TYPE_LABEL, XP_KINDS } from "@/components/monetization
 import { Button, Card, Notice, field } from "@/components/monetization/shared";
 
 /**
- * Gamification → XP Level Rewards: the free collection, one frame / theme /
+ * Earning → Level Rewards: the free collection, one frame / theme /
  * badge / title per level 1-100. Users get each item by reaching its level;
- * nothing here is sold (DP coin items live in Shopping → Digital items).
+ * nothing here is sold (DP coin items live in Shop → Digital Items).
  */
 export function XpRewardsTab() {
   const qc = useQueryClient();
@@ -42,7 +42,7 @@ export function XpRewardsTab() {
     <div className="space-y-5">
       <Card
         title="XP Level Rewards"
-        subtitle={`Free items users unlock by reaching a level: one per level, 1 to ${maxLevel}. Never sold. Premium (DP coin) items are under Shopping → Digital items.`}
+        subtitle={`Free items users unlock by reaching a level: one per level, 1 to ${maxLevel}. Never sold. Premium (DP coin) items are under Shop → Digital Items.`}
         action={<Button onClick={() => setCreating(true)} disabled={!full || freeLevels.length === 0}>+ New reward</Button>}
       >
         {!full && <Notice tone="warning">Only full admins can change level rewards.</Notice>}

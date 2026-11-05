@@ -250,7 +250,7 @@ export default function Referrals() {
           <div className="bg-card border border-border rounded-2xl p-5 h-full text-sm text-muted-foreground">
             <p className="font-bold text-foreground mb-1">Program settings</p>
             Referral reward (dono taraf), qualify action, limits aur milestones ab{" "}
-            <Link href="/coin-economy" className="font-semibold text-foreground underline">Coin Economy → Earn</Link> mein set hote hain.
+            <Link href="/earning/free-rewards" className="font-semibold text-foreground underline">Earning → Free Rewards</Link> mein set hote hain.
             Yahan sirf referrals ki queue aur approvals hain.
           </div>
         </div>

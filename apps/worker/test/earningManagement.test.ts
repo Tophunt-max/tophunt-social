@@ -291,7 +291,7 @@ describe('audit trail and alerts', () => {
     expect(again.eventBudgets).toBe(0);
     const list = await admin(env, 'GET', '/earning/notifications');
     expect(list.status).toBe(200);
-    expect(list.body.map((n: any) => n.link)).toEqual(['/earning-events']);
+    expect(list.body.map((n: any) => n.link)).toEqual(['/earning/events']);
     expect(list.body[0].title).toContain('Diwali');
   });
 });

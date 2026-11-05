@@ -33,7 +33,7 @@ Earning (free) → 💎 Diamond → contest entry → win → 🪙 DP coin → S
   bookmark `00000057-00000000-00005114-65e6bf3a832e4d5297657598f6b42315`
   (`wrangler d1 time-travel restore tophunt-social-db --bookmark=<id>`, available for 30 days).
 
-### Physical shop (`lib/shop.ts`, admin Shopping page, app `/shop`)
+### Physical shop (`lib/shop.ts`, admin Shop section, app `/shop`)
 
 - Admin creates products with a ₹ price, ₹ delivery, images, variants with stock and a return window. DP coin price per
   unit = ceil((₹ price + ₹ delivery) ÷ ₹ per DP coin). Each order stores the coins charged and the rate used.
@@ -47,7 +47,7 @@ Earning (free) → 💎 Diamond → contest entry → win → 🪙 DP coin → S
 
 ### Product images and compare-at price (migration 0082)
 
-- Images: Shopping → Physical products → Edit has an **Upload images** button (multi-select, sequential,
+- Images: Shop → Physical Products → Edit has an **Upload images** button (multi-select, sequential,
   progress) using `api.uploadProductImage` → `POST /admin/media/product-image` (the Contests prize-image
   route), plus reorder, remove and **Set cover** (the first image is the cover). The URL textarea stays as
   "Edit URLs (advanced)". `validateProductInput` still requires ≤8 https URLs. Images uploaded in the dialog
@@ -63,7 +63,7 @@ Earning (free) → 💎 Diamond → contest entry → win → 🪙 DP coin → S
 - App: strike-through + "-X%" on the phone / desktop home product cards, the Physical tab tiles, Hot deals
   cards and the product detail; automatic and admin product deal cards get a real "UP TO X% OFF" ribbon.
 
-### Shop fraud protection (`lib/shopRisk.ts`, admin Shopping → Fraud rules)
+### Shop fraud protection (`lib/shopRisk.ts`, admin Shop → Settings → Fraud rules)
 
 Free Diamonds can end as real products, so checkout applies two kinds of rule (all thresholds editable):
 
@@ -183,7 +183,7 @@ and re-checks price and availability inside the transaction.
 
 ### Shop Collections and Diamond Bundles (migration 0088, `lib/storeBundles.ts`)
 
-- **Where:** admin Shopping → **Collections** and Shopping → **Bundles** (full admins; writes audited with
+- **Where:** admin Shop → **Collections** and Shop → **Bundles** (full admins; writes audited with
   before/after, recent sign-in required).
 - **Collections** (`store_collections`, `store_collection_items`): name, subtitle, optional artwork, accent
   (violet, blue, plum, pink, purple, gold), sort, active and 1-60 ordered catalogue items (free XP items excluded).
@@ -214,7 +214,7 @@ and re-checks price and availability inside the transaction.
 
 ### Admin-managed digital items and uploaded WebP artwork
 
-- **Where:** admin Shopping → Digital items → **+ New item** / **Edit item**. Every kind can be created and
+- **Where:** admin Shop → Digital Items → **+ New item** / **Edit item**. Every kind can be created and
   edited there: frame, theme, badge, title, sticker, collectible, effect. Name, description, rarity, kind
   (locked once anyone owns it), Premium/XP tier, animated flag, fallback colours, badge icon, title text,
   artwork, and the listing (price, original price, stock, sale window, order, on sale, refundable).
@@ -258,7 +258,7 @@ and re-checks price and availability inside the transaction.
   and these items are never sold. 0084 moved the original 40 items to levels 1-40 (each now unlocks at or
   below its old level; existing grants untouched) and added 60 items for levels 41-100 with colour/icon
   fallbacks until artwork is uploaded. Turned-off items are not granted.
-- **Admin:** Gamification → XP level rewards. `GET /admin/gamification/xp-rewards`,
+- **Admin:** Earning → Level Rewards. `GET /admin/gamification/xp-rewards`,
   `PUT /admin/gamification/xp-rewards/:id { create?, level, swap?, item }`: one item per level (a taken level
   is refused unless `swap: true`), same artwork upload and validation as Shop items, xp markers forced,
   full admin, recent sign-in, audited `gamification.xp_reward.create|update`.
@@ -272,7 +272,7 @@ and re-checks price and availability inside the transaction.
 - **Hold (bonus-chasing guard).** While an account has an OPEN `velocity`, `same_device_match` or
   `ledger_mismatch` flag, it levels up as usual but its level rewards wait: level items are not granted and
   milestone Diamond is created as `held` (not claimable). The app shows "Level rewards review me hain".
-  Switch: `progression.holdRewardsWhenFlagged` (default on; Gamification → Rules → Limits).
+  Switch: `progression.holdRewardsWhenFlagged` (default on; Earning → XP & Levels → Rules → Limits).
 - **Review.** Closing a flag (`PATCH /admin/gamification/flags/:id`, now full admin + recent sign-in) calls
   `settleLevelRewards`: the account is paid what its real XP earns. Reverse farmed XP first, then mark Actioned.
 - **Clawback.** When XP drops (admin negative adjustment, event reversal, or any sync that sees
@@ -339,7 +339,7 @@ featured: { enabled, badge (≤24, "Legendary Drop"), title (≤60), subtitle (�
 
 ### Shop slider (`appConfig.monetization.store.slider`, `lib/shopHomeConfig.ts`)
 
-Admin: Shopping → **Shop home** → Shop slider (own tab: the Digital items tab already holds the listing grid,
+Admin: Shop → **Storefront** → Shop slider (own tab: the Digital items tab already holds the listing grid,
 featured drop and purchases, and slides can also point at physical products). Saved with
 `api.saveAppSettings({ monetization: { store: { slider } } })` → `POST /admin/app-settings` (full admin, recent
 sign-in, `settings.monetization.update` audit row). Arrays replace on save, so the panel always sends the whole
@@ -382,7 +382,7 @@ target: { kind: 'items' }                       Digital tab filtered to itemIds 
 
 ### Special Offers & Daily Deals (`appConfig.monetization.store.deals`)
 
-Admin: Shopping → **Shop home** → Special Offers & Daily Deals.
+Admin: Shop → **Storefront** → Special Offers & Daily Deals.
 
 ```
 deals: { enabled (false), title (1-40, "Special Offers & Daily Deals"), cards: DealCard[] (≤6) }

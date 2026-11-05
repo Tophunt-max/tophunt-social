@@ -370,7 +370,7 @@ export async function tryCreditVerificationReward(env: Env, uid: string, ctx: Cl
         console.warn(JSON.stringify({ event: "signup_bonus.review_hold", uid, flags }));
         await env.DB.prepare(
           `INSERT INTO admin_notifications (id, title, message, link, created_at)
-           SELECT ?, 'Signup bonus review', ?, '/coin-economy?tab=diamond', ?
+           SELECT ?, 'Signup bonus review', ?, '/earning/free-rewards', ?
             WHERE NOT EXISTS (SELECT 1 FROM admin_notifications WHERE title = 'Signup bonus review' AND created_at >= ?)`,
         ).bind(crypto.randomUUID(), `Signup bonus held for review (${flags.join(", ")}).`, ts, ts - 3_600_000).run().catch(() => {});
       }

@@ -90,8 +90,8 @@ export async function runCoinAlerts(env: Env, ts = Date.now()): Promise<CoinAler
     const sent = await adminAlert(
       env,
       `Event budget ${pct >= 100 ? "khatam" : "80%+"}: ${e.title}`,
-      `"${e.title}" ke ${pct}% Diamonds claim ho gaye (${e.spent} / ${e.budget}). Zaroorat ho to Earning Management → Special Events me budget badhao.`,
-      "/earning-events",
+      `"${e.title}" ke ${pct}% Diamonds claim ho gaye (${e.spent} / ${e.budget}). Zaroorat ho to Earning → Special Events me budget badhao.`,
+      "/earning/events",
       3 * DAY,
     );
     if (sent) out.eventBudgets++;

@@ -58,7 +58,7 @@ Ranks are assigned by **level**, not by XP band: Newcomer 1–5, Creator 6–15,
 Challenger 16–30, Champion 31–50, Legend 51–100. The XP bands in the product
 brief do not fit the existing formula (level 51 needs 637,500 XP at 500/500,
 not 30,000). Keeping the formula meant nobody's level changed. An admin can
-move the curve in Gamification → Rules if the bands should be tighter, and that
+move the curve in Earning → XP & Levels → Rules if the bands should be tighter, and that
 changes levels without changing anyone's XP.
 
 ### Progression sync: `lib/achievements.ts#syncProgression`
@@ -93,7 +93,7 @@ earning rate changes except through the new daily caps.
 | like received | 0 | n/a | Deliberately no XP. |
 
 The brief proposed different amounts (vote 2, check-in 5, win 40, entry 20).
-To switch, change them in Gamification → Rules. Changes apply from then on;
+To switch, change them in Earning → XP & Levels → Rules. Changes apply from then on;
 historical XP is never recalculated. Profile completion (100) and first contest
 (50) are one-time **achievements** in the default catalog.
 
@@ -104,7 +104,7 @@ historical XP is never recalculated. Profile completion (100) and first contest
   Entries from before the ledger have no event, so nothing historical changes.
 - **Refund of a paused contest's entry**: the entry XP is reversed in the same batch.
 - **Disqualification or moderation**: staff reverse the specific events in
-  Gamification → Users. Each reversal is a new event with a reason and an actor.
+  Earning → Players & Flags. Each reversal is a new event with a reason and an actor.
 - **Admin corrections**: `POST /admin/gamification/users/:id/xp` takes a signed
   amount and a required reason. It never goes below zero, records before and
   after in the audit log, and can notify the user.
@@ -226,12 +226,12 @@ inspect users (without coin rewards) and review flags.
    - votes, entries and settlement still credit XP;
    - profiles show `levelInfo`;
    - the profile progress bar matches the server.
-3. Add test uids to `betaUids` in Gamification → Rules. Exercise achievements,
+3. Add test uids to `betaUids` in Earning → XP & Levels → Rules. Exercise achievements,
    quests, a short season (finalize it), equipping, and a milestone with coins
    against a small `free_rewards` budget.
 4. Production: deploy with the experience off. Watch the following for at least a day:
    - the `gamificationHourly` cron run in System Health (`mismatches` must stay 0);
-   - XP issued per action in Gamification → Overview;
+   - XP issued per action in Earning → XP & Levels → Overview;
    - the error logs.
 5. Turn on for beta uids, then set `enabled: true`.
 

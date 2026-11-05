@@ -10,7 +10,7 @@ import { Button, Card, Notice, Num, Text, Toggle, field, fromLocalInput, toLocal
 import { safeArtUrl } from "@/lib/shopArt";
 
 /**
- * Gamification → Events: Special events in the app's Rewards Center (worker
+ * Earning → Special Events: special events in the app's Rewards Center (worker
  * lib/rewardEvents.ts, routes/adminEvents.ts). Tasks count server-side from
  * the moment a user joins; each completed task pays its Diamonds once, from the
  * free-rewards budget, under the daily free cap and the event budget.

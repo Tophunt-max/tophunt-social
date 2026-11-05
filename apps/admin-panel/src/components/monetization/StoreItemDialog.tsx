@@ -172,7 +172,7 @@ function problemsOf(d: Draft, isNew: boolean, takenIds: string[], soldCount: num
   return p;
 }
 
-/** XP level reward mode (Gamification → XP Level Rewards): no selling, one item per level. */
+/** XP level reward mode (Earning → Level Rewards): no selling, one item per level. */
 export interface XpLevelMode {
   /** Level → the item on it now. */
   levels: Map<number, { itemId: string; name: string }>;

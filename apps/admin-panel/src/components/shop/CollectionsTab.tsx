@@ -25,7 +25,7 @@ const accentColor = (a: string) => ACCENTS.find((x) => x.id === a)?.color ?? ACC
 const ID_RE = /^[a-z0-9_-]{2,40}$/;
 const slug = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
 
-/** Shopping → Collections: groups of catalogue items shown as "Popular Collection" on the app Shop home. */
+/** Shop → Collections: groups of catalogue items shown as "Popular Collection" on the app Shop home. */
 export function CollectionsTab() {
   const qc = useQueryClient();
   const { user } = useAuth();

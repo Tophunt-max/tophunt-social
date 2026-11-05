@@ -12,7 +12,7 @@ import { Card, Notice } from "@/components/monetization/shared";
 import { earningTypeLabel } from "@/lib/earningArt";
 
 /**
- * Earning Management → Dashboard: what the Rewards Center paid out, per day
+ * Earning → Earning Dashboard: what the Rewards Center paid out, per day
  * and per reward type, plus special events and top earners (worker
  * lib/earningAnalytics.ts). House accounts are excluded. CSV export of the
  * daily summary (up to 90 days) or every ledger row (up to 31 days).
@@ -139,7 +139,7 @@ export default function EarningDashboard() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-bold text-foreground">Special events</h3>
-                <Link href="/earning-events" className="text-xs text-primary hover:underline">Manage events →</Link>
+                <Link href="/earning/events" className="text-xs text-primary hover:underline">Manage events →</Link>
               </div>
               <Table
                 data={a.events}

@@ -9,7 +9,7 @@ import { Notice } from "@/components/monetization/shared";
 import { defaultEarningArt } from "@/lib/earningArt";
 
 /**
- * Earning Management → Assets: every Rewards Center artwork slot. The app
+ * Earning → Earning Assets: every Rewards Center artwork slot. The app
  * bundles each one as a transparent WebP. Replacing one is three steps:
  *   1. pick a WebP / PNG; it is checked here first (type, 1 MB, square,
  *      128-2048 px, transparent), the same rules the Worker enforces;

@@ -53,8 +53,8 @@ export default function Dashboard() {
   // Actionable items that need an admin's attention right now.
   const o = overview.data;
   const alerts = [
-    { n: (o as any)?.pendingShopReview ?? 0, label: "shop order(s) need a fraud review", href: "/shopping?tab=orders", icon: Flag, tone: "red" as const },
-    { n: (o as any)?.pendingShopOrders ?? 0, label: "shop order(s) to pack, ship or answer", href: "/shopping?tab=orders", icon: Wallet, tone: "blue" as const },
+    { n: (o as any)?.pendingShopReview ?? 0, label: "shop order(s) need a fraud review", href: "/shop/orders?status=review", icon: Flag, tone: "red" as const },
+    { n: (o as any)?.pendingShopOrders ?? 0, label: "shop order(s) to pack, ship or answer", href: "/shop/orders", icon: Wallet, tone: "blue" as const },
     { n: o?.pendingPrizeClaims ?? 0, label: "prize claim(s) to deliver", href: "/prize-claims", icon: Banknote, tone: "amber" as const },
     { n: o?.reports ?? 0, label: "open report(s)", href: "/reports", icon: Flag, tone: "red" as const },
     { n: o?.support ?? 0, label: "pending ticket(s)", href: "/support", icon: MessageSquare, tone: "violet" as const },

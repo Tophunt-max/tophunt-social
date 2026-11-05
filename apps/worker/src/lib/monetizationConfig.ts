@@ -71,7 +71,7 @@ export interface MonetizationConfig {
    * per calendar month (UTC) is capped here. 0 = no limit.
    */
   shop: { enabled: boolean; monthlyBudgetInr: number; fraud: ShopFraudConfig; physical: ShopPhysicalConfig };
-  /** Ways to earn Diamonds that live here (others: Coin Economy → Earn). */
+  /** Ways to earn Diamonds that live here (others: admin Earning → Free Rewards). */
   earning: {
     xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number };
     /**

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 /**
  * Row editors for the progression lists (ranks, level milestones, quests) in
- * Gamification → Rules. The Worker validates every field again
+ * Earning → XP & Levels → Rules. The Worker validates every field again
  * (worker lib/progression.ts `validateProgression`); these forms only keep the
  * shape right so admins never hand-edit JSON.
  */
@@ -107,7 +107,7 @@ export function fillMilestoneRows(rows: MilestoneRow[], maxLevel: number): Miles
 /**
  * Level milestones, one row per level 1..maxLevel. The level is fixed per row
  * (it is the row); "Reset" turns a level back into a plain filler. Each row
- * shows that level's free XP item (Gamification → XP level rewards), which is
+ * shows that level's free XP item (Earning → Level Rewards), which is
  * granted on its own: milestone items are extra rewards on top of it.
  */
 export function MilestonesEditor({ rows, onChange, itemIds, maxLevel, xpRewardByLevel }: {
