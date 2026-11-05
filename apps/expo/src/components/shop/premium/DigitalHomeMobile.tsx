@@ -50,16 +50,16 @@ const WHITE = TH.colors.white;
 
 /** Geometry of the Digital tab mock (mock px at 340 wide; widths come from cellWidth). */
 export const DIGITAL_M = {
-  /** Themes / Frames: 4 dark cards (≈ width / 4 × 100 pt on a 390 phone). */
-  dark: { cols: 4, gap: 6, h: 88, radius: 10.5, name: 8.5, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 10 },
-  /** Badges: 5 cards, art ≈ 44 pt. */
-  badge: { cols: 5, gap: 5, h: 100, radius: 10, art: 42, name: 8, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
-  /** Titles: 4 cards with the title plate on a small dark stage. */
-  title: { cols: 4, gap: 6, h: 92, radius: 10, plateH: 30, name: 7.5, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
-  /** 2 × 2 gradient category cards (≈ half width × 70 pt). */
-  special: { cols: 2, gap: 7, h: 61, radius: 12, artW: 40, artH: 34, title: 10.5, sub: 7.5, price: 8.5, coin: 9, arrow: 18 },
-  /** "Special Collections" banner (≈ 90 pt). */
-  banner: { h: 78, radius: 14, title: 13.5, sub: 8.5, ctaH: 22, cta: 9.5, artW: 96, artH: 62, crown: 14 },
+  /** Themes / Frames: 4 dark cards (≈ width / 4 × 94 pt on a 390 phone). */
+  dark: { cols: 4, gap: 6, h: 82, radius: 10.5, name: 8.5, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 10 },
+  /** Badges: 5 cards, art ≈ 33 pt, 1-line name. */
+  badge: { cols: 5, gap: 5, h: 74, radius: 10, art: 29, name: 8, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
+  /** Titles: 4 cards — the plate art (its text is part of the art), a rarity pill and the price. */
+  title: { cols: 4, gap: 6, h: 77, radius: 10, plateH: 32, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
+  /** 2 × 2 gradient category cards (≈ half width × 61 pt). */
+  special: { cols: 2, gap: 7, h: 53, radius: 12, artW: 40, artH: 34, title: 10.5, sub: 7.5, price: 8.5, coin: 9, arrow: 18 },
+  /** "Special Collections" banner (≈ 69 pt). */
+  banner: { h: 60, radius: 14, title: 13, sub: 8.5, ctaH: 20, cta: 9, artW: 86, artH: 52, crown: 13 },
 } as const;
 
 /** Extra touch area so a control shorter than 44 pt still gets a 44 pt target. */
@@ -96,7 +96,7 @@ function TagPill({ tag, u, height, size, style }: { tag: DigitalTag; u: number; 
   );
 }
 
-/** Coin + "3,000 DP", or a green "Owned". */
+/** Coin + "3,000 DP", or a green "Owned". A free item (price 0) shows nothing: the FREE tag pill already says it. */
 function Price({ item, u, size, coin, color }: { item: StoreItemView; u: number; size: number; coin: number; color: string }) {
   const fs = mfont(size, u);
   if (item.owned) {
@@ -107,6 +107,7 @@ function Price({ item, u, size, coin, color }: { item: StoreItemView; u: number;
       </View>
     );
   }
+  if (item.priceCoins === 0) return null;
   return (
     <View style={[styles.price, { gap: px(2, u) }]} pointerEvents="none">
       <CoinIcon size={px(coin, u)} />
@@ -115,7 +116,7 @@ function Price({ item, u, size, coin, color }: { item: StoreItemView; u: number;
   );
 }
 
-const priceA11y = (i: StoreItemView) => (i.owned ? 'owned' : `${i.priceCoins} DP coin`);
+const priceA11y = (i: StoreItemView) => (i.owned ? 'owned' : i.priceCoins === 0 ? 'free' : `${i.priceCoins} DP coin`);
 const isPremiumArt = (i: StoreItemView) => cosmeticTier(i) === 'premium';
 
 // ------------------------------------------------------------------ Themes / Frames (dark cards)
@@ -189,7 +190,7 @@ function LightCard({ p, u, width, height, radius, a11y, onPress, children }: { p
   );
 }
 
-/** Badges Collection card: rarity pill, the badge on a small dark circle, 2-line name, price and a violet heart. */
+/** Badges Collection card: rarity pill, the badge art, 1-line name, price and a violet heart. */
 export const BadgeShelfCard = React.memo(function BadgeShelfCard({
   p, item, now, u, width, onOpen,
 }: { p: TophuntPalette; item: StoreItemView; now: number; u: number; width: number; onOpen: (id: string) => void }) {
@@ -201,10 +202,10 @@ export const BadgeShelfCard = React.memo(function BadgeShelfCard({
   const heart = px(B.heart, u);
   return (
     <LightCard p={p} u={u} width={width} height={px(B.h, u)} radius={B.radius} a11y={`${item.name}, ${tag.label}, ${priceA11y(item)}. Details kholo`} onPress={() => onOpen(item.itemId)}>
-      <View style={[styles.col, { paddingTop: px(5, u), paddingBottom: px(4, u), paddingHorizontal: px(3, u), gap: px(3, u) }]}>
+      <View style={[styles.col, { paddingTop: px(4, u), paddingBottom: px(3, u), paddingHorizontal: px(3, u), gap: px(2.5, u) }]}>
         <TagPill tag={tag} u={u} height={B.tagH} size={B.tag} />
         <ItemArt item={item} width={d} height={d} />
-        <Text style={[styles.cardName, { fontSize: nameFs, lineHeight: nameFs * 1.15, minHeight: nameFs * 1.15 * 2, color: ink }]} numberOfLines={2}>{item.name}</Text>
+        <Text style={[styles.cardName, { fontSize: nameFs, lineHeight: nameFs * 1.15, color: ink }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{item.name}</Text>
         <View style={[styles.rowCenter, { gap: px(2, u), alignSelf: 'stretch', justifyContent: 'center' }]}>
           <View style={{ flexShrink: 1, minWidth: 0 }}><Price item={item} u={u} size={B.price} coin={B.coin} color={ink} /></View>
           <WishlistHeart itemId={item.itemId} name={item.name} size={heart} bubble={false} color={p.isDark ? '#C4B5FD' : SHOP_VIOLET} hitSlop={heartSlop(heart)} />
@@ -214,7 +215,7 @@ export const BadgeShelfCard = React.memo(function BadgeShelfCard({
   );
 });
 
-/** Titles Collection card: the title plate on a small dark stage, its rarity pill, price and a violet heart. */
+/** Titles Collection card: the title plate (its text is part of the artwork), its rarity pill, price and a violet heart. */
 export const TitleShelfCard = React.memo(function TitleShelfCard({
   p, item, u, width, onOpen,
 }: { p: TophuntPalette; item: StoreItemView; u: number; width: number; onOpen: (id: string) => void }) {
@@ -229,7 +230,6 @@ export const TitleShelfCard = React.memo(function TitleShelfCard({
     <LightCard p={p} u={u} width={width} height={px(T.h, u)} radius={T.radius} a11y={`Title ${text}: ${item.name}, ${tag.label}, ${priceA11y(item)}. Details kholo`} onPress={() => onOpen(item.itemId)}>
       <View style={[styles.col, { paddingVertical: px(5, u), paddingHorizontal: px(4, u), gap: px(4, u), justifyContent: 'space-between' }]}>
         <ItemArt item={item} width={plateW} height={plateH} />
-        <Text style={[styles.cardName, { fontSize: mfont(T.name, u), lineHeight: mfont(T.name, u) * 1.2, color: ink }]} numberOfLines={1}>{text}</Text>
         <TagPill tag={tag} u={u} height={T.tagH} size={T.tag} />
         <View style={[styles.rowCenter, { gap: px(3, u), alignSelf: 'stretch', justifyContent: 'center' }]}>
           <View style={{ flexShrink: 1, minWidth: 0 }}><Price item={item} u={u} size={T.price} coin={T.coin} color={ink} /></View>
@@ -250,6 +250,7 @@ const SpecialCardM = React.memo(function SpecialCardM({
   const titleFs = mfont(S.title, u);
   const subFs = mfont(S.sub, u);
   const priceFs = mfont(S.price, u);
+  const arrowD = px(S.arrow, u);
   const a11y = card.state === 'price' && card.price !== null
     ? `${card.title}: ${card.sub}, ${card.price} DP coin se shuru. Dekho`
     : card.state === 'soon'
@@ -261,7 +262,7 @@ const SpecialCardM = React.memo(function SpecialCardM({
         colors={SHOP_DIGITAL_CAT_GRADS[index % SHOP_DIGITAL_CAT_GRADS.length]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.special, { minHeight: px(S.h, u), borderRadius: r, paddingLeft: px(5, u), paddingRight: px(20, u), paddingVertical: px(6, u), gap: px(5, u) }]}
+        style={[styles.special, { minHeight: px(S.h, u), borderRadius: r, paddingLeft: px(5, u), paddingRight: px(24, u), paddingVertical: px(6, u), gap: px(5, u) }]}
       >
         <View style={{ width: px(S.artW, u), height: px(S.artH, u) }} pointerEvents="none">
           <TileArt tile={card.tile} width={px(S.artW, u)} height={px(S.artH, u)} />
@@ -280,7 +281,7 @@ const SpecialCardM = React.memo(function SpecialCardM({
             </View>
           ) : null}
         </View>
-        <View style={[styles.abs, { bottom: px(5, u), right: px(5, u) }]}><ArrowCircle u={u} size={S.arrow} /></View>
+        <View style={[styles.abs, { top: (px(S.h, u) - arrowD) / 2, right: px(5, u) }]}><ArrowCircle u={u} size={S.arrow} /></View>
       </LinearGradient>
     </TouchableOpacity>
   );
