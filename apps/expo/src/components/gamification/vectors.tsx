@@ -29,7 +29,10 @@ function Grad({ id, colors, vertical = true }: { id: string; colors: [string, st
   );
 }
 
-/** Four-point XP spark: the app-wide XP symbol. */
+/**
+ * Four-point spark. Decorative only (SparkleBurst particles): the XP symbol is
+ * the XpIcon artwork (src/components/ui/XpIcon.tsx).
+ */
 export function XpStar({ size = 20, color = '#FFB300' }: { size?: number; color?: string }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityElementsHidden importantForAccessibility="no">

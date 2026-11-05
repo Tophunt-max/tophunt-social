@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   api,
@@ -29,11 +29,10 @@ import {
 import { PageHeader, fmtDate, fmtNumber } from "@/lib/format";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { toast } from "@/lib/toast";
-import { DiamondIcon } from "@/components/ui/DiamondIcon";
+import { CoinIcon, DiamondIcon } from "@/components/ui/DiamondIcon";
 import {
   AlertCircle,
   Clock3,
-  Coins,
   Copy,
   Image as ImageIcon,
   Loader2,
@@ -462,7 +461,7 @@ export default function Contests() {
                       <span className="truncate text-xs font-medium">{contest.prizeProductTitle || "Product"}</span>
                     </span>
                   ) : (
-                    <span title="Prize, DP coin me">🪙 {fmtNumber(contest.rewardCoins)}</span>
+                    <span className="inline-flex items-center gap-1 font-medium" title="Prize, DP coin me"><CoinIcon size={13} />{fmtNumber(contest.rewardCoins)}</span>
                   )}
                 </div>
               ),
@@ -1368,7 +1367,7 @@ function ContestDialog({
                 <PrizeTypeOption
                   selected={!isProduct}
                   disabled={saving}
-                  icon={Coins}
+                  icon={CoinIcon}
                   title="DP coin"
                   description="Winner ko DP coin milte hain (Shopping me kharch hote hain). Entry-fee pot (Diamond) tak, upar ka budget se."
                   onSelect={() => set("prizeType", "coins")}
@@ -1589,7 +1588,7 @@ function PrizeTypeOption({
 }: {
   selected: boolean;
   disabled: boolean;
-  icon: typeof Coins;
+  icon: ComponentType<{ className?: string; size?: number }>;
   title: string;
   description: string;
   onSelect: () => void;

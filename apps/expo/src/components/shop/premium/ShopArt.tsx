@@ -9,8 +9,10 @@
  * resolves to the same paint.
  */
 import React from 'react';
+import { View } from 'react-native';
 import Svg, { Circle, Defs, Ellipse, G, LinearGradient, Path, RadialGradient, Rect, Stop, Text as SvgText } from 'react-native-svg';
 import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
+import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { TH } from '@/src/theme/tophunt';
 import type { TileKey } from '@/src/lib/shopModel';
 
@@ -335,22 +337,9 @@ export function CrownLogo({ width, height }: TileArtProps) {
   );
 }
 
-/** Glossy gold DP coin. */
+/** DP coin (the app-wide coin artwork). */
 export function CoinArt({ size }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" accessibilityLabel="DP coin">
-      <Defs>
-        <RadialGradient id="sa-coin" cx="0.38" cy="0.32" r="0.8">
-          <Stop offset="0" stopColor="#FFF6C2" />
-          <Stop offset="0.45" stopColor="#FFC41A" />
-          <Stop offset="1" stopColor="#B45309" />
-        </RadialGradient>
-      </Defs>
-      <Circle cx={12} cy={12} r={11} fill="url(#sa-coin)" stroke="#92400E" strokeWidth={0.8} />
-      <Circle cx={12} cy={12} r={7.6} fill="none" stroke="#FDE68A" strokeWidth={1.1} opacity={0.9} />
-      <SvgText x={12} y={15.6} fontSize={9.5} fontFamily={TH.fonts.bold} textAnchor="middle" fill="#92400E">D</SvgText>
-    </Svg>
-  );
+  return <CoinIcon size={size} />;
 }
 
 /** Cyan Diamond (the app-wide gem). */
@@ -791,22 +780,9 @@ export const HeroWaves = React.memo(function HeroWaves({ width, height }: TileAr
 
 // ------------------------------------------------------------------ phone Digital tab (design mock) art
 
-/** Small cyan faceted diamond with a white glint, scattered around title / banner art (24×24, decorative). */
+/** Small diamond scattered around title / banner art (decorative): the app-wide Diamond artwork. */
 export function DiamondSparkle({ size }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" pointerEvents="none">
-      <Defs>
-        <LinearGradient id="sa-dsp" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#CFFAFE" />
-          <Stop offset="0.5" stopColor="#22D3EE" />
-          <Stop offset="1" stopColor="#0E7490" />
-        </LinearGradient>
-      </Defs>
-      <Path d="M6 8 L9.5 4 H14.5 L18 8 L12 20 Z" fill="url(#sa-dsp)" stroke="#ECFEFF" strokeWidth={0.7} strokeLinejoin="round" />
-      <Path d="M6 8 H18 M9.5 4 L12 8 L14.5 4 M12 8 V20" fill="none" stroke="#ECFEFF" strokeWidth={0.6} opacity={0.75} />
-      <Path d={spark(19.5, 4, 2.6)} fill="#FFFFFF" opacity={0.95} />
-    </Svg>
-  );
+  return <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"><DiamondIcon size={size} /></View>;
 }
 
 /** Gold shield with a violet inset and star ("Badges Collection" section icon, 24×24). */

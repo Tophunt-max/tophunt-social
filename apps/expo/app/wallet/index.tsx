@@ -482,7 +482,7 @@ export default function WalletScreen() {
                             activeOpacity={0.9}
                             accessibilityRole="button"
                         >
-                            <Ionicons name="sparkles" size={18} color="#FF4D67" />
+                            <DiamondIcon size={20} />
                             <Text style={styles.earnText}>Diamond kamao</Text>
                         </TouchableOpacity>
                         <TouchableOpacity

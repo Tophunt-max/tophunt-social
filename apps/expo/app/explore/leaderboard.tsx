@@ -18,11 +18,12 @@ import { compactCount, leaderboardScore, splitPodium, type LeaderboardBy } from 
 import { SectionEmpty, SectionError } from '@/src/components/explore/ExploreBits';
 import { BRAND, BRAND_GRAD, PAD, useExplorePalette, type ExplorePalette } from '@/src/components/explore/theme';
 import { ScaleTouchable } from '@/src/components/explore/ScaleTouchable';
+import { XpIcon } from '@/src/components/ui/XpIcon';
 
 const TABS: { key: LeaderboardBy; label: string; unit: string; icon: string }[] = [
   { key: 'wins', label: 'Winners', unit: 'wins', icon: 'trophy' },
   { key: 'votes', label: 'Most voted', unit: 'votes', icon: 'heart' },
-  { key: 'xp', label: 'Top XP', unit: 'XP', icon: 'flash' },
+  { key: 'xp', label: 'Top XP', unit: 'XP', icon: 'xp' },
 ];
 
 const MEDAL = ['#FFD54A', '#CBD5E1', '#F4A261'];
@@ -70,7 +71,7 @@ export default function LeaderboardScreen() {
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
             >
-              <Ionicons name={t.icon} size={14} color={active ? BRAND : p.sub} />
+              {t.icon === 'xp' ? <XpIcon size={16} /> : <Ionicons name={t.icon} size={14} color={active ? BRAND : p.sub} />}
               <Text style={[styles.tabText, { color: active ? BRAND : p.sub }]}>{t.label}</Text>
             </TouchableOpacity>
           );

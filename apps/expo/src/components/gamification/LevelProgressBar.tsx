@@ -12,7 +12,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { progressA11y, progressLabel, progressPercent, type LevelInfo } from '@/src/lib/progression';
 import { barPlan, motionTimings } from '@/src/lib/xpAnimation';
-import { XpStar } from './vectors';
+import { XpIcon } from '@/src/components/ui/XpIcon';
 
 /**
  * The XP bar, drawn from the server's `levelInfo` only.
@@ -81,7 +81,7 @@ export function LevelProgressBar({
       {showLabels ? (
         <View style={styles.header}>
           <View style={styles.labelRow}>
-            <Animated.View style={star}><XpStar size={13} color="#FF4D67" /></Animated.View>
+            <Animated.View style={star}><XpIcon size={15} /></Animated.View>
             <Text style={styles.label}>
               {info.isMaxLevel ? `Level ${info.level} · Max` : `Level ${info.level} → ${info.level + 1}`}
             </Text>

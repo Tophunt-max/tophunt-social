@@ -18,6 +18,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useAuth } from '@/src/hooks/useAuth';
 import { notificationService, NotificationItem } from '@/src/services/notifications/notificationService';
 import { getNotificationDestination, getNotificationTag } from '@/src/services/notifications/notificationMeta';
+import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
 import { Colors } from '@/constants/theme';
 import { NotificationSkeleton } from '@/src/components/notifications/NotificationSkeleton';
 import { BackButton } from '@/src/components/ui/BackButton';
@@ -87,7 +88,7 @@ const NotificationRow = React.memo(({ item, isDark, onPress }: RowProps) => {
                     transition={150}
                 />
                 <View style={[styles.badge, { backgroundColor: tag.color }]}>
-                    <Ionicons name={tag.icon} size={11} color="#FFFFFF" />
+                    {tag.icon === 'diamond' ? <DiamondIcon size={13} /> : <Ionicons name={tag.icon} size={11} color="#FFFFFF" />}
                 </View>
                 {groupCount > 1 && (
                     <View style={styles.groupCount}>

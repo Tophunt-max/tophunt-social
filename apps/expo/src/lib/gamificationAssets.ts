@@ -25,10 +25,11 @@ export type VectorId =
   | 'lockBadge'
   | 'trophy'
   | 'emptyInventory'
-  | 'rewardGift';
+  | 'rewardGift'
+  | 'diamond';
 
 /** Every vector the renderer must implement (test/gamificationAssets.test.ts checks this). */
-export const VECTOR_IDS: VectorId[] = ['xpStar', 'emblem', 'frameRing', 'lockBadge', 'trophy', 'emptyInventory', 'rewardGift'];
+export const VECTOR_IDS: VectorId[] = ['xpStar', 'emblem', 'frameRing', 'lockBadge', 'trophy', 'emptyInventory', 'rewardGift', 'diamond'];
 
 export type AssetDef =
   | { kind: 'icon'; icon: string; color: string; label: string }
@@ -150,7 +151,7 @@ export const ASSETS = {
   'reward.claimable': vec('rewardGift', BRAND, 'Reward to claim'),
   'reward.locked': vec('lockBadge', '#9AA3AD', 'Locked reward'),
   'reward.seasonal': icon('medal', '#AB47BC', 'Seasonal reward'),
-  'reward.diamond': icon('diamond', '#22D3EE', 'Diamond reward'),
+  'reward.diamond': vec('diamond', '#22D3EE', 'Diamond reward'),
   'reward.hall_of_fame': vec('trophy', '#FFB300', 'Hall of Fame'),
   'reward.empty': vec('emptyInventory', '#9AA3AD', 'Nothing here yet'),
 

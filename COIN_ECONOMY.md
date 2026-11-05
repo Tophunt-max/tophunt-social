@@ -100,8 +100,10 @@ contest card says so and shows no Diamond amount. Artwork: `apps/expo/assets/ear
 256 px, illustrations 384 px; registry `index.ts`) and the claim-burst Lottie. The WebP are rendered from the SVG
 sources in `apps/expo/design/earning/` (`scripts/gen-earning-assets.py`) by `scripts/gen-earning-webp.mjs`, which
 adds glow, drop shadow and sheen; the app bundles no SVG for this artwork. 💎 Diamond, ⚡ XP and 🪙 DP coin are not
-artwork: the Rewards Center draws the app-wide icons (`DiamondIcon`, the XP star, `CoinIcon`) like every other screen,
-and they can't be replaced from the panel. Admins can replace any other piece (below).
+Rewards Center artwork: the Rewards Center draws the app-wide icons (`DiamondIcon`, `XpIcon`, `CoinIcon`) like every
+other screen, and they can't be replaced from the panel. Those three draw `apps/expo/assets/images/currency/{diamond,xp,dp-coin}.webp`
+(192 px, built from `Diamond.png`, `XP.png`, `DP Coin.png` in the same folder by `scripts/gen-currency-webp.mjs`); the
+admin panel's `DiamondIcon` / `CoinIcon` / `XpIcon` import the same files. Admins can replace any other piece (below).
 
 ### Rewards Center Diamonds (missions, achievements, contests)
 

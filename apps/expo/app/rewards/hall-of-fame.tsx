@@ -9,6 +9,7 @@ import { VerifiedBadge } from '@/src/components/ui/VerifiedBadge';
 import { Ionicons } from '@/src/lib/icons';
 import { BRAND, PAD, useExplorePalette, type ExplorePalette } from '@/src/components/explore/theme';
 import { SectionEmpty, SectionError } from '@/src/components/explore/ExploreBits';
+import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
 import { formatXp } from '@/src/lib/progression';
 import { useHallOfFame } from '@/src/services/gamification';
 import { Trophy as TrophyArt } from '@/src/components/gamification/vectors';
@@ -42,7 +43,7 @@ export default function HallOfFameScreen() {
           <Section p={p} title="Legends" sub={`Level ${d.legendsMinLevel}+ by lifetime XP`}>
             {d.legends.length ? d.legends.map((r: any) => (
               <Person key={r.uid} p={p} rank={r.rank} name={r.fullName || r.username} avatar={r.profileImageUrlThumb || r.profileImageUrl} verified={r.verified} right={`${formatXp(r.score)} XP`} onPress={() => open(r.uid)} />
-            )) : <SectionEmpty palette={p} icon="diamond-outline" text="No Legends yet. Be the first!" />}
+            )) : <SectionEmpty palette={p} art={<DiamondIcon size={30} style={{ opacity: 0.7 }} />} text="No Legends yet. Be the first!" />}
           </Section>
           <Section p={p} title="Season champions">
             {d.seasons.length ? d.seasons.map((r: any) => (

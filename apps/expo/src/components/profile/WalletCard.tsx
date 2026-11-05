@@ -61,7 +61,8 @@ export const WalletCard = ({ Dpcoin, lockedCoins, stats, onPress, onPressWins }:
       {/* Closed loop: earn Diamonds, spend DP coin. */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.action} onPress={() => router.push('/earn' as any)} accessibilityRole="button">
-          <Text style={styles.actionText}>💎 Diamond kamao</Text>
+          <DiamondIcon size={15} />
+          <Text style={styles.actionText}>Diamond kamao</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.action} onPress={() => router.push('/shop' as any)} accessibilityRole="button">
           <Text style={styles.actionText}>🛍️ Shop</Text>
@@ -91,7 +92,7 @@ export const WalletCard = ({ Dpcoin, lockedCoins, stats, onPress, onPressWins }:
 
 const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
-  action: { flex: 1, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 12, paddingVertical: 9, alignItems: 'center' },
+  action: { flex: 1, flexDirection: 'row', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 12, paddingVertical: 9, alignItems: 'center' },
   actionText: { color: '#FFF', fontFamily: 'Urbanist-Bold', fontSize: 13 },
   container: {
     margin: 16,

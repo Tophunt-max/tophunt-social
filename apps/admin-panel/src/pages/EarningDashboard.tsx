@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, LineChart, Line } from "recharts";
-import { Download, Gem, Coins, Zap, Users, RotateCcw } from "lucide-react";
+import { Download, Users, RotateCcw } from "lucide-react";
+import { CoinIcon, DiamondIcon, XpIcon } from "@/components/ui/DiamondIcon";
 import { api, describeError, type EarningAnalytics } from "@/lib/api";
 import { PageHeader, fmtNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
@@ -82,10 +83,10 @@ export default function EarningDashboard() {
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <Kpi icon={Gem} tone="bg-cyan-500" label="Diamonds earned" value={fmtNumber(a.totals.diamondsEarned)} sub={`${fmtNumber(a.totals.claims)} reward rows`} />
+            <Kpi icon={DiamondIcon} tone="bg-cyan-500" label="Diamonds earned" value={fmtNumber(a.totals.diamondsEarned)} sub={`${fmtNumber(a.totals.claims)} reward rows`} />
             <Kpi icon={RotateCcw} tone="bg-rose-500" label="Diamonds reversed" value={fmtNumber(a.totals.diamondsReversed)} sub="Referral clawbacks" />
-            <Kpi icon={Coins} tone="bg-amber-500" label="DP coin won" value={fmtNumber(a.totals.dpcoinWon)} sub="Contest wins" />
-            <Kpi icon={Zap} tone="bg-fuchsia-500" label="XP earned" value={fmtNumber(a.totals.xp)} sub={`${fmtNumber(a.totals.xpUsers)} users`} />
+            <Kpi icon={CoinIcon} tone="bg-amber-500" label="DP coin won" value={fmtNumber(a.totals.dpcoinWon)} sub="Contest wins" />
+            <Kpi icon={XpIcon} tone="bg-fuchsia-500" label="XP earned" value={fmtNumber(a.totals.xp)} sub={`${fmtNumber(a.totals.xpUsers)} users`} />
             <Kpi icon={Users} tone="bg-violet-500" label="Diamond earners" value={fmtNumber(a.totals.earners)} sub="Distinct users" />
           </div>
 
