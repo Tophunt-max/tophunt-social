@@ -71,7 +71,7 @@ export default function LeaderboardScreen() {
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
             >
-              {t.icon === 'xp' ? <XpIcon size={16} /> : <Ionicons name={t.icon} size={14} color={active ? BRAND : p.sub} />}
+              {t.icon === 'xp' ? <XpIcon size={20} /> : <Ionicons name={t.icon} size={14} color={active ? BRAND : p.sub} />}
               <Text style={[styles.tabText, { color: active ? BRAND : p.sub }]}>{t.label}</Text>
             </TouchableOpacity>
           );

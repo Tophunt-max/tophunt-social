@@ -198,7 +198,7 @@ export default function ShopItemScreen() {
           ) : null}
           {signedIn ? (
             <View style={[styles.coinPill, { backgroundColor: p.card, borderColor: p.border }]} accessible accessibilityLabel={live ? `${bal.dpcoin} DP coin` : 'DP coin balance load ho raha hai'}>
-              <CoinIcon size={15} />
+              <CoinIcon size={20} />
               {live ? <Text style={[styles.coinText, { color: p.text }]}>{bal.dpcoin.toLocaleString()}</Text> : <Skeleton width={30} height={12} borderRadius={6} />}
             </View>
           ) : null}

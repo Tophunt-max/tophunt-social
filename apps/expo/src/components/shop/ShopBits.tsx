@@ -13,6 +13,7 @@ import { Ionicons } from '@/src/lib/icons';
 import { BRAND, BRAND_GRAD, GOLD, type ExplorePalette } from '@/src/components/explore/theme';
 import { VOTE_GRAD } from './DigitalItemCard';
 import { ORDER_STATUS_LABEL, type OrderStatus } from '@/src/services/shop';
+import { currencyIconSize } from '@/src/components/ui/CurrencyImage';
 
 export const DANGER = '#F0413E';
 export const SUCCESS = '#22A559';
@@ -74,7 +75,7 @@ export function GradientButton({
             {coins !== undefined ? (
               <>
                 <View style={styles.btnSep} />
-                <CoinIcon size={14} />
+                <CoinIcon size={19} />
                 <Text style={[styles.btnText, { color: '#FFF' }]}>{coins.toLocaleString()}</Text>
               </>
             ) : null}
@@ -136,7 +137,7 @@ export function CoinMeter({ p, have, need, live }: { p: ExplorePalette; have: nu
       accessibilityLabel={short ? `${short} DP coin short. You have ${have} of ${need}.` : `You have enough DP coin: ${have} of ${need}.`}
     >
       <View style={styles.meterRow}>
-        <CoinIcon size={14} />
+        <CoinIcon size={19} />
         <Text style={[styles.meterText, { color: p.text }]}>
           {have.toLocaleString()} <Text style={{ color: p.sub }}>/ {need.toLocaleString()} DP coin</Text>
         </Text>
@@ -171,7 +172,7 @@ export function PricePill({ coins, size = 'md', dark = false }: { coins: number;
   const fs = size === 'lg' ? 20 : size === 'sm' ? 12 : 14;
   return (
     <View style={[styles.pricePill, dark && { backgroundColor: 'rgba(0,0,0,0.6)' }, size === 'lg' && { paddingHorizontal: 12, paddingVertical: 5 }]}>
-      <CoinIcon size={fs} color={GOLD} />
+      <CoinIcon size={currencyIconSize(fs)} />
       <Text style={[styles.pricePillText, { fontSize: fs }]}>{coins.toLocaleString()}</Text>
     </View>
   );

@@ -155,7 +155,7 @@ function LedgerRow({ p, label, value, strong, tone }: { p: TophuntPalette; label
     <View style={styles.ledgerRow} accessible accessibilityLabel={`${label}: ${value === null ? 'load ho raha hai' : `${value} Diamond`}`}>
       <Text style={[styles.ledgerLabel, { color: p.sub }]}>{label}</Text>
       <View style={styles.ledgerValue}>
-        <DiamondIcon size={strong ? 16 : 14} />
+        <DiamondIcon size={strong ? 23 : 20} />
         <Text style={[strong ? styles.ledgerStrong : styles.ledgerText, { color }]}>{value === null ? '—' : value.toLocaleString()}</Text>
       </View>
     </View>
@@ -189,7 +189,7 @@ function PrimaryButton({ label, icon, diamond, onPress, busy = false }: { label:
           <>
             {icon ? <Ionicons name={icon} size={16} color="#FFF" /> : null}
             <Text style={styles.primaryText}>{label}</Text>
-            {diamond ? <DiamondIcon size={16} color="#FFFFFF" /> : null}
+            {diamond ? <DiamondIcon size={22} /> : null}
           </>
         )}
       </LinearGradient>

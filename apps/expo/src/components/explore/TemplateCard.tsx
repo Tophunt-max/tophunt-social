@@ -158,7 +158,7 @@ export const TemplateCard = React.memo(function TemplateCard({ item, onStart }: 
               <>
                 <Text style={styles.templatePrizeLabel}>WINNER GETS</Text>
                 <View style={styles.templatePrizeRow}>
-                  <CoinIcon size={15} color="#FFD54A" />
+                  <CoinIcon size={28} />
                   <Text style={styles.templatePrizeValue} numberOfLines={1}>
                     {prize.coins}
                   </Text>

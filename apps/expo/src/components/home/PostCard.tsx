@@ -839,7 +839,7 @@ export const PostCard = memo(({ item, isDark, onMatchEnded, onNotInterested, liv
             style={styles.prizeBadge}
           >
             {/* Prize in DP coins, the coin symbol used app-wide. */}
-            <CoinIcon size={12} color="#E6A200" />
+            <CoinIcon size={16} />
             <Text style={styles.prizeText} accessibilityLabel={`Prize ${prize.coins} DP coin`}>{prize.coins}</Text>
           </LinearGradient>
         ) : null}

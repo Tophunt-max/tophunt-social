@@ -101,7 +101,7 @@ export default function MyCollectionScreen() {
   const H = 40; // header row height (pt), like the phone shop header
   const pillH = px(25, u);
   const pillFs = Math.round(11.5 * u * 10) / 10;
-  const pillIcon = px(14, u);
+  const pillIcon = px(20, u);
   const titleFs = Math.round(19 * u * 10) / 10;
   const subFs = Math.round(10.5 * u * 10) / 10;
   const artW = px(64, u);

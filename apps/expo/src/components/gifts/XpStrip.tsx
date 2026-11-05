@@ -26,17 +26,17 @@ export function XpStrip({ isDark }: { isDark: boolean }) {
       accessibilityRole="button"
       accessibilityLabel={`${convertibleXp} XP. ${xpPerDiamond} XP makes 1 Diamond.`}
     >
-      <XpIcon size={30} />
+      <XpIcon size={40} />
       <View style={{ flex: 1 }}>
         <Text style={[styles.title, { color: isDark ? '#fff' : '#111' }]}>{convertibleXp} XP</Text>
         <View style={styles.subRow}>
           <Text style={styles.sub}>{xpPerDiamond} XP = 1</Text>
-          <DiamondIcon size={13} />
+          <DiamondIcon size={17} />
           <Text style={styles.sub}>Diamond</Text>
           {availableDiamonds > 0 ? (
             <>
               <Text style={styles.sub}>· abhi {availableDiamonds}</Text>
-              <DiamondIcon size={13} />
+              <DiamondIcon size={17} />
               <Text style={styles.sub}>bana sakte ho</Text>
             </>
           ) : null}

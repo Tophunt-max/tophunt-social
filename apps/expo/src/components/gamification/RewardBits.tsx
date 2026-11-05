@@ -40,7 +40,7 @@ export function XpGainPill({ amount, compact = false }: { amount: number; compac
       accessible
       accessibilityLabel={`${pos ? 'Gained' : 'Lost'} ${Math.abs(amount)} XP`}
     >
-      <GamificationIcon assetKey="xp.star" size={compact ? 12 : 14} />
+      <GamificationIcon assetKey="xp.star" size={compact ? 16 : 19} />
       <Text style={[styles.pillText, { color: pos ? '#8A5700' : '#C62828', fontSize: compact ? 11 : 12 }]}>
         {pos ? '+' : '−'}{Math.abs(amount)} XP
       </Text>

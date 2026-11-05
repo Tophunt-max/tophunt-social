@@ -43,7 +43,7 @@ export default function HallOfFameScreen() {
           <Section p={p} title="Legends" sub={`Level ${d.legendsMinLevel}+ by lifetime XP`}>
             {d.legends.length ? d.legends.map((r: any) => (
               <Person key={r.uid} p={p} rank={r.rank} name={r.fullName || r.username} avatar={r.profileImageUrlThumb || r.profileImageUrl} verified={r.verified} right={`${formatXp(r.score)} XP`} onPress={() => open(r.uid)} />
-            )) : <SectionEmpty palette={p} art={<DiamondIcon size={30} style={{ opacity: 0.7 }} />} text="No Legends yet. Be the first!" />}
+            )) : <SectionEmpty palette={p} art={<DiamondIcon size={44} style={{ opacity: 0.7 }} />} text="No Legends yet. Be the first!" />}
           </Section>
           <Section p={p} title="Season champions">
             {d.seasons.length ? d.seasons.map((r: any) => (

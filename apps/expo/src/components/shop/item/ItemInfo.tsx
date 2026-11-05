@@ -51,7 +51,7 @@ export function ItemPriceCard({ item, p, live, dpcoin }: { item: StoreItemView; 
       ) : (
         <>
           <View style={[styles.row, { flexWrap: 'wrap' }]} accessible accessibilityLabel={`Price ${item.priceCoins} DP coin${was ? `, pehle ${was}, ${pct} percent off` : ''}`}>
-            <CoinIcon size={26} />
+            <CoinIcon size={38} />
             <Text style={[styles.price, { color: p.text }]}>{item.priceCoins.toLocaleString()}</Text>
             <Text style={[styles.unit, { color: p.sub }]}>DP coin</Text>
             {was ? <Text style={[styles.was, { color: p.sub }]}>{was.toLocaleString()}</Text> : null}
@@ -69,7 +69,7 @@ export function ItemPriceCard({ item, p, live, dpcoin }: { item: StoreItemView; 
         <Text style={[styles.balLabel, { color: p.sub }]}>Aapke DP coin:</Text>
         {live ? (
           <View style={styles.row}>
-            <CoinIcon size={14} />
+            <CoinIcon size={20} />
             <Text style={[styles.balValue, { color: p.text }]}>{dpcoin.toLocaleString()}</Text>
           </View>
         ) : (

@@ -419,7 +419,7 @@ export default function BattleSetupScreen() {
             onPress={navigateToWallet} 
             style={[styles.walletContainer, { backgroundColor: cardBg }]}
          >
-            <DiamondIcon size={20} />
+            <DiamondIcon size={24} />
             <Text style={[styles.walletText, { color: textColor }]}>{userCoins}</Text>
          </TouchableOpacity>
       </View>
@@ -453,7 +453,7 @@ export default function BattleSetupScreen() {
               <Text style={[styles.playerName, { color: textColor }]} numberOfLines={1}>You</Text>
               <View style={styles.feeInfo}>
                 <Text style={styles.feeMinus}>-{fee}</Text>
-                <DiamondIcon size={18} />
+                <DiamondIcon size={22} />
               </View>
             </View>
 
@@ -486,7 +486,7 @@ export default function BattleSetupScreen() {
               </Text>
               <View style={styles.feeInfo}>
                 <Text style={styles.feeMinus}>-{fee}</Text>
-                <DiamondIcon size={18} />
+                <DiamondIcon size={22} />
               </View>
             </View>
           </View>
@@ -659,7 +659,7 @@ export default function BattleSetupScreen() {
                   <ActivityIndicator color="#FFF" />
                 ) : (
                   <View style={styles.joinBtnContent}>
-                    {!hasInsufficientCoins && <DiamondIcon size={20} color="#FFF" />}
+                    {!hasInsufficientCoins && <DiamondIcon size={26} />}
                     <Text style={styles.joinBtnText}>
                       {hasInsufficientCoins ? "Diamond kamao" : `Pay ${fee} Diamond & Join`}
                     </Text>
@@ -670,7 +670,7 @@ export default function BattleSetupScreen() {
           {/* Coin Animation */}
           {showCoinAnimation && (
             <Animated.View style={[styles.flyingCoin, animatedCoinStyle]}>
-                <DiamondIcon size={32} />
+                <DiamondIcon size={42} />
                 <Text style={styles.flyingCoinText}>-{fee}</Text>
             </Animated.View>
           )}

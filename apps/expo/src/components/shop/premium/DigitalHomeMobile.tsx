@@ -51,13 +51,13 @@ const WHITE = TH.colors.white;
 /** Geometry of the Digital tab mock (mock px at 340 wide; widths come from cellWidth). */
 export const DIGITAL_M = {
   /** Themes / Frames: 4 dark cards (≈ width / 4 × 94 pt on a 390 phone). */
-  dark: { cols: 4, gap: 6, h: 82, radius: 10.5, name: 8.5, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 10 },
+  dark: { cols: 4, gap: 6, h: 82, radius: 10.5, name: 8.5, price: 7.5, tag: 6.5, tagH: 11, coin: 11, heart: 10 },
   /** Badges: 5 cards, art ≈ 33 pt, 1-line name. */
-  badge: { cols: 5, gap: 5, h: 74, radius: 10, art: 29, name: 8, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
+  badge: { cols: 5, gap: 5, h: 74, radius: 10, art: 29, name: 8, price: 7.5, tag: 6.5, tagH: 11, coin: 11, heart: 9 },
   /** Titles: 4 cards — the plate art (its text is part of the art), a rarity pill and the price. */
-  title: { cols: 4, gap: 6, h: 77, radius: 10, plateH: 32, price: 7.5, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
+  title: { cols: 4, gap: 6, h: 77, radius: 10, plateH: 32, price: 7.5, tag: 6.5, tagH: 11, coin: 11, heart: 9 },
   /** 2 × 2 gradient category cards (≈ half width × 61 pt). */
-  special: { cols: 2, gap: 7, h: 53, radius: 12, artW: 40, artH: 34, title: 10.5, sub: 7.5, price: 8.5, coin: 9, arrow: 18 },
+  special: { cols: 2, gap: 7, h: 53, radius: 12, artW: 40, artH: 34, title: 10.5, sub: 7.5, price: 8.5, coin: 12, arrow: 18 },
   /** "Special Collections" banner (≈ 69 pt). */
   banner: { h: 60, radius: 14, title: 13, sub: 8.5, ctaH: 20, cta: 9, artW: 86, artH: 52, crown: 13 },
 } as const;

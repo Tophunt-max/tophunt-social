@@ -104,7 +104,7 @@ export const TrendRow = React.memo(function TrendRow({
           <Text style={[styles.rowSub, { color: p.sub }]} numberOfLines={1}>{`${typeLabel} · `}<Text style={{ color: t.color }}>{t.label}</Text></Text>
           {item.owned ? null : (
             <View style={styles.rowPrice}>
-              <CoinIcon size={14} />
+              <CoinIcon size={20} />
               <Text style={[styles.rowPriceText, { color: p.text }]}>{item.priceCoins.toLocaleString()}</Text>
               <DiscountTag item={item} size={10.5} color={p.sub} />
             </View>

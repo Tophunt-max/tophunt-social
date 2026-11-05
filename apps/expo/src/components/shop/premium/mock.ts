@@ -58,7 +58,7 @@ export function fitFont(text: string, width: number, max: number, floor: number 
  */
 export const MOCK = {
   crown: { y: 14, w: 56, h: 34 },
-  header: { y: 36, h: 30, logoW: 26, logoH: 22, word: 21, dpW: 125, diaW: 100, pillH: 30, cart: 26, orders: 30, gap: 8, pillText: 15, pillIcon: 18, badge: 16 },
+  header: { y: 36, h: 30, logoW: 26, logoH: 22, word: 21, dpW: 125, diaW: 100, pillH: 30, cart: 26, orders: 30, gap: 8, pillText: 15, pillIcon: 24, badge: 16 },
   title: { y: 68, h: 36, bag: 34, size: 27, tagline: 13.5 },
   tabs: { y: 106, h: 34, radius: 17, inset: 3, text: 14, icon: 15 },
   hero: { y: 147, h: 145, radius: 16 },
@@ -151,7 +151,7 @@ export function mfont(ref: number, u: number): number {
  * `gap` between them and `head` from a section header to its body.
  */
 export const MOCK_M = {
-  header: { h: 40, rowTop: 14, logo: 22, word: 17, pillH: 25, pillText: 11.5, pillIcon: 14, cart: 22, badge: 14, gap: 6 },
+  header: { h: 40, rowTop: 14, logo: 22, word: 17, pillH: 25, pillText: 11.5, pillIcon: 20, cart: 22, badge: 14, gap: 6 },
   crown: { w: 28, h: 18 },
   /** Title block: pink bag (≈36 pt on a 390 phone), "Shop" (≈28 pt), tagline, the 3D bag art (≈110 pt) on the right. */
   title: { y: 44, h: 54, bag: 31, size: 24.5, tagline: 11.3, laurel: 13, art: 84, artTop: 30 },
