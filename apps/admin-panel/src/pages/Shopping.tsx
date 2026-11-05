@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { PageHeader } from "@/lib/format";
+import { useTabParam } from "@/lib/useTabParam";
 import { OrdersTab } from "@/components/shop/OrdersTab";
 import { ProductsTab } from "@/components/shop/ProductsTab";
 import { StoreTab } from "@/components/monetization/StoreTab";
@@ -24,11 +24,10 @@ type Tab = (typeof TABS)[number]["id"];
  * and digital items, and 💎 Diamonds on Shop Bundles (items only). No ₹
  * changes hands.
  */
+const TAB_IDS = TABS.map((t) => t.id);
+
 export default function Shopping() {
-  const [tab, setTab] = useState<Tab>(() => {
-    const t = new URLSearchParams(window.location.search).get("tab");
-    return (TABS.some((x) => x.id === t) ? t : "orders") as Tab;
-  });
+  const [tab, setTab] = useTabParam<Tab>(TAB_IDS, "orders");
   return (
     <div>
       <PageHeader title="Shopping" subtitle="Users spend 🪙 DP coin on physical products and digital items, and 💎 Diamonds on bundles (items only). You ship physical orders by hand." />

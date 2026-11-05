@@ -1,8 +1,8 @@
-import { useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { api, describeError, type EarningAuditRow } from "@/lib/api";
 import { PageHeader, fmtDateTime } from "@/lib/format";
+import { useTabParam } from "@/lib/useTabParam";
 import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { SegTabs } from "@/components/finance/bits";
@@ -20,6 +20,7 @@ const TABS = [
   { key: "audit", label: "Audit trail" },
   { key: "alerts", label: "Alerts" },
 ];
+const TAB_KEYS = TABS.map((t) => t.key);
 
 function tone(action: string): any {
   if (/reverse|clawback|reset|delete|revoke|reject/.test(action)) return "danger";
@@ -91,7 +92,7 @@ function AlertsTab() {
 }
 
 export default function EarningAudit() {
-  const [tab, setTab] = useState(() => (new URLSearchParams(window.location.search).get("tab") === "alerts" ? "alerts" : "audit"));
+  const [tab, setTab] = useTabParam(TAB_KEYS, "audit");
   return (
     <div>
       <PageHeader title="Earning Audit & Alerts" subtitle="Who changed earning settings, and the alerts the earning checks raised" />

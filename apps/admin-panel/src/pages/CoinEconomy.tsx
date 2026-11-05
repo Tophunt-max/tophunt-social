@@ -26,6 +26,7 @@ import { DiamondIcon } from "@/components/ui/DiamondIcon";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/StatCard";
 import { SegTabs } from "@/components/finance/bits";
+import { useTabParam } from "@/lib/useTabParam";
 import { PageHeader, exportCsv, fmtDateTime, fmtNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -71,6 +72,7 @@ const TABS = [
   { key: "health", label: "Health" },
 ];
 /** Old tab links keep working. */
+const TAB_KEYS = TABS.map((t) => t.key);
 const TAB_ALIASES: Record<string, string> = { earn: "diamond", contests: "diamond", shopping: "dpcoin" };
 
 const KIND_LABEL: Record<PromoBudgetKind, string> = {
@@ -102,11 +104,7 @@ const field =
   "w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
 export default function CoinEconomy() {
-  const [tab, setTab] = useState(() => {
-    const raw = new URLSearchParams(window.location.search).get("tab") ?? "";
-    const t = TAB_ALIASES[raw] ?? raw;
-    return TABS.some((x) => x.key === t) ? t : "overview";
-  });
+  const [tab, setTab] = useTabParam(TAB_KEYS, "overview", TAB_ALIASES);
   return (
     <div>
       <PageHeader

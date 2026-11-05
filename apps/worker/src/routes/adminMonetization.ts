@@ -258,7 +258,7 @@ export function registerMonetizationRoutes(
               (SELECT COUNT(*) FROM store_purchases p WHERE p.item_id = r.id AND p.status = 'completed') AS purchases,
               (SELECT COALESCE(SUM(p.price_coins), 0) FROM store_purchases p WHERE p.item_id = r.id AND p.status = 'completed') AS revenue
          FROM reward_catalog r LEFT JOIN store_listings l ON l.item_id = r.id
-        WHERE json_extract(r.asset, '$.collection') IS NULL OR json_extract(r.asset, '$.collection') <> 'xp40' OR l.item_id IS NOT NULL
+        WHERE r.managed_by = 'shop' OR l.item_id IS NOT NULL
         ORDER BY (l.item_id IS NULL), l.sort, r.sort, r.id`,
     ).all<any>();
     return c.json((rows.results ?? []).map((r) => ({
@@ -276,25 +276,34 @@ export function registerMonetizationRoutes(
     const itemId = c.req.param("itemId");
     if (!ITEM_ID_RE.test(itemId)) throw httpsError("invalid-argument", "Invalid item id.");
     const item = await c.env.DB.prepare(
-      `SELECT r.id, EXISTS (SELECT 1 FROM xp_cosmetic_unlocks x WHERE x.item_id = r.id AND x.collection = 'xp40') AS xp40
+      `SELECT r.id, r.managed_by, EXISTS (SELECT 1 FROM xp_cosmetic_unlocks x WHERE x.item_id = r.id AND x.collection = 'xp40') AS xp40
          FROM reward_catalog r WHERE r.id = ?`,
     ).bind(itemId).first<any>();
-    if (!item) throw httpsError("not-found", "Catalog item not found. Create it under Gamification → Catalog first.");
-    if (item.xp40) throw httpsError("failed-precondition", "Free XP cosmetics cannot be listed for DP coin.");
+    if (!item) throw httpsError("not-found", "Catalog item not found. Create it under Shopping → Digital items first.");
+    if (item.xp40 || item.managed_by === "xp") throw httpsError("failed-precondition", "Free XP cosmetics cannot be listed for DP coin.");
     const v = validateListingInput(await c.req.json<any>().catch(() => ({})));
     const before = await c.env.DB.prepare(`SELECT * FROM store_listings WHERE item_id = ?`).bind(itemId).first<any>();
     if (before && v.stockLimit !== null && v.stockLimit < Number(before.sold_count)) {
       throw httpsError("invalid-argument", `Stock limit cannot be below the ${before.sold_count} already sold.`);
     }
+    // Listing an Earning reward item moves it to the Shop: from now on only
+    // Shopping → Digital items edits it (lib/catalogItem.ts CatalogOwner).
+    const adopted = item.managed_by !== "shop";
     const ts = Date.now();
-    await c.env.DB.prepare(
-      `INSERT INTO store_listings (item_id, price_coins, compare_at_coins, ownership, refundable, stock_limit, active, starts_at, ends_at, sort, created_at, updated_at)
-       VALUES (?, ?, ?, 'permanent', ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (item_id) DO UPDATE SET price_coins = excluded.price_coins, compare_at_coins = excluded.compare_at_coins, refundable = excluded.refundable,
-         stock_limit = excluded.stock_limit, active = excluded.active, starts_at = excluded.starts_at, ends_at = excluded.ends_at,
-         sort = excluded.sort, updated_at = excluded.updated_at`,
-    ).bind(itemId, v.priceCoins, v.compareAtCoins, v.refundable, v.stockLimit, v.active, v.startsAt, v.endsAt, v.sort, ts, ts).run();
-    await logAudit(c, before ? "store.listing.update" : "store.listing.create", "store_listing", itemId, { before, after: v });
+    const stmts = [
+      c.env.DB.prepare(
+        `INSERT INTO store_listings (item_id, price_coins, compare_at_coins, ownership, refundable, stock_limit, active, starts_at, ends_at, sort, created_at, updated_at)
+         VALUES (?, ?, ?, 'permanent', ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (item_id) DO UPDATE SET price_coins = excluded.price_coins, compare_at_coins = excluded.compare_at_coins, refundable = excluded.refundable,
+           stock_limit = excluded.stock_limit, active = excluded.active, starts_at = excluded.starts_at, ends_at = excluded.ends_at,
+           sort = excluded.sort, updated_at = excluded.updated_at`,
+      ).bind(itemId, v.priceCoins, v.compareAtCoins, v.refundable, v.stockLimit, v.active, v.startsAt, v.endsAt, v.sort, ts, ts),
+    ];
+    if (adopted) stmts.push(c.env.DB.prepare(`UPDATE reward_catalog SET managed_by = 'shop', updated_at = ? WHERE id = ?`).bind(ts, itemId));
+    await c.env.DB.batch(stmts);
+    await logAudit(c, before ? "store.listing.update" : "store.listing.create", "store_listing", itemId, {
+      before, after: v, ...(adopted ? { adoptedFrom: item.managed_by } : {}),
+    });
     return c.json({ success: true });
   });
 
@@ -318,8 +327,11 @@ export function registerMonetizationRoutes(
       `SELECT r.*, EXISTS (SELECT 1 FROM xp_cosmetic_unlocks x WHERE x.item_id = r.id AND x.collection = 'xp40') AS xp40
          FROM reward_catalog r WHERE r.id = ?`,
     ).bind(itemId).first<any>();
-    if (before?.xp40) throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification → XP Level Rewards.");
+    if (before?.xp40 || before?.managed_by === "xp") throw httpsError("failed-precondition", "Free XP cosmetics are managed under Gamification → XP Level Rewards.");
     if (body?.create === true && before) throw httpsError("already-exists", `An item with id "${itemId}" already exists. Pick another id.`);
+    // XP rows are refused above; an Earning reward item edited here moves to
+    // the Shop (listed or not), like the listing route (lib/catalogItem.ts CatalogOwner).
+    const adoptedFrom = before && before.managed_by !== "shop" ? String(before.managed_by) : null;
     await assertTypeChangeAllowed(c.env, itemId, before?.type, item.type);
 
     const listing = body?.listing == null ? null : validateListingInput(body.listing);
@@ -329,7 +341,7 @@ export function registerMonetizationRoutes(
     }
 
     const ts = Date.now();
-    const stmts = [catalogUpsertStatement(c.env, itemId, item, ts)];
+    const stmts = [catalogUpsertStatement(c.env, itemId, item, ts, "shop")];
     if (listing) {
       stmts.push(
         c.env.DB.prepare(
@@ -350,6 +362,7 @@ export function registerMonetizationRoutes(
       listingBefore: beforeListing ?? null,
       listingAfter: listing,
       ownersAffected: await itemOwnerCount(c.env, itemId),
+      ...(adoptedFrom ? { adoptedFrom } : {}),
     });
     return c.json({ success: true, itemId });
   });
