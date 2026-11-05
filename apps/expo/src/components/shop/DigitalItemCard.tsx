@@ -12,7 +12,7 @@ import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '@/src/components/ui/Avatar';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons, MaterialCommunityIcons } from '@/src/lib/icons';
+import { Ionicons, MaterialCommunityIcons } from '@/src/components/shop/ShopGlyphs';
 import { CosmeticPreview } from '@/src/components/gamification/RewardBits';
 import { CosmeticBadge, CosmeticTitleChip, FramedAvatar, ThemeBackdrop, TierPill } from '@/src/components/gamification/CosmeticBits';
 import { type ExplorePalette } from '@/src/components/explore/theme';

@@ -21,7 +21,7 @@ import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { ThemeBackdrop } from '@/src/components/gamification/CosmeticBits';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { cosmeticTier } from '@/src/lib/cosmeticArt';
 import { digitalTag, rarityPill, type DigitalTag, type ShelfType, type SpecialCard } from '@/src/lib/digitalHomeModel';
 import type { StoreItemView } from '@/src/services/monetization';

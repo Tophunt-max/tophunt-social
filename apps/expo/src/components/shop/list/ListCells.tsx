@@ -18,7 +18,7 @@ import { DiscountTag } from '@/src/components/shop/premium/DiscountTag';
 import { ProductPreview } from '@/src/components/shop/premium/ProductPreview';
 import { SparkleField, TileArt } from '@/src/components/shop/premium/ShopArt';
 import { ArtStage, cardShadow } from '@/src/components/shop/premium/surface';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { rankMedal } from '@/src/lib/shopListModel';
 import { TYPE_SINGULAR, dealTimerLabel, type TileKey } from '@/src/lib/shopModel';
 import type { StoreItemView } from '@/src/services/monetization';

@@ -8,11 +8,11 @@
 import React from 'react';
 import { Platform, StyleSheet, TouchableOpacity, type StyleProp, type ViewStyle } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import Heart from 'lucide-react-native/icons/heart';
 import { Alert } from '@/src/lib/appAlert';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useMonetizationConfig, useToggleWishlist, useWishlist } from '@/src/services/monetization';
 import { TH } from '@/src/theme/tophunt';
+import { ShopIcon } from '@/src/components/shop/ShopIcon';
 
 export function WishlistHeart({
   itemId, name, size = 16, style, color = '#FFFFFF', bubble = true, hitSlop = 8,
@@ -51,7 +51,7 @@ export function WishlistHeart({
       accessibilityLabel={`${name ? `${name}: ` : ''}${on ? 'Wishlist se hatao' : 'Wishlist mein daalo'}`}
       style={[bubble && [styles.bubble, { width: box, height: box, borderRadius: box / 2 }], style]}
     >
-      <Heart size={size} color={on ? TH.colors.primary : color} fill={on ? TH.colors.primary : 'transparent'} strokeWidth={2.2} />
+      <ShopIcon name={on ? 'uiHeartFilled' : 'uiHeart'} size={size} color={on ? TH.colors.primary : color} />
     </TouchableOpacity>
   );
 }

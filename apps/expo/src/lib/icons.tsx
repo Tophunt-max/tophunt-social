@@ -14,6 +14,7 @@
  * Unmapped names fall back to a neutral Circle (never a crash).
  */
 import React from 'react';
+import { IconOverrideContext } from './iconOverride';
 import type { StyleProp, ViewStyle, TextStyle } from 'react-native';
 import Circle from 'lucide-react-native/icons/circle';
 import AlarmClock from 'lucide-react-native/icons/alarm-clock';
@@ -342,8 +343,12 @@ const feather: Record<string, LucideIcon> = {
   'download': ic('Download'), 'upload': ic('Upload'), 'plus': ic('Plus'), 'user': ic('User'),
 };
 
-function makeIconSet(map: Record<string, LucideIcon>) {
+function makeIconSet(map: Record<string, LucideIcon>, set?: 'ionicons' | 'mci') {
   const Comp = ({ name, size = 24, color = '#000000', style }: IconProps) => {
+    const override = React.useContext(IconOverrideContext);
+    // A screen can draw these names from its own artwork (the Shop: WebP in assets/icons/shop).
+    const custom = override && set ? override({ kind: set, name }, size, color, style) : null;
+    if (custom) return custom;
     const Glyph = (name && map[name]) || Circle;
     return <Glyph size={size} color={color} style={style as any} />;
   };
@@ -352,8 +357,16 @@ function makeIconSet(map: Record<string, LucideIcon>) {
   return Comp as React.FC<IconProps> & { glyphMap: Record<string, LucideIcon> };
 }
 
-export const Ionicons = makeIconSet(ionicons);
-export const MaterialCommunityIcons = makeIconSet(mci);
+/** The lucide glyph name an icon-set name resolves to ('Circle' for an unknown name). Used by the Shop's WebP glyphs. */
+const NAME_OF = new Map<LucideIcon, string>(Object.entries(I).map(([n, c]) => [c, n]));
+export function lucideNameOf(set: 'ionicons' | 'mci', name: string | undefined): string {
+  const map = set === 'ionicons' ? ionicons : mci;
+  const c = name ? map[name] : undefined;
+  return (c && NAME_OF.get(c)) || 'Circle';
+}
+
+export const Ionicons = makeIconSet(ionicons, 'ionicons');
+export const MaterialCommunityIcons = makeIconSet(mci, 'mci');
 export const FontAwesome5 = makeIconSet(fa5);
 export const Feather = makeIconSet(feather);
 

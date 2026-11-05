@@ -67,7 +67,7 @@ describe('Shop artwork', () => {
       expect(Math.abs(info!.w / info!.h - w / h), `${key} aspect`).toBeLessThan((w / h) * 0.02);
       expect(Math.max(info!.w, info!.h), `${file} size`).toBeGreaterThanOrEqual(128);
       expect(bytes.length, `${file} bytes`).toBeLessThan(40 * 1024);
-      if (tint) expect(file.startsWith('glyphs/'), `${key} tint`).toBe(true);
+      if (tint) expect(/^(glyphs|ui)\//.test(file), `${key} tint`).toBe(true);
     }
     expect(total).toBeLessThan(400 * 1024);
   });
@@ -89,5 +89,80 @@ describe('Shop artwork', () => {
     const art = fs.readFileSync(path.join(ROOT, 'src', 'components', 'shop', 'premium', 'ShopArt.tsx'), 'utf8');
     const svgs = [...art.matchAll(/<Svg\b/g)].length;
     expect(svgs).toBe(2); // SparkleField, HeroWaves
+  });
+});
+
+/** Every Shop source file: the routes, the Shop components, and the models that feed them icon names. */
+const SHOP_SOURCES = [
+  ...walk(path.join(ROOT, 'app', 'shop')),
+  ...walk(path.join(ROOT, 'src', 'components', 'shop')),
+  ...['shopModel', 'shopItemModel', 'shopListModel', 'digitalHomeModel', 'physicalHomeModel', 'collectionHomeModel'].map((f) => path.join(ROOT, 'src', 'lib', `${f}.ts`)),
+].filter((f) => /\.tsx?$/.test(f));
+/** Shared components drawn inside the Shop whose icon names go through the Shop's WebP glyphs. */
+const SHARED_IN_SHOP = ['src/components/explore/ExploreBits.tsx', 'src/components/gamification/RarityPill.tsx', 'src/components/gamification/CosmeticBits.tsx', 'src/components/gamification/RewardBits.tsx'];
+/**
+ * Vector drawing a Shop file may still contain, and why: none of these is an
+ * icon. Background glows and gradients sized to the screen, and the hero
+ * headline text (live text, so it can't be an image).
+ */
+const SVG_ALLOWED: Record<string, string> = {
+  'src/components/shop/premium/ShopArt.tsx': 'SparkleField / HeroWaves banner overlays',
+  'app/shop/index.tsx': 'page background glow',
+  'src/components/shop/item/ItemHero.tsx': 'item hero glow',
+  'src/components/shop/premium/HeroBanner.tsx': 'slide light rays and headline text',
+};
+
+function shimMaps() {
+  const shim = fs.readFileSync(path.join(ROOT, 'src', 'lib', 'icons.tsx'), 'utf8');
+  const block = (name: string) => {
+    const s = shim.indexOf(`const ${name}: Record<string, LucideIcon> = {`);
+    return shim.slice(s, shim.indexOf('\n};', s));
+  };
+  const parse = (b: string) => Object.fromEntries([...b.matchAll(/'([\w-]+)': ic\('(\w+)'\)/g)].map((m) => [m[1], m[2]]));
+  const g = shim.indexOf('// Gamification (ranks, achievements, cosmetics)');
+  return { ion: parse(block('ionicons')), mci: parse(block('mci')), catalog: parse(shim.slice(g, shim.indexOf('\n};', g))) };
+}
+
+describe('every Shop icon is a WebP in assets/icons/shop', () => {
+  const keys = new Set(appList().map(([k]) => k));
+  const { ion, mci, catalog } = shimMaps();
+
+  it('every icon name the Shop can request has its ui/ WebP (including server catalog names)', () => {
+    const missing: string[] = [];
+    const need = (lucide: string, where: string) => { const k = lucide === 'X' ? 'uiClose' : `ui${lucide}`; if (!keys.has(k)) missing.push(`${k} (${where})`); };
+    // ShopGlyphs.tsx is the resolver itself (its strings are request kinds, not icon names).
+    for (const f of [...SHOP_SOURCES, ...SHARED_IN_SHOP.map((r) => path.join(ROOT, r))].filter((x) => !x.endsWith('ShopGlyphs.tsx'))) {
+      const src = fs.readFileSync(f, 'utf8');
+      for (const m of src.matchAll(/['"]([a-z][\w-]*)['"]/g)) {
+        if (ion[m[1]]) need(ion[m[1]], `${rel(ROOT, f)}: ${m[1]}`);
+        if (/MaterialCommunityIcons/.test(src) && mci[m[1]]) need(mci[m[1]], `${rel(ROOT, f)}: mci ${m[1]}`);
+      }
+    }
+    for (const [name, lucide] of Object.entries(catalog)) need(lucide, `catalog ${name}`);
+    for (const k of ['uiCircle', 'uiChevron', 'uiArrow', 'uiClose', 'uiCloseCircle', 'uiHeartFilled']) expect(keys.has(k), k).toBe(true);
+    expect([...new Set(missing)]).toEqual([]);
+  });
+
+  it('Shop files never draw vector icons directly', () => {
+    for (const f of SHOP_SOURCES) {
+      const src = fs.readFileSync(f, 'utf8');
+      const r = rel(ROOT, f);
+      // ShopGlyphs resolves names through the shim (and draws WebP); nothing else may import it.
+      if (!r.endsWith('ShopGlyphs.tsx')) expect(src, `${r} imports the vector icon shim`).not.toMatch(/from '@\/src\/lib\/icons'/);
+      expect(src, `${r} imports lucide`).not.toMatch(/from 'lucide-react-native/);
+      expect(src, `${r} imports raw svg assets`).not.toMatch(/from '@\/assets\/svgs'/);
+      expect(src, `${r} uses @expo/vector-icons`).not.toMatch(/@expo\/vector-icons/);
+      if (/from 'react-native-svg'/.test(src)) expect(SVG_ALLOWED[r], `${r} draws SVG`).toBeTruthy();
+    }
+  });
+
+  it('every Shop route is inside ShopIconScope, so shared components use the WebPs too', () => {
+    const layout = fs.readFileSync(path.join(ROOT, 'app', 'shop', '_layout.tsx'), 'utf8');
+    expect(layout).toMatch(/<ShopIconScope>[\s\S]*<Stack/);
+    for (const f of ['src/lib/icons.tsx', 'src/components/ui/ArrowIcon.tsx', 'src/components/ui/CloseIcon.tsx']) {
+      expect(fs.readFileSync(path.join(ROOT, f), 'utf8'), f).toMatch(/useContext\(IconOverrideContext\)/);
+    }
+    // The bottom nav is app-wide and keeps its own icons inside the Shop.
+    expect(fs.readFileSync(path.join(ROOT, 'src/components/home/BottomNav.tsx'), 'utf8')).toMatch(/<IconOverrideContext\.Provider value=\{null\}>/);
   });
 });

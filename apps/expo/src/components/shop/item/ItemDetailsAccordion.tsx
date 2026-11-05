@@ -7,7 +7,7 @@ import React, { useCallback, useState } from 'react';
 import { LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { EQUIP_WHERE } from '@/src/lib/shopModel';
 import type { StoreItemView } from '@/src/services/monetization';
 import { BRAND, TH, type TophuntPalette } from '@/src/theme/tophunt';

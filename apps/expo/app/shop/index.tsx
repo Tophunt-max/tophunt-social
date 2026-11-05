@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { emitToast } from '@/src/lib/toastBridge';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
 import { DealCard, ProductTile } from '@/src/components/shop/ShopTiles';

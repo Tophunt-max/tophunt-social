@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BackButton } from '@/src/components/ui/BackButton';
 import { AppImage } from '@/src/components/ui/AppImage';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { emitToast } from '@/src/lib/toastBridge';
 import { BRAND, BRAND_GRAD, GOLD, PAD, useExplorePalette } from '@/src/components/explore/theme';
 import { CoinMeter, DANGER, GhostButton, GradientButton, PricePill, ShopCard, ShopHeader, Stepper } from '@/src/components/shop/ShopBits';

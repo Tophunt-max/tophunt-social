@@ -17,7 +17,7 @@ import Animated, { FadeInDown, FadeInUp, useReducedMotion } from 'react-native-r
 import * as Haptics from 'expo-haptics';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
 import { Avatar } from '@/src/components/ui/Avatar';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useDesignWindow } from '@/src/lib/layout';
 import { formatXp } from '@/src/lib/progression';

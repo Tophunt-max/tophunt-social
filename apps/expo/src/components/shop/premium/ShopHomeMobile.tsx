@@ -22,7 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { discountOf, type CardTag, type CategoryTile, type CollectionCard, type DealCardView, type DealsSummary, type PopularCollection, type ShopNav } from '@/src/lib/shopModel';
 import {
   SHOP_ACCENT_GRADS,

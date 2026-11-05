@@ -15,7 +15,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { bundleAllOwned, bundleItemsLine } from '@/src/lib/shopModel';
 import { SHOP_BUNDLE_GRAD, SHOP_TAG_NEW, SHOP_YELLOW_BTN, SHOP_YELLOW_INK, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';

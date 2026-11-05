@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { BRAND, BRAND_GRAD, PAD, useExplorePalette } from '@/src/components/explore/theme';
 import { SectionError } from '@/src/components/explore/ExploreBits';
 import { ScaleTouchable } from '@/src/components/explore/ScaleTouchable';

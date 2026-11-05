@@ -15,7 +15,7 @@ import { cosmeticTier } from '@/src/lib/cosmeticArt';
 import { RarityPill } from '@/src/components/gamification/RarityPill';
 import { CosmeticPreview, GamificationError } from '@/src/components/gamification/RewardBits';
 import { useEquipCosmetic, useInventory, type InventoryItemView } from '@/src/services/gamification';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 
 const BG = '#07111F';
 const CARD = '#0D1B2E';

@@ -21,19 +21,10 @@ import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import Svg, { Path } from 'react-native-svg';
-import Heart from 'lucide-react-native/icons/heart';
-import TrendingUp from 'lucide-react-native/icons/trending-up';
-import Shirt from 'lucide-react-native/icons/shirt';
-import Headphones from 'lucide-react-native/icons/headphones';
-import Watch from 'lucide-react-native/icons/watch';
-import Coffee from 'lucide-react-native/icons/coffee';
-import Gift from 'lucide-react-native/icons/gift';
-import Package from 'lucide-react-native/icons/package';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import {
   productTag,
   type PhysicalCategory,
@@ -55,6 +46,8 @@ import { MOCK_M, cellWidth, mfont, px } from './mock';
 import { CrownIcon, DiamondSparkle, FlameIcon, GiftArt, TabGlyph, TrophyIcon } from './ShopArt';
 import { SectionHeaderM } from './ShopHomeMobile';
 import { lavenderShadow, shopBorder } from './surface';
+import { ShopIcon } from '@/src/components/shop/ShopIcon';
+import type { ShopIconKey } from '@/assets/icons/shop';
 
 const WHITE = TH.colors.white;
 
@@ -88,7 +81,7 @@ function HeroArt({ width, height }: { width: number; height: number }) {
         <GiftArt width={width * 0.52} height={height * 0.72} />
       </View>
       <View style={[styles.abs, { left: width * 0.1, bottom: height * 0.06 }]}>
-        <Shirt size={height * 0.52} color="#FFD9E1" />
+        <ShopIcon name="uiShirt" size={height * 0.52} color="#FFD9E1" />
       </View>
       <View style={[styles.abs, { right: width * 0.42, bottom: 0 }]}>
         <TrophyIcon size={height * 0.4} />
@@ -175,7 +168,7 @@ function SavedHeart({ id, name, saved, size, onToggle }: { id: string; name: str
       accessibilityState={{ selected: saved }}
       accessibilityLabel={`${name}: ${saved ? 'Saved se hatao' : 'Save karo'}`}
     >
-      <Heart size={size} color={BRAND} fill={saved ? BRAND : 'transparent'} strokeWidth={2.2} />
+      <ShopIcon name={saved ? 'uiHeartFilled' : 'uiHeart'} size={size} color={BRAND} />
     </TouchableOpacity>
   );
 }
@@ -216,7 +209,7 @@ export const ProductCardM = React.memo(function ProductCardM({
           {img ? (
             <AppImage source={{ uri: img }} displayWidth={Math.round(width - px(8, u))} style={{ width: width - px(8, u), height: px(F.imgH, u) }} contentFit="contain" transition={0} accessibilityLabel={product.title} />
           ) : (
-            <Package size={px(F.imgH, u) * 0.7} color={p.sub} />
+            <ShopIcon name="uiPackage" size={px(F.imgH, u) * 0.7} color={p.sub} />
           )}
         </View>
         <Text style={[styles.cardName, { fontSize: nameFs, lineHeight: nameFs * 1.2, color: ink }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{product.title}</Text>
@@ -241,23 +234,10 @@ export const ProductCardM = React.memo(function ProductCardM({
 // ------------------------------------------------------------------ Categories row
 
 /** Baseball cap outline (lucide has none), same stroke style as the other category icons. */
-function CapOutline({ size, color }: { size: number; color: string }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 13 C5 8.6 8.1 5.5 12 5.5 C15.9 5.5 19 8.6 19 13" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M4 13 L20 13 C22.5 13 22.5 16.5 19 16.5 L5 16.5 C1.5 16.5 1.5 13 4 13 Z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-    </Svg>
-  );
-}
+const CAT_ICON: Record<PhysCatIcon, ShopIconKey> = { shirt: 'uiShirt', cap: 'uiCap', headphones: 'uiHeadphones', watch: 'uiWatch', mug: 'uiCoffee', gift: 'uiGift', box: 'uiPackage' };
 
 function CatIcon({ icon, size }: { icon: PhysCatIcon; size: number }) {
-  if (icon === 'shirt') return <Shirt size={size} color={BRAND} />;
-  if (icon === 'cap') return <CapOutline size={size} color={BRAND} />;
-  if (icon === 'headphones') return <Headphones size={size} color={BRAND} />;
-  if (icon === 'watch') return <Watch size={size} color={BRAND} />;
-  if (icon === 'mug') return <Coffee size={size} color={BRAND} />;
-  if (icon === 'gift') return <Gift size={size} color={BRAND} />;
-  return <Package size={size} color={BRAND} />;
+  return <ShopIcon name={CAT_ICON[icon] ?? 'uiPackage'} size={size} color={BRAND} />;
 }
 
 /** Categories row: 6 white tiles — the admin's uploaded image when there is one, else the pink outline icon — and the category name. */
@@ -412,7 +392,7 @@ export function PhysicalHomeMobile({ p, u, inner, now, featured, trending, exclu
 
       {trending.length ? (
         <View style={{ marginTop: gap }}>
-          <SectionHeaderM p={p} u={u} icon={<TrendingUp size={icon} color={BRAND} />} title="Trending Products" action={{ label: 'View All', onPress: onAllTrending }} />
+          <SectionHeaderM p={p} u={u} icon={<ShopIcon name="uiTrendingUp" size={icon} color={BRAND} />} title="Trending Products" action={{ label: 'View All', onPress: onAllTrending }} />
           {productRow(trending)}
         </View>
       ) : null}

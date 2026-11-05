@@ -6,7 +6,7 @@ import { CosmeticFx, ShimmerSweep } from '@/src/components/gamification/Cosmetic
 import { CosmeticArtGraphic } from '@/src/components/gamification/CosmeticGraphic';
 import { ThemeBackdrop } from '@/src/components/gamification/CosmeticBits';
 import { CosmeticPreview } from '@/src/components/gamification/RewardBits';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { cosmeticArt, titlePlateHasText } from '@/src/lib/cosmeticArt';
 import { assetColors } from '@/src/lib/progression';
 import { TH, rarityToken } from '@/src/theme/tophunt';

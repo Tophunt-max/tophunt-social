@@ -12,7 +12,7 @@ import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-nativ
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { discountOf, type CardTag, type CategoryTile, type CollectionTile, type DealCardView, type ShopNav } from '@/src/lib/shopModel';
 import { BRAND, BRAND_BUTTON, BRAND_GRAD, TH, TH_DARK, rarityToken, type TophuntPalette } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';

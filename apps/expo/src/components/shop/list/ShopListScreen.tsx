@@ -31,7 +31,7 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { useAuthGate } from '@/src/hooks/useAuthGate';
 import { useProfile } from '@/src/hooks/useProfileData';
 import { balancesOf, hasLiveBalance } from '@/src/lib/balances';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { useDesignWindow, webPhoneColumn } from '@/src/lib/layout';
 import { countLabel } from '@/src/lib/shopListModel';
 import { BRAND, BRAND_BUTTON, TH, gridCellWidth, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';

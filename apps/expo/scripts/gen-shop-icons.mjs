@@ -9,9 +9,11 @@
  * Each file keeps its viewBox aspect ratio. Longest side per group:
  *   tiles 192 px (category / collection tiles, up to ~64 pt at 3x)
  *   art 384 px   (banners: winged crown, shop bag, chest, ornaments)
- *   icons, glyphs 128 px (section and small icons, up to ~42 pt at 3x)
- * `glyphs/` are single-colour white line art the app tints at runtime, saved
- * lossless so the tint stays clean; the rest are lossy with full-quality alpha.
+ *   icons, glyphs, ui 128 px (section and small icons, up to ~42 pt at 3x)
+ * `glyphs/` and `ui/` are single-colour white line art the app tints at
+ * runtime (ui/ is every functional Shop icon: cart, search, lock, time…),
+ * saved lossless so the tint stays clean; the rest are lossy with
+ * full-quality alpha.
  *
  * Needs sharp (with librsvg), which is not an app dependency:
  *   npm i --no-save sharp@0.34 && node apps/expo/scripts/gen-shop-icons.mjs
@@ -34,7 +36,7 @@ try {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, '..', 'design', 'shop');
 const OUT = path.join(HERE, '..', 'assets', 'icons', 'shop');
-const LONG_SIDE = { tiles: 192, art: 384, icons: 128, glyphs: 128 };
+const LONG_SIDE = { tiles: 192, art: 384, icons: 128, glyphs: 128, ui: 128 };
 
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
 
@@ -56,7 +58,7 @@ for (const file of walk(SRC).filter((f) => f.endsWith('.svg')).sort()) {
   const out = path.join(OUT, rel.replace(/\.svg$/, '.webp'));
   fs.mkdirSync(path.dirname(out), { recursive: true });
   const img = sharp(svg, { density }).resize(w, h, { fit: 'fill', kernel: 'lanczos3' });
-  await (group === 'glyphs'
+  await (group === 'glyphs' || group === 'ui'
     ? img.webp({ lossless: true, effort: 6 })
     : img.webp({ quality: 90, alphaQuality: 100, effort: 6, smartSubsample: true })
   ).toFile(out);

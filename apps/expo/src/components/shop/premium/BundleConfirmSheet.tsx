@@ -15,7 +15,7 @@ import Animated, { FadeIn, FadeInUp, useReducedMotion } from 'react-native-reani
 import { LinearGradient } from 'expo-linear-gradient';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
 import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { balanceAfter, bundleItemsLine, bundleOwnedNote, isShort, TYPE_SINGULAR, type BundleErrorView } from '@/src/lib/shopModel';
 import { BRAND, BRAND_BUTTON, SHOP_BUNDLE_GRAD, TH, rarityToken, type TophuntPalette } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';

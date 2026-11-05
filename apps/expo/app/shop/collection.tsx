@@ -28,7 +28,7 @@ import { CollectionHomeMobile } from '@/src/components/shop/collection/Collectio
 import { GiftArt, LaurelSprig, VioletCrownIcon, DiamondSparkle } from '@/src/components/shop/premium/ShopArt';
 import { MOCK_M_MARGIN, mobileScale, px } from '@/src/components/shop/premium/mock';
 import { ErrorState } from '@/src/components/shop/premium/ShopBlocks';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { notificationService } from '@/src/services/notifications/notificationService';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useProfile } from '@/src/hooks/useProfileData';

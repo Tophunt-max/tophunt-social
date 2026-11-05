@@ -11,7 +11,7 @@ import { Skeleton } from '@/src/components/ui/Skeleton';
 import { useCoinRate } from '@/src/hooks/useCoinRate';
 import { useCountdown } from '@/src/hooks/useCountdown';
 import { coinsInInr } from '@/src/lib/coinValue';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { availability, coinsShort } from '@/src/lib/shopItemModel';
 import { TYPE_SINGULAR, discountOf } from '@/src/lib/shopModel';
 import type { StoreItemView } from '@/src/services/monetization';

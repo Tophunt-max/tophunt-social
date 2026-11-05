@@ -13,7 +13,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, type AccessibilityActionEvent, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { dealTimerLabel } from '@/src/lib/shopModel';
 import { BRAND, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import { MOCK_M, mfont, px } from './mock';

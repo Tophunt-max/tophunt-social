@@ -4,6 +4,7 @@ import { useRouter, usePathname } from 'expo-router';
 import * as Icons from '@/assets/svgs';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@/src/lib/icons';
+import { IconOverrideContext } from '@/src/lib/iconOverride';
 import { Colors } from '@/constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFeature } from '@/src/services/appSettings';
@@ -143,6 +144,8 @@ export const BottomNav = ({ backgroundColor, isDark, collectionActive = false }:
   });
 
   return (
+    // The bottom nav is app-wide: it keeps its own icons inside the Shop too.
+    <IconOverrideContext.Provider value={null}>
     <View>
     {/* Guests only: the persistent Log in / Sign up strip (renders nothing when signed in). */}
     <GuestBanner isDark={isDark} />
@@ -304,6 +307,7 @@ export const BottomNav = ({ backgroundColor, isDark, collectionActive = false }:
         </Modal>
     </View>
     </View>
+    </IconOverrideContext.Provider>
   );
 };
 

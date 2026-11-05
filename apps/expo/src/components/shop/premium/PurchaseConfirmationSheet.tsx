@@ -13,7 +13,7 @@ import Animated, { FadeInUp, useReducedMotion } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { CloseIcon } from '@/src/components/ui/CloseIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { balanceAfter, isShort, TYPE_SINGULAR, type PurchaseErrorView } from '@/src/lib/shopModel';
 import { BRAND, BRAND_BUTTON, TH, type TophuntPalette } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
