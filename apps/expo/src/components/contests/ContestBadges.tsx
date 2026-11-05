@@ -120,7 +120,7 @@ export function ContestEntryBadge({
       accessibilityLabel={`Entry costs ${fee} Diamonds`}
     >
       {/* Entry fees are paid in Diamonds only (src/lib/balances.ts). */}
-      <DiamondIcon size={iconSize} color={PAID_FG} />
+      <DiamondIcon size={small ? 16 : 18} />
       <Text
         style={[styles.badgeText, styles.numeric, { color: PAID_FG }, small && styles.badgeTextSm]}
         numberOfLines={1}
@@ -245,7 +245,7 @@ export function ContestPrizeLine({
       </Text>
       {/* A coin prize is paid in DP coins (src/lib/balances.ts). */}
       <View style={styles.prizeValueRow} accessible accessibilityLabel={`Winner gets ${prize.coins} DP coins`}>
-        <CoinIcon size={16} color={COIN_FG} />
+        <CoinIcon size={24} />
         <Text style={[styles.prizeValue, { color: COIN_FG }]} numberOfLines={1} maxFontSizeMultiplier={MAX_SCALE}>
           {prize.coins} DP coin
         </Text>

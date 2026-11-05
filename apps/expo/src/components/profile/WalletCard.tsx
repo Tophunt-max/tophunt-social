@@ -38,7 +38,7 @@ export const WalletCard = ({ Dpcoin, lockedCoins, stats, onPress, onPressWins }:
           <View accessible accessibilityLabel={`${dpcoin} DP coins, for shopping`}>
             <Text style={styles.label}>DP coin</Text>
             <View style={styles.coinRow}>
-              <CoinIcon size={24} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <CoinIcon size={34} style={{ marginRight: 6 }} />
               <Text style={styles.coinValue}>{dpcoin}</Text>
             </View>
             <Text style={styles.split}>{value ? `Shopping · ${value}` : 'Shopping ke liye'}</Text>
@@ -47,7 +47,7 @@ export const WalletCard = ({ Dpcoin, lockedCoins, stats, onPress, onPressWins }:
           <View accessible accessibilityLabel={`${diamonds} Diamonds, for contest entry only`}>
             <Text style={styles.label}>Diamond</Text>
             <View style={styles.coinRow}>
-              <DiamondIcon size={24} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <DiamondIcon size={34} style={{ marginRight: 6 }} />
               <Text style={styles.coinValue}>{diamonds}</Text>
             </View>
             <Text style={styles.split}>Contest entry ke liye</Text>
@@ -61,7 +61,7 @@ export const WalletCard = ({ Dpcoin, lockedCoins, stats, onPress, onPressWins }:
       {/* Closed loop: earn Diamonds, spend DP coin. */}
       <View style={styles.actions}>
         <TouchableOpacity style={styles.action} onPress={() => router.push('/earn' as any)} accessibilityRole="button">
-          <DiamondIcon size={15} />
+          <DiamondIcon size={19} />
           <Text style={styles.actionText}>Diamond kamao</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.action} onPress={() => router.push('/shop' as any)} accessibilityRole="button">

@@ -50,7 +50,7 @@ export const COLLECTION_M = {
   /** Type section: header + one row of 6 cells (or the expanded grid). */
   section: { icon: 15, title: 13, link: 10 },
   /** Item cell: art, equipped check and the bottom pill. */
-  cell: { cols: 6, gap: 5, h: 62, radius: 10, art: 30, artThemeH: 24, artTitleH: 15, pill: 13, pillText: 6.5, pillIcon: 7.5, check: 12 },
+  cell: { cols: 6, gap: 5, h: 62, radius: 10, art: 30, artThemeH: 24, artTitleH: 15, pill: 13, pillText: 6.5, pillIcon: 10.5, check: 12 },
 } as const;
 
 /** Extra touch area so a control shorter than 44 pt still gets a 44 pt target. */
@@ -99,7 +99,7 @@ export function CollectionModeToggle({ p, u, width, mode, onChange }: { p: Tophu
   };
   return (
     <View style={[styles.row, { width, gap }]} accessibilityRole="tablist">
-      {side('free', <DiamondIcon size={px(T.icon, u)} />, 'Free Collection', 'Earned / Unlocked (Free)')}
+      {side('free', <DiamondIcon size={px(T.icon + 4, u)} />, 'Free Collection', 'Earned / Unlocked (Free)')}
       {side('dp', <CrownIcon size={px(T.icon, u)} />, 'DP Coin Collection', 'Purchased with DP Coin')}
     </View>
   );

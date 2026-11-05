@@ -131,7 +131,7 @@ function LedgerRow({ p, label, value, strong, tone }: { p: TophuntPalette; label
     <View style={styles.ledgerRow} accessible accessibilityLabel={`${label}: ${value === null ? 'load ho raha hai' : `${value} DP coin`}`}>
       <Text style={[styles.ledgerLabel, { color: p.sub }]}>{label}</Text>
       <View style={styles.ledgerValue}>
-        <CoinIcon size={strong ? 16 : 14} />
+        <CoinIcon size={strong ? 23 : 20} />
         <Text style={[strong ? styles.ledgerStrong : styles.ledgerText, { color }]}>{value === null ? '—' : value.toLocaleString()}</Text>
       </View>
     </View>

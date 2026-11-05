@@ -93,7 +93,7 @@ export default function PhotoContestsScreen() {
         
         <View style={[styles.walletBadge, { backgroundColor: cardBg }]}>
            {/* Contest screens show Diamonds: the balance entry fees are paid from. */}
-           <DiamondIcon size={18} />
+           <DiamondIcon size={22} />
            <Text style={[styles.walletText, { color: textColor }]}>{balancesOf(profile).diamonds}</Text>
         </View>
       </View>

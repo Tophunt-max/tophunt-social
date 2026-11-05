@@ -41,7 +41,7 @@ const BOARDS: { key: Board; label: string }[] = [
   { key: 'diamonds', label: 'Top Earners' },
 ];
 
-const BOARD_ICON: Record<Board, React.ReactNode> = { xp: <XpIcon size={16} />, diamonds: <DiamondIcon size={16} /> };
+const BOARD_ICON: Record<Board, React.ReactNode> = { xp: <XpIcon size={20} />, diamonds: <DiamondIcon size={20} /> };
 
 /**
  * Leaderboards: XP (today / week / month / season / all time) and Top
@@ -136,7 +136,7 @@ export default function XpLeaderboardScreen() {
           refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => { q.refetch(); me.refetch(); }} tintColor={BRAND} />}
           onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()}
           onEndReachedThreshold={0.4}
-          ListEmptyComponent={<SectionEmpty palette={p} art={isXp ? <XpIcon size={30} style={{ opacity: 0.7 }} /> : <DiamondIcon size={30} style={{ opacity: 0.7 }} />} text={isXp ? 'No XP earned yet in this period. Be the first!' : 'Is period me abhi tak kisi ne Diamond reward nahi kamaya. Pehle bano!'} />}
+          ListEmptyComponent={<SectionEmpty palette={p} art={isXp ? <XpIcon size={44} style={{ opacity: 0.7 }} /> : <DiamondIcon size={44} style={{ opacity: 0.7 }} />} text={isXp ? 'No XP earned yet in this period. Be the first!' : 'Is period me abhi tak kisi ne Diamond reward nahi kamaya. Pehle bano!'} />}
           ListFooterComponent={q.isFetchingNextPage ? <ActivityIndicator color={BRAND} style={{ marginVertical: 16 }} /> : null}
           renderItem={({ item }) => (
             <Row r={item} p={p} unit={unit} fmt={fmt} prevRank={prevRanks?.get(item.uid)} isMe={item.uid === user?.uid} onOpen={() => router.push(`/profile?userId=${encodeURIComponent(item.uid)}` as any)} />
@@ -150,7 +150,7 @@ export default function XpLeaderboardScreen() {
             <Text style={styles.meLabel}>Your rank</Text>
             <View style={{ flex: 1 }} />
             <Text style={styles.meScore}>{fmt(me.data.score)}{isXp ? ' XP' : ''}</Text>
-            {isXp ? null : <DiamondIcon size={16} />}
+            {isXp ? null : <DiamondIcon size={22} />}
           </LinearGradient>
         </View>
       ) : null}
@@ -192,7 +192,7 @@ const Row = React.memo(function Row({ r, p, isMe, onOpen, prevRank, unit, fmt }:
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         <Text style={[styles.score, { color: BRAND }]}>{fmt(r.score)}</Text>
-        {unit === 'XP' ? <Text style={[styles.unit, { color: p.sub }]}>{unit}</Text> : <DiamondIcon size={13} />}
+        {unit === 'XP' ? <Text style={[styles.unit, { color: p.sub }]}>{unit}</Text> : <DiamondIcon size={18} />}
       </View>
     </TouchableOpacity>
   );

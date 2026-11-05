@@ -486,7 +486,7 @@ function TopBar({
           <Skeleton width={76} height={38} borderRadius={19} />
         ) : (
           <TouchableOpacity style={[styles.coinChip, { backgroundColor: p.chip }]} onPress={onWallet} accessibilityRole="button" accessibilityLabel={`${coins} Diamonds. Earn Diamonds`}>
-            <DiamondIcon size={14} />
+            <DiamondIcon size={22} />
             <Text style={[styles.coinText, { color: p.text }]}>{coins.toLocaleString()}</Text>
             <View style={styles.coinPlus}>
               <Ionicons name="add" size={13} color="#FFF" />

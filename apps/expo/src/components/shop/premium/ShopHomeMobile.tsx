@@ -229,7 +229,7 @@ export const FeatureCardM = React.memo(function FeatureCardM({
               </>
             ) : (
               <>
-                <CoinIcon size={px(10, u)} />
+                <CoinIcon size={px(13, u)} />
                 <Text style={[styles.priceText, { fontSize: priceFs, color: WHITE }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{`${item.priceCoins.toLocaleString()} DP`}</Text>
               </>
             )}
@@ -273,7 +273,7 @@ export const TrendCardM = React.memo(function TrendCardM({ p, item, u, width, vi
           </>
         ) : (
           <>
-            <CoinIcon size={px(10, u)} />
+            <CoinIcon size={px(13, u)} />
             <Text style={[styles.priceText, { fontSize: priceFs, color: ink }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{item.priceCoins.toLocaleString()}</Text>
           </>
         )}
@@ -356,7 +356,7 @@ export function DealCardM({
     if (c.product) {
       price = (
         <View style={[styles.price, { gap: px(3, u), marginTop: px(2, u) }]}>
-          <CoinIcon size={px(11, u)} />
+          <CoinIcon size={px(14, u)} />
           <Text style={[styles.priceText, { fontSize: mfont(10, u), color: WHITE }]} numberOfLines={1}>{c.product.priceCoins.toLocaleString()} DP</Text>
         </View>
       );
@@ -369,7 +369,7 @@ export function DealCardM({
     sub = pct > 0 ? `${prod.title} • ${pct}% OFF` : prod.title;
     price = (
       <View style={[styles.price, { gap: px(3, u), marginTop: px(2, u) }]}>
-        <CoinIcon size={px(11, u)} />
+        <CoinIcon size={px(14, u)} />
         <Text style={[styles.priceText, { fontSize: mfont(10, u), color: WHITE }]} numberOfLines={1}>{prod.priceCoins.toLocaleString()} DP</Text>
         {pct ? <Text style={[styles.was, { fontSize: mfont(8, u), color: 'rgba(255,255,255,0.7)' }]} numberOfLines={1}>{Number(prod.compareAtCoins).toLocaleString()}</Text> : null}
       </View>

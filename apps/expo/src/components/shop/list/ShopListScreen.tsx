@@ -262,7 +262,7 @@ function BalancePill({ p, currency }: { p: TophuntPalette; currency: 'dp' | 'dia
       accessibilityLabel={live ? `${value.toLocaleString()} ${unit}. Wallet kholo` : `${unit} balance load ho raha hai`}
       style={[styles.pill, { backgroundColor: p.card, borderColor: p.border }]}
     >
-      {currency === 'diamond' ? <DiamondIcon size={15} /> : <CoinIcon size={15} />}
+      {currency === 'diamond' ? <DiamondIcon size={20} /> : <CoinIcon size={20} />}
       {live ? <Text style={[styles.pillText, { color: p.text }]}>{value.toLocaleString()}</Text> : <Skeleton width={30} height={12} borderRadius={6} />}
     </TouchableOpacity>
   );

@@ -40,7 +40,7 @@ export function NeedDiamondsSheet({
       <Pressable style={styles.back} onPress={onClose} accessibilityLabel="Close">
         <Pressable style={[styles.sheet, { backgroundColor: card }]} onPress={() => undefined}>
           <LinearGradient colors={['#FF4D67', '#8B5CF6']} style={styles.icon}>
-            <DiamondIcon size={28} color="#FFF" />
+            <DiamondIcon size={44} />
           </LinearGradient>
           <Text style={[styles.title, { color: text }]}>Diamond kam hain</Text>
           <Text style={[styles.body, { color: sub }]}>
@@ -56,7 +56,7 @@ export function NeedDiamondsSheet({
                   <>
                     <Ionicons name="play" size={16} color="#FFF" />
                     <Text style={styles.ctaText}>Ad dekho · +{ad.reward}</Text>
-                    <DiamondIcon size={14} color="#FFF" />
+                    <DiamondIcon size={20} />
                   </>
                 )}
               </LinearGradient>

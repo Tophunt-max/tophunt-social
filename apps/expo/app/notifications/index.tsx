@@ -88,7 +88,7 @@ const NotificationRow = React.memo(({ item, isDark, onPress }: RowProps) => {
                     transition={150}
                 />
                 <View style={[styles.badge, { backgroundColor: tag.color }]}>
-                    {tag.icon === 'diamond' ? <DiamondIcon size={13} /> : <Ionicons name={tag.icon} size={11} color="#FFFFFF" />}
+                    {tag.icon === 'diamond' ? <DiamondIcon size={15} /> : <Ionicons name={tag.icon} size={11} color="#FFFFFF" />}
                 </View>
                 {groupCount > 1 && (
                     <View style={styles.groupCount}>

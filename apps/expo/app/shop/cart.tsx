@@ -132,7 +132,7 @@ export default function CartScreen() {
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                           <Stepper p={p} value={l.qty} label={l.title} onMinus={() => setQty(l.variantId, l.qty - 1)} onPlus={() => setQty(l.variantId, l.qty + 1)} />
                           <View style={{ flex: 1 }} />
-                          <CoinIcon size={14} />
+                          <CoinIcon size={20} />
                           <Text style={[styles.lineTotal, { color: p.text }]}> {(l.unitCoins * l.qty).toLocaleString()}</Text>
                         </View>
                       </View>
@@ -167,7 +167,7 @@ export default function CartScreen() {
               <Text style={[styles.sub, { color: p.sub }]}>Delivery included</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <CoinIcon size={20} />
+              <CoinIcon size={32} />
               <Text style={[styles.total, { color: p.text }]}>{cart.total.toLocaleString()}</Text>
             </View>
           </View>

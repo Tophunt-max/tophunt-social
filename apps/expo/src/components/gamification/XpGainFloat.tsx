@@ -45,7 +45,7 @@ export function XpGainFloat({ item, onDone }: { item: XpGainItem | null; onDone:
   return (
     <View pointerEvents="none" style={styles.anchor}>
       <Animated.View style={[styles.pill, style]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Animated.View style={star}><XpIcon size={16} /></Animated.View>
+        <Animated.View style={star}><XpIcon size={18} /></Animated.View>
         <Text style={styles.text}>+{item.amount} XP</Text>
       </Animated.View>
     </View>

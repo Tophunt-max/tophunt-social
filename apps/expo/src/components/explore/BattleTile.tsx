@@ -100,7 +100,7 @@ export const BattleTile = React.memo(function BattleTile({
             <MaterialCommunityIcons name="gift" size={13} color={GOLD} />
           ) : prize.coins > 0 ? (
             <View style={styles.prize}>
-              <CoinIcon size={11} color={GOLD} />
+              <CoinIcon size={16} />
               <Text style={styles.prizeText}>{compactCount(prize.coins)}</Text>
             </View>
           ) : null}

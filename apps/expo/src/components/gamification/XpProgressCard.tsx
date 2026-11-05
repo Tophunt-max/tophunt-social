@@ -134,7 +134,7 @@ export function LevelRoadmap({
                 ))}
                 {m.coins > 0 ? (
                   <View style={[styles.chip, { backgroundColor: p.chip }]}>
-                    <GamificationIcon assetKey="reward.diamond" size={12} />
+                    <GamificationIcon assetKey="reward.diamond" size={17} />
                     <Text style={[styles.chipText, { color: p.text }]}>{m.coins}</Text>
                   </View>
                 ) : null}

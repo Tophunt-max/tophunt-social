@@ -14,6 +14,7 @@ import { ScaleTouchable } from '@/src/components/explore/ScaleTouchable';
 import { BRAND_GRAD, GOLD, type ExplorePalette } from '@/src/components/explore/theme';
 import { VOTE_GRAD } from './DigitalItemCard';
 import { DiscountTag } from './premium/DiscountTag';
+import { currencyIconSize } from '@/src/components/ui/CurrencyImage';
 
 export interface ShopProduct {
   id: string;
@@ -58,7 +59,7 @@ function RoundAction({ icon, onPress, busy, locked, owned, p, label, size = 36 }
 function Price({ coins, p, size = 15 }: { coins: number; p: ExplorePalette; size?: number }) {
   return (
     <View style={styles.price}>
-      <CoinIcon size={size} />
+      <CoinIcon size={currencyIconSize(size + 1)} />
       <Text style={[styles.priceText, { color: p.text, fontSize: size + 1 }]}>{coins.toLocaleString()}</Text>
     </View>
   );
@@ -135,7 +136,7 @@ export function DealCard({ item, width, p, canAfford, onPress }: { item: ShopPro
         <View style={{ flex: 1, gap: 3 }}>
           <Text style={styles.dealTitle} numberOfLines={1}>{item.title}</Text>
           <View style={styles.price}>
-            <CoinIcon size={15} color={GOLD} />
+            <CoinIcon size={22} />
             <Text style={[styles.priceText, { color: GOLD, fontSize: 17 }]}>{item.priceCoins.toLocaleString()}</Text>
             <DiscountTag item={item} size={12} color="#E5E7EB" />
           </View>

@@ -25,6 +25,7 @@ import { ProductPreview } from './ProductPreview';
 import { GiftArt, GiftIcon } from './ShopArt';
 import { SectionHeaderM } from './ShopHomeMobile';
 import { lavenderShadow } from './surface';
+import { currencyIconSize } from '@/src/components/ui/CurrencyImage';
 
 const WHITE = TH.colors.white;
 /** Cards on the phone home. */
@@ -104,7 +105,7 @@ function PricePill({ price, u }: { price: number; u: number }) {
   const fs = mfont(10, u);
   return (
     <LinearGradient colors={SHOP_YELLOW_BTN} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={[styles.pill, { height: h, borderRadius: h / 2, gap: px(3, u), paddingHorizontal: px(6, u) }]}>
-      <DiamondIcon size={fs + 1} />
+      <DiamondIcon size={Math.min(h - 2, currencyIconSize(fs))} />
       <Text style={[styles.pillText, { fontSize: fs, color: SHOP_YELLOW_INK }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{price.toLocaleString()}</Text>
     </LinearGradient>
   );
