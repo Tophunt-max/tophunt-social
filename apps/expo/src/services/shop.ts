@@ -69,10 +69,19 @@ export const SHOP_KEYS = {
   xp: ['earning', 'xp-conversion'] as const,
 };
 
+export interface ShopProductsResult {
+  products: ShopProduct[];
+  /** Product ids by units sold in the last 30 days (worker shop.ts trendingProductIds); older servers send none. */
+  trending: string[];
+}
+
 export function useShopProducts(enabled: boolean) {
   return useQuery({
     queryKey: SHOP_KEYS.products,
-    queryFn: async () => ((await callApi('getShopProducts')) as { products: ShopProduct[] }).products,
+    queryFn: async () => {
+      const body = (await callApi('getShopProducts')) as { products: ShopProduct[]; trending?: string[] };
+      return { products: body.products, trending: body.trending ?? [] };
+    },
     enabled,
     staleTime: 30_000,
   });

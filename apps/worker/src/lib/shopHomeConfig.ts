@@ -500,3 +500,99 @@ export function publicDeals(
     }));
   return cards.length ? { title: d.title, cards } : null;
 }
+
+// ------------------------------------------------------------------ physical home (categories, exclusive)
+
+export const PHYSICAL_LIMITS = { maxCategories: 12, maxExclusive: 12, label: 40 } as const;
+
+/** Admin-managed category tile of the Physical tab: which product category, its display label and its image. */
+export interface ShopCategoryConfig {
+  key: string;
+  label: string;
+  imageUrl: string | null;
+  sort: number;
+}
+
+/**
+ * The Physical tab's admin-managed blocks (appConfig.monetization.shop.physical):
+ * the Categories row (tiles with an uploaded image) and the Exclusive
+ * Collection (product ids, admin order). The app falls back to derived
+ * categories / hides the shelf when a list is empty, and a tile / product
+ * still reads its live data (count, price, stock) from the catalogue.
+ */
+export interface ShopPhysicalConfig {
+  categories: ShopCategoryConfig[];
+  exclusive: string[];
+}
+
+export const PHYSICAL_DEFAULTS: ShopPhysicalConfig = { categories: [], exclusive: [] };
+
+function checkCategory(raw: unknown, path: string, bad: Bad = mkBad()): ShopCategoryConfig {
+  const c = isObj(raw) ? raw : bad(`${path} must be an object.`);
+  const key = typeof c.key === "string" && ITEM_ID_RE.test(c.key) ? c.key : bad(`${path}.key must be a product category (2-40 lowercase letters, digits, - or _).`);
+  const label = typeof c.label === "string" && c.label.trim().length >= 2 && c.label.trim().length <= PHYSICAL_LIMITS.label ? c.label.trim() : bad(`${path}.label must be 2-${PHYSICAL_LIMITS.label} characters.`);
+  const imageUrl = c.imageUrl == null || c.imageUrl === "" ? null : isSafeImageUrl(c.imageUrl) ? c.imageUrl : bad(`${path}.imageUrl must be an https image url.`);
+  const sort = Number.isInteger(c.sort) && (c.sort as number) >= 0 && (c.sort as number) <= 9999 ? (c.sort as number) : bad(`${path}.sort must be an integer 0-9999.`);
+  return { key, label, imageUrl, sort };
+}
+
+/** Admin patch of shop.physical: unknown fields and malformed entries are refused, the whole save fails. */
+export function validatePhysicalPatch(v: unknown): void {
+  if (v === undefined) return;
+  const p = isObj(v) ? v : mkBad()("shop.physical must be an object.");
+  for (const k of Object.keys(p)) if (k !== "categories" && k !== "exclusive") mkBad()(`shop.physical.${k} is not a known field.`);
+  if (p.categories !== undefined) {
+    if (!Array.isArray(p.categories)) mkBad()("shop.physical.categories must be a list.");
+    if (p.categories.length > PHYSICAL_LIMITS.maxCategories) mkBad()(`shop.physical.categories: at most ${PHYSICAL_LIMITS.maxCategories}.`);
+    const seen = new Set<string>();
+    for (const [i, x] of p.categories.entries()) {
+      const c = checkCategory(x, `categories[${i}]`);
+      if (seen.has(c.key)) mkBad()(`categories[${i}].key ${c.key} is used twice.`);
+      seen.add(c.key);
+    }
+  }
+  if (p.exclusive !== undefined) {
+    if (!Array.isArray(p.exclusive)) mkBad()("shop.physical.exclusive must be a list of product ids.");
+    if (p.exclusive.length > PHYSICAL_LIMITS.maxExclusive) mkBad()(`shop.physical.exclusive: at most ${PHYSICAL_LIMITS.maxExclusive}.`);
+    const seen = new Set<string>();
+    for (const [i, x] of p.exclusive.entries()) {
+      if (typeof x !== "string" || !PRODUCT_ID_RE.test(x)) mkBad()(`exclusive[${i}] must be a product id.`);
+      if (seen.has(x)) mkBad()(`exclusive[${i}] ${x} is listed twice.`);
+      seen.add(x);
+    }
+  }
+}
+
+/** The stored physical-home block with defaults; never throws. A malformed category / id is dropped. */
+export function parsePhysical(raw: unknown): ShopPhysicalConfig {
+  const s = isObj(raw) ? raw : {};
+  const categories: ShopCategoryConfig[] = [];
+  const seen = new Set<string>();
+  for (const [i, x] of (Array.isArray(s.categories) ? s.categories : []).entries()) {
+    if (categories.length >= PHYSICAL_LIMITS.maxCategories) break;
+    try {
+      const c = checkCategory(x, `categories[${i}]`);
+      if (seen.has(c.key)) continue;
+      seen.add(c.key);
+      categories.push(c);
+    } catch {
+      /* dropped */
+    }
+  }
+  categories.sort((a, b) => a.sort - b.sort);
+  const exclusive: string[] = [];
+  const seenIds = new Set<string>();
+  for (const x of Array.isArray(s.exclusive) ? s.exclusive : []) {
+    if (exclusive.length >= PHYSICAL_LIMITS.maxExclusive) break;
+    if (typeof x !== "string" || !PRODUCT_ID_RE.test(x) || seenIds.has(x)) continue;
+    seenIds.add(x);
+    exclusive.push(x);
+  }
+  return { categories, exclusive };
+}
+
+/** The physical-home block as the app may see it, or null: only while the shop is open and there is something to show. */
+export function publicPhysical(shopEnabled: boolean, v: ShopPhysicalConfig): ShopPhysicalConfig | null {
+  if (!shopEnabled) return null;
+  return v.categories.length || v.exclusive.length ? { categories: v.categories, exclusive: v.exclusive } : null;
+}

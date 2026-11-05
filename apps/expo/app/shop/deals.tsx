@@ -46,10 +46,10 @@ export default function ShopDealsScreen() {
   const u = mobileScale(contentW);
 
   const products = useShopProducts(!!user && cfg.shop.enabled);
-  const allProducts = useMemo(() => (cfg.shop.enabled ? products.data ?? [] : []), [cfg.shop.enabled, products.data]);
+  const allProducts = useMemo(() => (cfg.shop.enabled ? products.data?.products ?? [] : []), [cfg.shop.enabled, products.data]);
   const physical = useMemo(() => physicalDeals(allProducts), [allProducts]);
   const cards = useMemo(
-    () => resolveDealCards(cfg.store.deals, cfg.store.enabled ? d.items : [], cfg.shop.enabled ? products.data ?? null : null, now),
+    () => resolveDealCards(cfg.store.deals, cfg.store.enabled ? d.items : [], cfg.shop.enabled ? products.data?.products ?? null : null, now),
     [cfg.store.deals, cfg.store.enabled, d.items, cfg.shop.enabled, products.data, now],
   );
 

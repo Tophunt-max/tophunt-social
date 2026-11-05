@@ -27,7 +27,7 @@ export default function ProductScreen() {
   const { user } = useAuth();
   const cfg = useMonetizationConfig();
   const q = useShopProducts(!!user && cfg.shop.enabled);
-  const product = useMemo(() => q.data?.find((x) => x.id === id), [q.data, id]);
+  const product = useMemo(() => q.data?.products.find((x) => x.id === id), [q.data, id]);
   const [variantId, setVariantId] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
   const [img, setImg] = useState(0);
