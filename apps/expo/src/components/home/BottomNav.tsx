@@ -19,9 +19,11 @@ const { height } = Dimensions.get('window');
 interface BottomNavProps {
     backgroundColor: string;
     isDark: boolean;
+    /** My Collection page (design mock): the last tab slot reads "My Collection" (active) instead of Profile. */
+    collectionActive?: boolean;
 }
 
-export const BottomNav = ({ backgroundColor, isDark }: BottomNavProps) => {
+export const BottomNav = ({ backgroundColor, isDark, collectionActive = false }: BottomNavProps) => {
   const router = useRouter();
   const pathname = usePathname();
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -102,7 +104,8 @@ export const BottomNav = ({ backgroundColor, isDark }: BottomNavProps) => {
 
   const NavItem = ({ icon: InactiveIcon, activeIcon: ActiveIcon, label, path, prefix }: any) => {
     // `prefix`: the tab also stays active on its sub-screens (Shop → item, bundle, collections…).
-    const isActive = pathname === path || (prefix && pathname.startsWith(`${path}/`));
+    // On the My Collection page (collectionActive) only its own tab lights up.
+    const isActive = collectionActive ? path === '/shop/collection' : pathname === path || (prefix && pathname.startsWith(`${path}/`));
     const color = isActive ? activeColor : inactiveColor;
     const CurrentIcon = isActive ? ActiveIcon : InactiveIcon;
 
@@ -198,12 +201,21 @@ export const BottomNav = ({ backgroundColor, isDark }: BottomNavProps) => {
               path="/messages" 
           />
         )}
-        <NavItem 
-            icon={Icons.Profile_Light} 
-            activeIcon={Icons.Profile_Dark} 
-            label="Profile" 
-            path="/profile" 
-        />
+        {collectionActive ? (
+          <NavItem
+              icon={Icons.Profile_Light}
+              activeIcon={Icons.Profile_Dark}
+              label="My Collection"
+              path="/shop/collection"
+          />
+        ) : (
+          <NavItem
+              icon={Icons.Profile_Light}
+              activeIcon={Icons.Profile_Dark}
+              label="Profile"
+              path="/profile"
+          />
+        )}
 
         <Modal
             visible={showAddMenu}
