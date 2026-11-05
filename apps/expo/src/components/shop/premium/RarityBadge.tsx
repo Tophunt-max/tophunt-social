@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialCommunityIcons } from '@/src/lib/icons';
+import { MaterialCommunityIcons } from '@/src/components/shop/ShopGlyphs';
 import { TH, rarityToken } from '@/src/theme/tophunt';
 
 /**

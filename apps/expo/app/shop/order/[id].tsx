@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { emitToast } from '@/src/lib/toastBridge';
 import { BRAND, PAD, useExplorePalette } from '@/src/components/explore/theme';
 import { DANGER, GhostButton, GradientButton, ProductThumb, ShopCard, ShopHeader, StatusPill, StepTrack, statusColor } from '@/src/components/shop/ShopBits';

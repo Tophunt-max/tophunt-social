@@ -22,7 +22,7 @@ import { useCountdown } from '@/src/hooks/useCountdown';
 import { useDigitalPurchase } from '@/src/hooks/useDigitalPurchase';
 import { useProfile } from '@/src/hooks/useProfileData';
 import { balancesOf, hasLiveBalance } from '@/src/lib/balances';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { appShareOrigin, shareBattleLink } from '@/src/lib/share';
 import {
   bundlesWithItem,

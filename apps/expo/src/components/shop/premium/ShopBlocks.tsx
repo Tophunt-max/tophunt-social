@@ -5,7 +5,7 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { BRAND, BRAND_BUTTON, TH, type TophuntPalette } from '@/src/theme/tophunt';

@@ -8,7 +8,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { timeLeftLabel } from '@/src/lib/shareCaptions';
 import { TYPE_SINGULAR } from '@/src/lib/shopModel';
 import { BRAND, BRAND_BUTTON, TH, rarityToken, type TophuntPalette } from '@/src/theme/tophunt';

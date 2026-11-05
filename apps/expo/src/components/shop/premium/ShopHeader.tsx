@@ -5,7 +5,7 @@ import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
 import { Skeleton } from '@/src/components/ui/Skeleton';
 import { useImageAspect } from '@/src/components/home/Header';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { fitArt } from '@/src/lib/layout';
 import { useAppConfig } from '@/src/services/appSettings';
 import { BRAND, SHOP_NAVY, TH, type TophuntPalette } from '@/src/theme/tophunt';

@@ -1,6 +1,7 @@
 import React from 'react';
 import { type StyleProp, type ViewStyle } from 'react-native';
 import { Close_X, Close_Circle_Outline } from '@/assets/svgs';
+import { IconOverrideContext } from '@/src/lib/iconOverride';
 
 /**
  * The only close/dismiss glyph in the app.
@@ -37,6 +38,10 @@ export type CloseIconProps = {
 };
 
 function CloseIconComponent({ size = 24, color, variant = 'plain', style }: CloseIconProps) {
+    // The Shop draws its own WebP close glyph (src/lib/iconOverride.ts).
+    const override = React.useContext(IconOverrideContext);
+    const custom = override ? override({ kind: variant === 'circle' ? 'close-circle' : 'close' }, size, color, style) : null;
+    if (custom) return custom;
     const Glyph = variant === 'circle' ? Close_Circle_Outline : Close_X;
 
     return (

@@ -9,7 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BackButton } from '@/src/components/ui/BackButton';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { BRAND, BRAND_GRAD, GOLD, type ExplorePalette } from '@/src/components/explore/theme';
 import { VOTE_GRAD } from './DigitalItemCard';
 import { ORDER_STATUS_LABEL, type OrderStatus } from '@/src/services/shop';

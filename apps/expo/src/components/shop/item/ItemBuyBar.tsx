@@ -8,7 +8,7 @@ import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View, type LayoutChangeEvent } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { coinsShort, type BuyBarState } from '@/src/lib/shopItemModel';
 import { discountOf } from '@/src/lib/shopModel';
 import type { StoreItemView } from '@/src/services/monetization';

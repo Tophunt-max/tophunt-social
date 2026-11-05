@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { Left_Arrow, Arrow_Right } from '@/assets/svgs';
+import { IconOverrideContext } from '@/src/lib/iconOverride';
 
 /**
  * The only directional arrow in the app.
@@ -53,6 +54,10 @@ function ArrowIconComponent({ size = 24, color, direction, variant = 'chevron', 
     const dir = direction ?? (isChevron ? 'left' : 'right');
     const Glyph = isChevron ? Left_Arrow : Arrow_Right;
     const needsMirror = isChevron ? dir === 'right' : dir === 'left';
+    // The Shop draws its own WebP arrow (src/lib/iconOverride.ts).
+    const override = React.useContext(IconOverrideContext);
+    const custom = override ? override({ kind: variant, flip: needsMirror }, size, color, style) : null;
+    if (custom) return custom;
 
     return (
         <Glyph

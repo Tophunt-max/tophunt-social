@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { FormInput } from '@/src/components/inputs/FormInput';
 import { emitToast } from '@/src/lib/toastBridge';
 import { BRAND_GRAD, PAD, useExplorePalette } from '@/src/components/explore/theme';

@@ -16,10 +16,6 @@ import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import Check from 'lucide-react-native/icons/check';
-import LayoutGrid from 'lucide-react-native/icons/layout-grid';
-import Layers from 'lucide-react-native/icons/layers';
-import Sparkles from 'lucide-react-native/icons/sparkles';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
@@ -37,6 +33,7 @@ import { cellWidth, mfont, px } from '../premium/mock';
 import { ItemArt } from '../premium/ProductPreview';
 import { BadgeIcon, CrownIcon, FrameArt, VioletCrownIcon } from '../premium/ShopArt';
 import { lavenderShadow, shopBorder } from '../premium/surface';
+import { ShopIcon } from '@/src/components/shop/ShopIcon';
 
 const WHITE = TH.colors.white;
 const GREEN: [string, string] = ['#22C55E', '#16A34A'];
@@ -108,12 +105,12 @@ export function CollectionModeToggle({ p, u, width, mode, onChange }: { p: Tophu
 // ------------------------------------------------------------------ filter chips
 
 const CHIP_ICONS: Record<string, (size: number, color: string) => React.ReactNode> = {
-  all: (s, c) => <LayoutGrid size={s} color={c} />,
+  all: (s, c) => <ShopIcon name="uiLayoutGrid" size={s} color={c} />,
   frame: (s, c) => <FrameArt width={s} height={s * 0.85} />,
-  theme: (s, c) => <Layers size={s} color={c} />,
+  theme: (s, c) => <ShopIcon name="uiLayers" size={s} color={c} />,
   badge: (s, _c) => <BadgeIcon size={s} />,
   title: (s, c) => <CrownIcon size={s} />,
-  effect: (s, c) => <Sparkles size={s} color={c} />,
+  effect: (s, c) => <ShopIcon name="uiSparkles" size={s} color={c} />,
 };
 
 /** Filter chips (All, Frames, Themes, Badges, Titles, Effects): the active one is a pink pill. */
@@ -244,7 +241,7 @@ export const CollectionCellM = React.memo(function CollectionCellM({
       </View>
       {cell.state === 'equipped' ? (
         <LinearGradient colors={GREEN} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.cellCheck, { width: check, height: check, borderRadius: check / 2, top: -check * 0.3, right: -check * 0.3, borderColor: p.bg }]} pointerEvents="none">
-          <Check size={check * 0.66} color={WHITE} strokeWidth={3} />
+          <ShopIcon name="uiCheck" size={check * 0.66} color={WHITE} />
         </LinearGradient>
       ) : null}
     </Pressable>
@@ -255,10 +252,10 @@ export const CollectionCellM = React.memo(function CollectionCellM({
 
 const SECTION_ICON: Record<string, (size: number) => React.ReactNode> = {
   frame: (s) => <FrameArt width={s} height={s * 0.85} />,
-  theme: (s) => <Layers size={s} color={BRAND} />,
+  theme: (s) => <ShopIcon name="uiLayers" size={s} color={BRAND} />,
   badge: (s) => <BadgeIcon size={s} />,
   title: (s) => <CrownIcon size={s} />,
-  effect: (s) => <Sparkles size={s} color={BRAND} />,
+  effect: (s) => <ShopIcon name="uiSparkles" size={s} color={BRAND} />,
 };
 
 /** A type section: icon + "Avatar Frames (24)" + "View All →", one row of 6 cells; View All expands to the full grid. */

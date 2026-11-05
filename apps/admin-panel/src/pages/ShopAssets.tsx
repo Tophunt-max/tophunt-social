@@ -29,6 +29,7 @@ const GROUP_LABELS: Record<string, string> = {
   art: "Banners & illustrations",
   icons: "Section icons",
   glyphs: "Tinted glyphs (tabs, laurels, placeholders)",
+  ui: "UI icons (tinted: cart, search, lock, time, back, close…)",
 };
 
 const MAX_BYTES = 1024 * 1024;

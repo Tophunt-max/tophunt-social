@@ -35,7 +35,7 @@ import Svg, { Circle, Defs, G, Path, RadialGradient, Stop, Text as SvgText } fro
 import { useIsFocused } from '@react-navigation/native';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { countdownParts, slideImage, type HeroSlide, type HeroSlides, type ShopNav } from '@/src/lib/shopModel';
 import { BRAND, BRAND_BUTTON, RARITY_TOKENS, SHOP_HERO_GRAD, TH, TH_DARK, type RarityToken } from '@/src/theme/tophunt';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';

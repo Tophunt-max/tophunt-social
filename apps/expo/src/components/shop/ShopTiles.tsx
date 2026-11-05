@@ -9,7 +9,7 @@ import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppImage } from '@/src/components/ui/AppImage';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
-import { Ionicons } from '@/src/lib/icons';
+import { Ionicons } from '@/src/components/shop/ShopGlyphs';
 import { ScaleTouchable } from '@/src/components/explore/ScaleTouchable';
 import { BRAND_GRAD, GOLD, type ExplorePalette } from '@/src/components/explore/theme';
 import { VOTE_GRAD } from './DigitalItemCard';
