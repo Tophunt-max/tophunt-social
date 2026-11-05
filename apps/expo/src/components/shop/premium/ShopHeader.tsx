@@ -178,7 +178,7 @@ function NavyPill({ kind, value, live, height, fontSize, icon, padX, gap, onPres
     >
       {dp ? <CoinIcon size={icon} /> : <DiamondIcon size={icon} />}
       <Text style={[styles.pillText, { fontSize, color: TH.colors.white }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-        {live ? value.toLocaleString() : '—'}
+        {live ? `${value.toLocaleString()}${dp ? ' DP' : ''}` : '—'}
       </Text>
     </TouchableOpacity>
   );

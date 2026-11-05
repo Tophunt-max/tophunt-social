@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ItemStage, type Viewer } from '@/src/components/shop/DigitalItemCard';
 import { CosmeticFx, ShimmerSweep } from '@/src/components/gamification/CosmeticFx';
@@ -7,7 +7,7 @@ import { CosmeticArtGraphic } from '@/src/components/gamification/CosmeticGraphi
 import { ThemeBackdrop } from '@/src/components/gamification/CosmeticBits';
 import { CosmeticPreview } from '@/src/components/gamification/RewardBits';
 import { Ionicons } from '@/src/lib/icons';
-import { cosmeticArt } from '@/src/lib/cosmeticArt';
+import { cosmeticArt, titlePlateHasText } from '@/src/lib/cosmeticArt';
 import { assetColors } from '@/src/lib/progression';
 import { TH, rarityToken } from '@/src/theme/tophunt';
 import type { StoreItemView } from '@/src/services/monetization';
@@ -31,11 +31,17 @@ export function ItemArt({ item, width, height }: { item: StoreItemView; width: n
   if (art && (art.kind === 'title' || item.type === 'title')) {
     const w = Math.min(width * 0.96, (height * 0.9) / PLATE_RATIO);
     const h = w * PLATE_RATIO;
+    const text = String(item.asset?.text ?? item.name);
     return (
       <View style={center} pointerEvents="none">
         <View style={{ width: w, height: h }}>
           <CosmeticArtGraphic art={art} width={w} height={h} fit="contain" />
           {art.Fx ? <CosmeticFx Fx={art.Fx} fx={art.fx} width={w} height={h} /> : null}
+          {!titlePlateHasText(item) && text ? (
+            <View style={{ position: 'absolute', left: w * 0.08, right: w * 0.08, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={styles.plateText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{text}</Text>
+            </View>
+          ) : null}
         </View>
       </View>
     );
@@ -113,5 +119,6 @@ export function ProductPreview({
 }
 
 const styles = StyleSheet.create({
+  plateText: { color: '#FFF', fontFamily: TH.fonts.bold, fontSize: 13, letterSpacing: 0.6, textTransform: 'uppercase', textShadowColor: 'rgba(0,0,0,0.35)', textShadowRadius: 2, textShadowOffset: { width: 0, height: 1 } },
   glow: { shadowOpacity: 0.55, shadowRadius: 14, shadowOffset: { width: 0, height: 0 }, elevation: 6 },
 });
