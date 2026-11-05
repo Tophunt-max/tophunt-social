@@ -1,299 +1,240 @@
-import React from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Platform, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BackButton } from '@/src/components/ui/BackButton';
 import { CoinIcon } from '@/src/components/ui/CoinIcon';
 import { Skeleton } from '@/src/components/ui/Skeleton';
-import { Ionicons } from '@/src/lib/icons';
 import type { Viewer } from '@/src/components/shop/DigitalItemCard';
-import { ProductPreview } from '@/src/components/shop/premium/ProductPreview';
-import { RarityBadge } from '@/src/components/shop/premium/RarityBadge';
-import { WishlistHeart } from '@/src/components/shop/premium/WishlistHeart';
 import { EmptyState, ErrorState } from '@/src/components/shop/premium/ShopBlocks';
+import { WishlistHeart } from '@/src/components/shop/premium/WishlistHeart';
+import { mobileScale } from '@/src/components/shop/premium/mock';
+import { ItemBuyBar, type BuyBarActions } from '@/src/components/shop/item/ItemBuyBar';
+import { ItemDetailsAccordion } from '@/src/components/shop/item/ItemDetailsAccordion';
+import { ItemHero } from '@/src/components/shop/item/ItemHero';
+import { ItemAvailability, ItemPriceCard, ItemTitleBlock } from '@/src/components/shop/item/ItemInfo';
+import { BundlesRail, CollectionsRail, SimilarRail } from '@/src/components/shop/item/ItemRails';
+import { ItemSkeleton } from '@/src/components/shop/item/ItemSkeleton';
 import { useAuth } from '@/src/hooks/useAuth';
-import { useCoinRate } from '@/src/hooks/useCoinRate';
+import { useAuthGate } from '@/src/hooks/useAuthGate';
 import { useCountdown } from '@/src/hooks/useCountdown';
 import { useDigitalPurchase } from '@/src/hooks/useDigitalPurchase';
 import { useProfile } from '@/src/hooks/useProfileData';
-import { DiscountTag } from '@/src/components/shop/premium/DiscountTag';
 import { balancesOf, hasLiveBalance } from '@/src/lib/balances';
-import { coinsInInr } from '@/src/lib/coinValue';
-import { EQUIP_WHERE, TYPE_SINGULAR, hasRealStock, isShort } from '@/src/lib/shopModel';
-import { useMonetizationConfig, useStore, type StoreItemView } from '@/src/services/monetization';
-import { BRAND, BRAND_BUTTON, TH, rarityToken, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';
+import { Ionicons } from '@/src/lib/icons';
+import { appShareOrigin, shareBattleLink } from '@/src/lib/share';
+import {
+  bundlesWithItem,
+  buyBarState,
+  collectionsWithItem,
+  equipSlotFor,
+  heroTag,
+  isEquipped,
+  itemShareCaption,
+  itemShareUrl,
+  similarItems,
+} from '@/src/lib/shopItemModel';
+import { emitToast } from '@/src/lib/toastBridge';
+import { useEquipCosmetic, useInventory } from '@/src/services/gamification';
+import { useMonetizationConfig, useShopCollections, useStore, type StoreItemView } from '@/src/services/monetization';
+import { BRAND, TH, useTophuntPalette } from '@/src/theme/tophunt';
+
+/** Phone column; wider screens centre it. */
+const MAX_W = 640;
+const PAD = 16;
 
 /**
- * One digital item: a large live preview on the viewer's own avatar / name,
- * what it is, its price, whether they own it, and real availability (stock
- * left / sale end, only when the listing has them). Data comes from the
- * getStore cache; an item that is not on sale shows "Item available nahi hai".
+ * One digital item (`/shop/item/[id]`): a large live preview on the viewer's
+ * own avatar / name in each place the item shows (profile, post, comment,
+ * battle), name / type / rarity, the price card with the real DP coin
+ * balance, real availability, bundles and collections that include it,
+ * similar items, collapsible details, and a sticky buy / equip bar.
+ *
+ * Data: getStore (the listing), getShopCollections (bundles + collections),
+ * getInventory (equipped state), the profile (balance, avatar, name). Nothing
+ * is invented: no ratings, reviews, views or sold counts.
  */
 export default function ShopItemScreen() {
   const p = useTophuntPalette();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const insets = useSafeAreaInsets();
+  const { id: rawId } = useLocalSearchParams<{ id: string }>();
+  const id = String(rawId ?? '');
   const { user } = useAuth();
+  const { requireAuth } = useAuthGate();
   const cfg = useMonetizationConfig();
-  const store = useStore(!!user && cfg.store.enabled);
+  const signedIn = !!user;
+  const enabled = signedIn && cfg.store.enabled;
+  const store = useStore(enabled);
+  const shopCols = useShopCollections(enabled);
+  const inventory = useInventory(enabled);
   const { data: me, refetch: refetchMe } = useProfile(user?.uid || '');
   const { onBuy, buying, dialog } = useDigitalPurchase({ onBought: () => void refetchMe(), onStale: () => void store.refetch() });
+  const equip = useEquipCosmetic();
   const { width } = useWindowDimensions();
-  const contentW = Math.min(width, 1100);
-  const pad = contentW >= 700 ? 24 : 16;
-  const wide = contentW >= 900;
+  const contentW = Math.min(width, MAX_W);
+  const inner = contentW - PAD * 2;
+  const u = Math.min(mobileScale(contentW), 1.3);
 
-  const item = store.data?.find((i) => i.itemId === String(id ?? ''));
-  const viewer: Viewer = { avatarUri: (me as any)?.profileImageUrl ?? user?.photoURL ?? null, name: (me as any)?.fullName ?? user?.displayName ?? null };
+  const item = store.data?.find((i) => i.itemId === id);
   const live = hasLiveBalance(me);
   const bal = balancesOf(me as any);
-  const backToShop = () => router.replace('/shop' as any);
+  const avatarUri: string | null = (me as any)?.profileImageUrl ?? user?.photoURL ?? null;
+  const viewerName: string | null = (me as any)?.fullName ?? user?.displayName ?? null;
+  const viewer: Viewer = useMemo(() => ({ avatarUri, name: viewerName }), [avatarUri, viewerName]);
+
+  // `now` for sale windows; re-read when the sale ends / starts so the bar flips on time.
+  const [now, setNow] = useState(() => Date.now());
+  const endCd = useCountdown(item?.endsAt ?? null);
+  const startCd = useCountdown(item?.startsAt ?? null);
+  useEffect(() => setNow(Date.now()), [endCd.ended, startCd.ended, id]);
+
+  const storeItems = store.data;
+  const bundles = useMemo(() => bundlesWithItem(shopCols.data?.bundles, id, now), [shopCols.data?.bundles, id, now]);
+  const collections = useMemo(() => collectionsWithItem(shopCols.data?.collections, id), [shopCols.data?.collections, id]);
+  const similar = useMemo(() => (item ? similarItems(item, storeItems ?? []) : []), [item, storeItems]);
+  const tag = useMemo(() => (item ? heroTag(item, storeItems ?? [], now) : null), [item, storeItems, now]);
+  const equipped = item ? isEquipped(inventory.data as any, item) : false;
+  const barState = item ? buyBarState(item, { signedIn, live, dpcoin: bal.dpcoin, now, equipped }) : null;
+
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setNow(Date.now());
+    try {
+      await Promise.allSettled([store.refetch(), refetchMe(), shopCols.refetch(), inventory.refetch()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [store, refetchMe, shopCols, inventory]);
+
+  const [barH, setBarH] = useState(84);
+  const backToShop = useCallback(() => router.replace('/shop' as any), [router]);
+  const openBundle = useCallback((bid: string) => router.push(`/shop/bundle/${encodeURIComponent(bid)}` as any), [router]);
+  const openCollection = useCallback((cid: string) => router.push(`/shop/collections/${encodeURIComponent(cid)}` as any), [router]);
+  const openItem = useCallback((iid: string) => router.push(`/shop/item/${encodeURIComponent(iid)}` as any), [router]);
+  const buyOther = useCallback((i: StoreItemView) => void onBuy(i), [onBuy]);
+
+  const shareUrl = item ? itemShareUrl(appShareOrigin(), item.itemId) : null;
+  const onShare = useCallback(async () => {
+    if (!item || !shareUrl) return;
+    const outcome = await shareBattleLink({ caption: itemShareCaption(item.name, shareUrl), url: shareUrl });
+    if (outcome === 'copied_link') emitToast('Link copy ho gaya', 'success');
+    else if (outcome === 'failed') emitToast('Share nahi hua. Dobara try karo.', 'error');
+  }, [item, shareUrl]);
+
+  const setEquipped = useCallback(
+    (on: boolean) => {
+      if (!item || equip.isPending) return;
+      const slot = equipSlotFor(item.type);
+      if (!slot) return;
+      equip.mutate(
+        { slot, itemId: on ? item.itemId : null },
+        {
+          onSuccess: () => {
+            if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+            emitToast(on ? 'Equip ho gaya!' : 'Hata diya', 'success');
+          },
+          onError: (e: any) => emitToast(typeof e?.message === 'string' && e.message ? e.message : 'Abhi nahi hua. Dobara try karo.', 'error'),
+        },
+      );
+    },
+    [item, equip],
+  );
+
+  const actions: BuyBarActions = useMemo(
+    () => ({
+      onBuy: () => item && void onBuy(item),
+      onEarn: () => router.push('/explore/battles' as any),
+      onEquip: () => setEquipped(true),
+      onUnequip: () => setEquipped(false),
+      onCollection: () => router.push('/shop/collection' as any),
+      onSignIn: () => void requireAuth('wallet'),
+    }),
+    [item, onBuy, router, setEquipped, requireAuth],
+  );
 
   let body: React.ReactNode;
   if (!cfg.store.enabled) {
     body = <EmptyState p={p} icon="sparkles" title="Store abhi band hai" text="Digital items jaldi wapas aayenge." action={{ label: 'Shop par wapas', onPress: backToShop }} />;
+  } else if (!signedIn && !item) {
+    body = <EmptyState p={p} icon="lock-closed" title="Sign in karo" text="Item dekhne aur kharidne ke liye sign in karo." action={{ label: 'Sign in karo', onPress: () => void requireAuth('wallet') }} />;
   } else if (store.isLoading) {
-    body = <DetailSkeleton wide={wide} contentW={contentW - pad * 2} />;
-  } else if (store.isError) {
+    body = <ItemSkeleton width={inner} />;
+  } else if (store.isError && !item) {
     body = <ErrorState p={p} text="Item load nahi hua." onRetry={() => void store.refetch()} />;
   } else if (!item) {
     body = <EmptyState p={p} icon="search" title="Item available nahi hai" text="Ye item ab sale par nahi hai ya link galat hai." action={{ label: 'Shop par wapas', onPress: backToShop }} />;
   } else {
     body = (
-      <ItemDetail
-        item={item}
-        p={p}
-        viewer={viewer}
-        wide={wide}
-        contentW={contentW - pad * 2}
-        live={live}
-        dpcoin={bal.dpcoin}
-        busy={buying === item.itemId}
-        onBuy={() => void onBuy(item)}
-        onEquip={() => router.push('/shop/collection' as any)}
-        onEarn={() => router.push('/explore/battles' as any)}
-      />
+      <View style={styles.sections}>
+        <ItemHero item={item} viewer={viewer} width={inner} p={p} tag={tag} />
+        <View style={{ gap: 14 }}>
+          <ItemTitleBlock item={item} p={p} />
+          <ItemPriceCard item={item} p={p} live={live} dpcoin={bal.dpcoin} />
+          <ItemAvailability item={item} p={p} now={now} />
+        </View>
+        <BundlesRail p={p} bundles={bundles} u={u} pad={PAD} viewer={viewer} onOpen={openBundle} />
+        <CollectionsRail p={p} collections={collections} pad={PAD} onOpen={openCollection} />
+        <SimilarRail p={p} items={similar} pad={PAD} viewer={viewer} live={live} dpcoin={bal.dpcoin} buying={buying} onOpen={openItem} onBuy={buyOther} />
+        <ItemDetailsAccordion item={item} p={p} />
+      </View>
     );
   }
 
+  const iconBtn = [styles.iconBtn, { backgroundColor: p.card, borderColor: p.border }];
   return (
-    <LinearGradient colors={p.bgGradient} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={styles.container}>
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={[styles.bar, { width: contentW, paddingHorizontal: pad }]}>
-        <BackButton size={22} color={p.text} style={[styles.iconBtn, { backgroundColor: p.card, borderColor: p.border }]} />
-        <Text style={[styles.barTitle, { color: p.text }]} accessibilityRole="header" numberOfLines={1}>{item?.name ?? 'Item details'}</Text>
-        {item ? (
-          <WishlistHeart itemId={item.itemId} name={item.name} size={18} color={p.text} bubble={false} style={[styles.iconBtn, { backgroundColor: p.card, borderColor: p.border }]} />
-        ) : null}
-        <View style={[styles.coinPill, { backgroundColor: p.card, borderColor: p.border }]} accessible accessibilityLabel={live ? `${bal.dpcoin} DP coin` : 'DP coin balance load ho raha hai'}>
-          <CoinIcon size={15} />
-          {live ? <Text style={[styles.coinText, { color: p.text }]}>{bal.dpcoin.toLocaleString()}</Text> : <Skeleton width={30} height={12} borderRadius={6} />}
-        </View>
-      </View>
-      <ScrollView
-        contentContainerStyle={{ width: contentW, alignSelf: 'center', paddingHorizontal: pad, paddingBottom: 48 }}
-        refreshControl={<RefreshControl refreshing={store.isRefetching} onRefresh={() => { void store.refetch(); void refetchMe(); }} tintColor={BRAND} />}
-      >
-        {body}
-      </ScrollView>
-      {dialog}
-    </SafeAreaView>
-    </LinearGradient>
-  );
-}
-
-function ItemDetail({
-  item, p, viewer, wide, contentW, live, dpcoin, busy, onBuy, onEquip, onEarn,
-}: {
-  item: StoreItemView; p: TophuntPalette; viewer: Viewer; wide: boolean; contentW: number; live: boolean; dpcoin: number; busy: boolean;
-  onBuy: () => void; onEquip: () => void; onEarn: () => void;
-}) {
-  const rate = useCoinRate();
-  const t = rarityToken(item.rarity);
-  const sale = useCountdown(item.endsAt);
-  const short = isShort(dpcoin, item.priceCoins, live);
-  const saleOver = sale.ended;
-  const previewW = wide ? Math.min(460, Math.round(contentW * 0.48)) : contentW;
-  const previewH = wide ? previewW : Math.round(Math.min(contentW * 0.9, 380));
-  const inr = coinsInInr(item.priceCoins, rate);
-
-  const info = (
-    <View style={{ flex: 1, minWidth: 0, gap: 14 }}>
-      <View style={styles.badges}>
-        <RarityBadge rarity={item.rarity} size="md" />
-        <View style={[styles.typePill, { backgroundColor: p.cardAlt }]}>
-          <Text style={[styles.typeText, { color: p.sub }]}>{TYPE_SINGULAR[item.type] ?? item.type}</Text>
-        </View>
-      </View>
-      <Text style={[styles.name, { color: p.text }]}>{item.name}</Text>
-      {item.description ? <Text style={[styles.desc, { color: p.sub }]}>{item.description}</Text> : null}
-
-      <View style={[styles.priceCard, { backgroundColor: p.card, borderColor: t.glow ? `${t.color}66` : p.border }]}>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.label, { color: p.sub }]}>{item.owned ? 'Aapke collection mein' : 'Price'}</Text>
-          {item.owned ? (
-            <View style={styles.row}>
-              <Ionicons name="checkmark-circle" size={20} color={TH.colors.success} />
-              <Text style={[styles.price, { color: TH.colors.success, fontSize: 20 }]}>Owned</Text>
-            </View>
-          ) : (
-            <View style={styles.row}>
-              <CoinIcon size={22} />
-              <Text style={[styles.price, { color: p.text }]}>{item.priceCoins.toLocaleString()}</Text>
-              <Text style={[styles.unit, { color: p.sub }]}>DP coin</Text>
-              <DiscountTag item={item} size={13} color={p.sub} />
-            </View>
-          )}
-          {!item.owned && inr ? <Text style={[styles.inr, { color: p.sub }]}>{inr}</Text> : null}
-        </View>
-      </View>
-
-      {!item.owned && (hasRealStock(item) || (sale.label && !saleOver)) ? (
-        <View style={styles.availability}>
-          {hasRealStock(item) ? (
-            <View style={[styles.availChip, { backgroundColor: p.cardAlt }]}>
-              <Ionicons name="cube-outline" size={13} color={p.text} />
-              <Text style={[styles.availText, { color: p.text }]}>{item.remaining} stock baaki</Text>
-            </View>
-          ) : null}
-          {sale.label && !saleOver ? (
-            <View style={[styles.availChip, { backgroundColor: `${TH.colors.pink}22` }]} accessibilityLabel={`Sale ${sale.label} mein khatam`}>
-              <Ionicons name="time" size={13} color={TH.colors.pink} />
-              <Text style={[styles.availText, { color: TH.colors.pink }]}>Sale {sale.label} mein khatam</Text>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-
-      <View style={[styles.facts, { backgroundColor: p.card, borderColor: p.border }]}>
-        <Fact p={p} icon="sparkles" title="Equip kahan hoga" text={EQUIP_WHERE[item.type] ?? 'Aapke profile par.'} />
-        <Fact p={p} icon="infinite" title="Ownership" text="Hamesha ke liye aapka. Kabhi bhi equip ya hata sakte ho." />
-        <Fact p={p} icon="shield-checkmark-outline" title="Refund" text={item.refundable ? 'Refund support se request kar sakte ho.' : 'Ye item refundable nahi hai.'} />
-        <Fact p={p} icon="information-circle-outline" title="Sirf look" text="Cosmetic hai: votes, fees, prizes ya ranking par koi asar nahi." last />
-      </View>
-
-      <View style={{ gap: 10 }}>
-        {item.owned ? (
-          <PrimaryButton p={p} label="Equip karo" icon="sparkles" onPress={onEquip} />
-        ) : saleOver ? (
-          <PrimaryButton p={p} label="Sale khatam ho gayi" icon="time" disabled />
-        ) : short ? (
-          <>
-            <PrimaryButton p={p} label="DP coin kam hai" icon="lock-closed" disabled hint={`${(item.priceCoins - dpcoin).toLocaleString()} DP coin aur chahiye`} />
-            <TouchableOpacity onPress={onEarn} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Kamao: contest jeet kar DP coin kamao">
-              <LinearGradient colors={BRAND_BUTTON} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.btn}>
-                <Ionicons name="trophy" size={16} color="#FFF" />
-                <Text style={styles.btnText}>Kamao</Text>
-              </LinearGradient>
+    <View style={[styles.container, { backgroundColor: p.bg }]}>
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={[styles.bar, { width: contentW, paddingHorizontal: PAD }]}>
+          <BackButton size={22} color={p.text} style={iconBtn} />
+          <Text style={[styles.barTitle, { color: p.text }]} accessibilityRole="header" numberOfLines={1}>{item?.name ?? 'Item details'}</Text>
+          {item ? <WishlistHeart itemId={item.itemId} name={item.name} size={18} color={p.text} bubble={false} style={iconBtn} /> : null}
+          {item && shareUrl ? (
+            <TouchableOpacity onPress={() => void onShare()} style={iconBtn} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={`${item.name} share karo`}>
+              <Ionicons name="share-social-outline" size={18} color={p.text} />
             </TouchableOpacity>
-          </>
-        ) : (
-          <PrimaryButton p={p} label={`Abhi kharido · ${item.priceCoins.toLocaleString()}`} icon="flash" onPress={onBuy} busy={busy} />
-        )}
-      </View>
-    </View>
-  );
-
-  return (
-    <View style={[wide ? styles.wide : styles.narrow, { marginTop: 12 }]}>
-      <View>
-        <ProductPreview item={item} viewer={viewer} width={previewW} height={previewH} radius={TH.radii.xxl} />
-        <Text style={[styles.previewNote, { color: p.sub, width: previewW }]}>Live preview: aapki DP aur naam par aise dikhega</Text>
-      </View>
-      {info}
-    </View>
-  );
-}
-
-function Fact({ p, icon, title, text, last }: { p: TophuntPalette; icon: string; title: string; text: string; last?: boolean }) {
-  return (
-    <View style={[styles.fact, !last && { borderBottomWidth: 1, borderBottomColor: p.border }]}>
-      <View style={[styles.factIcon, { backgroundColor: p.cardAlt }]}>
-        <Ionicons name={icon} size={15} color={BRAND} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.factTitle, { color: p.text }]}>{title}</Text>
-        <Text style={[styles.factText, { color: p.sub }]}>{text}</Text>
-      </View>
-    </View>
-  );
-}
-
-/** Brand pink primary button; disabled reads as a neutral chip. */
-function PrimaryButton({ p, label, icon, onPress, disabled, busy, hint }: { p: TophuntPalette; label: string; icon: string; onPress?: () => void; disabled?: boolean; busy?: boolean; hint?: string }) {
-  const off = disabled || busy;
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      disabled={off}
-      activeOpacity={0.85}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: !!disabled, busy: !!busy }}
-      accessibilityLabel={hint ? `${label}. ${hint}` : label}
-    >
-      <LinearGradient
-        colors={disabled ? [p.cardAlt, p.cardAlt] : BRAND_BUTTON}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={[styles.btn, busy && { opacity: 0.7 }]}
-      >
-        <Ionicons name={icon} size={16} color={disabled ? p.sub : '#FFF'} />
-        <View style={{ alignItems: 'center' }}>
-          <Text style={[styles.btnText, disabled && { color: p.sub }]}>{label}</Text>
-          {hint ? <Text style={[styles.btnHint, disabled && { color: p.sub }]}>{hint}</Text> : null}
+          ) : null}
+          {signedIn ? (
+            <View style={[styles.coinPill, { backgroundColor: p.card, borderColor: p.border }]} accessible accessibilityLabel={live ? `${bal.dpcoin} DP coin` : 'DP coin balance load ho raha hai'}>
+              <CoinIcon size={15} />
+              {live ? <Text style={[styles.coinText, { color: p.text }]}>{bal.dpcoin.toLocaleString()}</Text> : <Skeleton width={30} height={12} borderRadius={6} />}
+            </View>
+          ) : null}
         </View>
-      </LinearGradient>
-    </TouchableOpacity>
-  );
-}
-
-function DetailSkeleton({ wide, contentW }: { wide: boolean; contentW: number }) {
-  const w = wide ? Math.min(460, Math.round(contentW * 0.48)) : contentW;
-  return (
-    <View style={[wide ? styles.wide : styles.narrow, { marginTop: 12 }]} accessible accessibilityLabel="Item load ho raha hai">
-      <Skeleton width={w} height={wide ? w : Math.round(Math.min(contentW * 0.9, 380))} borderRadius={TH.radii.xxl} />
-      <View style={{ flex: 1, gap: 12 }}>
-        <Skeleton width={120} height={22} borderRadius={11} />
-        <Skeleton width="70%" height={28} />
-        <Skeleton width="90%" height={14} />
-        <Skeleton width="100%" height={84} borderRadius={TH.radii.lg} />
-        <Skeleton width="100%" height={52} borderRadius={TH.radii.md} />
-      </View>
+        <ScrollView
+          contentContainerStyle={{ width: contentW, alignSelf: 'center', paddingHorizontal: PAD, paddingTop: 8, paddingBottom: (item && barState ? barH : insets.bottom) + 28 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={BRAND} colors={[BRAND]} />}
+        >
+          {body}
+        </ScrollView>
+      </SafeAreaView>
+      {item && barState && cfg.store.enabled ? (
+        <ItemBuyBar
+          state={barState}
+          item={item}
+          p={p}
+          live={live}
+          dpcoin={bal.dpcoin}
+          buying={buying === item.itemId}
+          equipping={equip.isPending || (item.owned && inventory.isLoading)}
+          bottomInset={insets.bottom}
+          onLayout={(e) => setBarH(Math.round(e.nativeEvent.layout.height))}
+          actions={actions}
+        />
+      ) : null}
+      {dialog}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  bar: { flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'center', paddingTop: 6, paddingBottom: 6 },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  barTitle: { flex: 1, fontFamily: TH.fonts.bold, fontSize: 18 },
-  coinPill: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, borderRadius: TH.radii.pill, borderWidth: 1, paddingHorizontal: 10 },
+  bar: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'center', paddingTop: 6, paddingBottom: 8 },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  barTitle: { flex: 1, fontFamily: TH.fonts.bold, fontSize: 17 },
+  coinPill: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, borderRadius: TH.radii.pill, borderWidth: 1, paddingHorizontal: 10 },
   coinText: { fontFamily: TH.fonts.bold, fontSize: 13.5 },
-  wide: { flexDirection: 'row', gap: 28, alignItems: 'flex-start' },
-  narrow: { gap: 18 },
-  previewNote: { fontFamily: TH.fonts.medium, fontSize: 11.5, textAlign: 'center', marginTop: 8 },
-  badges: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  typePill: { borderRadius: TH.radii.pill, paddingHorizontal: 10, paddingVertical: 4 },
-  typeText: { fontFamily: TH.fonts.bold, fontSize: 11 },
-  name: { fontFamily: TH.fonts.bold, fontSize: 28, lineHeight: 32 },
-  desc: { fontFamily: TH.fonts.medium, fontSize: 14, lineHeight: 20 },
-  priceCard: { flexDirection: 'row', alignItems: 'center', borderRadius: TH.radii.lg, borderWidth: 1, padding: 14 },
-  label: { fontFamily: TH.fonts.semibold, fontSize: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  price: { fontFamily: TH.fonts.bold, fontSize: 28 },
-  unit: { fontFamily: TH.fonts.semibold, fontSize: 13, marginTop: 6 },
-  inr: { fontFamily: TH.fonts.medium, fontSize: 12, marginTop: 2 },
-  availability: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  availChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: TH.radii.pill, paddingHorizontal: 10, paddingVertical: 6 },
-  availText: { fontFamily: TH.fonts.bold, fontSize: 12 },
-  facts: { borderRadius: TH.radii.lg, borderWidth: 1, paddingHorizontal: 12 },
-  fact: { flexDirection: 'row', gap: 10, paddingVertical: 11, alignItems: 'flex-start' },
-  factIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  factTitle: { fontFamily: TH.fonts.bold, fontSize: 13 },
-  factText: { fontFamily: TH.fonts.medium, fontSize: 12.5, lineHeight: 17, marginTop: 1 },
-  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 52, borderRadius: TH.radii.md, paddingVertical: 8 },
-  btnText: { color: '#FFF', fontFamily: TH.fonts.bold, fontSize: 15 },
-  btnHint: { color: 'rgba(255,255,255,0.75)', fontFamily: TH.fonts.medium, fontSize: 11 },
+  sections: { gap: 26 },
 });
