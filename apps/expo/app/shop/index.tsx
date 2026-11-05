@@ -44,6 +44,7 @@ import {
   type ShortcutCard,
 } from '@/src/components/shop/premium/ShopHomeMobile';
 import { DigitalHomeMobile, DigitalHomeSkeleton } from '@/src/components/shop/premium/DigitalHomeMobile';
+import { PhysicalHomeMobile, PhysicalHomeSkeleton } from '@/src/components/shop/premium/PhysicalHomeMobile';
 import { CategoryRail, Chip, EmptyState, ErrorState, SectionHeader as BlockHeader, ShopSkeleton, type RailEntry } from '@/src/components/shop/premium/ShopBlocks';
 import { BottomNav } from '@/src/components/home/BottomNav';
 import { useAuth } from '@/src/hooks/useAuth';
@@ -85,10 +86,11 @@ import {
   type ShopTab,
 } from '@/src/lib/shopModel';
 import { digitalShelves, isDefaultDigitalFilter, specialCards, type ShelfType, type SpecialCard } from '@/src/lib/digitalHomeModel';
+import { featuredProducts, physicalCategories } from '@/src/lib/physicalHomeModel';
 import { useInventory } from '@/src/services/gamification';
 import { useGiftCatalog, useGiftHistory, useMonetizationConfig, useShopCollections, useStore, useWishlist, type StoreItemView } from '@/src/services/monetization';
-import { useCart, useShopProducts } from '@/src/services/shop';
-import { BRAND, BRAND_BUTTON, TH, asExplorePalette, gridCellWidth, gridColumns, rarityToken, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';
+import { useCart, useSavedProducts, useShopProducts } from '@/src/services/shop';
+import { BRAND, BRAND_BUTTON, BRAND_GRAD, TH, asExplorePalette, gridCellWidth, gridColumns, rarityToken, useTophuntPalette, type TophuntPalette } from '@/src/theme/tophunt';
 
 const GAP = 12;
 
@@ -179,6 +181,8 @@ export default function ShopScreen() {
   const [filter, setFilter] = useState<DigitalFilter>(NO_FILTER);
   // Phone Digital tab: the full catalogue was asked for ("Sab digital items dekho") without a filter.
   const [browseAll, setBrowseAll] = useState(false);
+  // Physical tab: the full products catalogue was asked for (View All / a category tile / Explore Rewards).
+  const [browsePhysical, setBrowsePhysical] = useState(false);
   const [category, setCategory] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -240,6 +244,11 @@ export default function ShopScreen() {
   const specials = useMemo(() => specialCards(digital, { enabled: cfg.gifts.enabled, list: gifts.data ?? null }), [digital, cfg.gifts.enabled, gifts.data]);
 
   const allProducts = useMemo(() => products.data ?? [], [products.data]);
+  // Phone Physical tab home (design mock): the featured shelf, the categories row and the saved hearts.
+  const physFeatured = useMemo(() => featuredProducts(allProducts), [allProducts]);
+  const physCats = useMemo(() => physicalCategories(allProducts), [allProducts]);
+  const savedIds = useSavedProducts((s) => s.ids);
+  const toggleSaved = useSavedProducts((s) => s.toggle);
   const productCats = useMemo(() => [...new Set(allProducts.map((x) => x.category))], [allProducts]);
   const productList = useMemo(() => allProducts.filter((x) => !category || x.category === category), [allProducts, category]);
   // Hot deals: products the admin marked featured that are in stock.
@@ -280,6 +289,7 @@ export default function ShopScreen() {
       e.preventDefault();
       setFilter(NO_FILTER);
       setBrowseAll(false);
+      setBrowsePhysical(false);
       setCategory(null);
       setTab('shop');
     });
@@ -293,11 +303,15 @@ export default function ShopScreen() {
     setBrowseAll(false);
     setTab('digital');
   }, [setTab]);
-  /** Tab bar tap: the Digital tab opens on its home (no filter); the other tabs as before. */
+  /** Tab bar tap: the Digital and Physical tabs open on their home (no filter / catalogue); the other tabs as before. */
   const onTabBar = useCallback((t: ShopTab) => {
     if (t === 'digital') {
       setFilter(NO_FILTER);
       setBrowseAll(false);
+    }
+    if (t === 'physical') {
+      setBrowsePhysical(false);
+      setCategory(null);
     }
     setTab(t);
   }, [setTab]);
@@ -326,6 +340,18 @@ export default function ShopScreen() {
   const onBrowseAll = useCallback(() => {
     setFilter(NO_FILTER);
     setBrowseAll(true);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, []);
+  // Physical tab: View All / Explore Rewards / the Redeem banner → the full products catalogue.
+  const onBrowsePhysical = useCallback(() => {
+    setCategory(null);
+    setBrowsePhysical(true);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, []);
+  // A Physical category tile → the catalogue filtered to it.
+  const onPhysicalCategory = useCallback((key: string) => {
+    setCategory(key);
+    setBrowsePhysical(true);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, []);
   const canAfford = (coins: number) => !live || bal.dpcoin >= coins;
@@ -432,6 +458,30 @@ export default function ShopScreen() {
           onSpecial={onSpecial}
           onExplore={onExplore}
           onBrowseAll={onBrowseAll}
+        />
+      </View>
+    </View>
+  );
+
+  // The Physical home (design mock) while no category / catalogue was asked for; on wide screens a centred phone-width column like the Digital home.
+  const showPhysicalHome = !browsePhysical && !category;
+  const physicalHome = (
+    <View style={{ paddingHorizontal: margin, alignItems: 'center' }}>
+      <View style={{ width: dColW }}>
+        <PhysicalHomeMobile
+          p={p}
+          u={dU}
+          inner={dColW}
+          now={now}
+          featured={physFeatured}
+          cats={physCats}
+          savedIds={savedIds}
+          onToggleSaved={toggleSaved}
+          onOpenProduct={openProduct}
+          onAllFeatured={onBrowsePhysical}
+          onAllCategories={onBrowsePhysical}
+          onCategory={onPhysicalCategory}
+          onExplore={onBrowsePhysical}
         />
       </View>
     </View>
@@ -694,10 +744,14 @@ export default function ShopScreen() {
                 onWallet={() => router.push('/wallet' as any)}
                 onOrders={() => router.push('/shop/orders' as any)}
                 onCart={() => router.push('/shop/cart' as any)}
-                {...(tab === 'digital' ? { title: 'Digital Shop', subtitle: 'Exclusive • Premium • Upgrade', accent: 'digital' as const } : null)}
+                {...(tab === 'digital'
+                  ? { title: 'Digital Shop', subtitle: 'Exclusive • Premium • Upgrade', accent: 'digital' as const }
+                  : tab === 'physical'
+                    ? { title: 'Physical Shop', subtitle: 'Redeem • Collect • Get Delivered', accent: 'physical' as const }
+                    : null)}
               />
               <View style={{ marginTop: px(MOCK_M.tabs.y - MOCK_M.title.y - MOCK_M.title.h, uM) }}>
-                <ShopNavigationTabsMobile p={p} u={uM} width={inner} tab={tab} onTab={onTabBar} onCollection={openCollection} activeGrad={tab === 'digital' ? BRAND_BUTTON : undefined} />
+                <ShopNavigationTabsMobile p={p} u={uM} width={inner} tab={tab} onTab={onTabBar} onCollection={openCollection} activeGrad={tab === 'physical' ? BRAND_GRAD : tab === 'digital' ? BRAND_BUTTON : undefined} />
               </View>
             </View>
           ) : (
@@ -746,13 +800,19 @@ export default function ShopScreen() {
           ) : !cfg.shop.enabled ? (
             <View style={{ paddingHorizontal: pad }}><EmptyState p={p} icon="bag-handle" title="Shop abhi band hai" text="Physical products jaldi aa rahe hain!" /></View>
           ) : products.isLoading ? (
-            <ShopSkeleton p={p} cellW={cellW} cols={cols} pad={pad} />
+            showPhysicalHome ? (
+              <View style={{ paddingHorizontal: margin, alignItems: 'center' }}><PhysicalHomeSkeleton p={p} u={dU} inner={dColW} /></View>
+            ) : (
+              <ShopSkeleton p={p} cellW={cellW} cols={cols} pad={pad} />
+            )
           ) : products.isError ? (
             <View style={{ paddingHorizontal: pad }}><ErrorState p={p} text="Products load nahi hue." onRetry={() => void products.refetch()} /></View>
           ) : !allProducts.length ? (
             <View style={{ paddingHorizontal: pad }}>
               <EmptyState p={p} icon="gift" text="Products jaldi aa rahe hain. Tab tak digital items try karo!" action={cfg.store.enabled ? { label: 'Digital items dekho', onPress: () => setTab('digital') } : undefined} />
             </View>
+          ) : showPhysicalHome ? (
+            physicalHome
           ) : (
             <>
               {deals.length ? (

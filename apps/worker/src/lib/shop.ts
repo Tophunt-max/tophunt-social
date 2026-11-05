@@ -73,6 +73,8 @@ export interface ProductView {
   compareAtCoins: number | null;
   returnDays: number;
   featured: boolean;
+  /** Listing time (ms): the only "new" signal the app shows a NEW tag from. */
+  createdAt: number;
   variants: { id: string; label: string; inStock: boolean; stock: number }[];
 }
 
@@ -141,6 +143,7 @@ export async function listProducts(env: Env, opts: { category?: string | null; p
       compareAtCoins: compareAtCoinsOf(p.compare_at_inr_paise, Number(p.price_inr_paise), Number(p.shipping_inr_paise), dpCoinInr),
       returnDays: Number(p.return_days),
       featured: !!p.featured,
+      createdAt: Number(p.created_at),
       variants: (byProduct.get(p.id) ?? []).map((v) => ({ id: v.id, label: v.label, stock: Number(v.stock), inStock: Number(v.stock) > 0 })),
     }))
     .filter((p) => p.variants.length > 0);
