@@ -17,8 +17,9 @@ import { CubeLine, DiamondSparkle, Laurel, LaurelSprig, PinkBagIcon, ShopBagArt 
  * The app's own header logo, exactly as the Home header draws it: the admin
  * `headerLogoUrl` (App Settings) when set, else the bundled TopHunt wordmark,
  * at its real aspect ratio inside `maxWidth` × `maxHeight`.
+ * Exported for the My Collection header (same logo, same rules).
  */
-function BrandLogo({ maxWidth, maxHeight }: { maxWidth: number; maxHeight: number }) {
+export function BrandLogo({ maxWidth, maxHeight }: { maxWidth: number; maxHeight: number }) {
   const { config } = useAppConfig();
   const customUrl = config?.headerLogoUrl || null;
   const aspect = useImageAspect(customUrl) ?? 3;
@@ -163,8 +164,8 @@ export function ShopHeader({ p, u, inner, live, dpcoin, diamonds, cartCount, onO
   );
 }
 
-/** Dark navy balance pill of the phone header (both modes): currency icon, white bold amount, "—" until the server answers. */
-function NavyPill({ kind, value, live, height, fontSize, icon, padX, gap, onPress }: { kind: 'dp' | 'diamond'; value: number; live: boolean; height: number; fontSize: number; icon: number; padX: number; gap: number; onPress: () => void }) {
+/** Dark navy balance pill of the phone header (both modes): currency icon, white bold amount, "—" until the server answers. Exported for the My Collection header. */
+export function NavyPill({ kind, value, live, height, fontSize, icon, padX, gap, onPress }: { kind: 'dp' | 'diamond'; value: number; live: boolean; height: number; fontSize: number; icon: number; padX: number; gap: number; onPress: () => void }) {
   const dp = kind === 'dp';
   const label = dp ? 'DP coin' : 'Diamonds';
   return (
