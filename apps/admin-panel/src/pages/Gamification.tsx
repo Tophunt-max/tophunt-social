@@ -7,7 +7,9 @@ import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader, fmtDateTime, fmtNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
+import { Link } from "wouter";
 import { isFullAdminRole, useAuth } from "@/lib/auth";
+import { useTabParam } from "@/lib/useTabParam";
 import { RARITIES } from "@/lib/shopArt";
 import {
   MilestonesEditor, QuestsEditor, RanksEditor, fillMilestoneRows,
@@ -32,7 +34,7 @@ const btn2 = "bg-secondary text-foreground text-sm font-medium px-3 py-1.5 round
 const card = "bg-card border border-border rounded-2xl p-5";
 
 export default function GamificationPage() {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useTabParam<Tab>(TABS, "overview");
   return (
     <div>
       <PageHeader title="Gamification" subtitle="XP, levels, achievements, cosmetics, quests and seasons" />
@@ -358,6 +360,9 @@ function Achievements() {
 // ----------------------------------------------------------------- catalog
 /** Frame designs the app draws (apps/expo/src/lib/gamificationAssets.ts). */
 const FRAME_KEYS = ["frame.starter", "frame.bronze", "frame.silver", "frame.gold", "frame.champion", "frame.legendary"];
+/** Which editor owns a catalogue row (Worker reward_catalog.managed_by, migration 0089). */
+const OWNER_LABEL: Record<string, string> = { earning: "Earning (here)", shop: "Shop", xp: "XP level rewards" };
+const OWNER_HREF: Record<string, string> = { shop: "/shopping?tab=digital", xp: "/gamification?tab=xp-rewards" };
 const EMPTY_ITEM = { id: "", type: "frame", name: "", description: "", rarity: "common", asset: { key: "frame.gold", colors: ["#FF4D67", "#8B5CF6"], animated: false }, active: true, sort: 0 };
 
 function Catalog() {
@@ -381,7 +386,12 @@ function Catalog() {
   };
   return (
     <div className="space-y-4">
-      <button className={btn} onClick={() => open({ ...EMPTY_ITEM })}>New item</button>
+      <div className="rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm">
+        Yahan sirf <b>Earning reward items</b> banao aur edit karo (achievement, season, milestone aur grant rewards).
+        Shop mein bikne wale items <Link href="/shopping?tab=digital" className="font-semibold text-primary underline">Shopping → Digital items</Link> mein,
+        aur XP level ke free items <span className="font-semibold">XP level rewards</span> tab mein manage hote hain. Server bhi yahi rule enforce karta hai.
+      </div>
+      <button className={btn} onClick={() => open({ ...EMPTY_ITEM })}>New reward item</button>
       {edit && (
         <div className={card}>
           <div className="grid sm:grid-cols-3 gap-3">
@@ -423,7 +433,17 @@ function Catalog() {
           { key: "rarity", header: "Rarity", render: (i: any) => <Badge>{i.rarity}</Badge> },
           { key: "owners", header: "Owners", render: (i: any) => <span>{fmtNumber(i.owners)}</span> },
           { key: "active", header: "State", render: (i: any) => <span className="text-xs">{i.active ? "available" : "hidden"}</span> },
-          { key: "edit", header: "", render: (i: any) => <button className={btn2} onClick={() => open(i)}>Edit</button> },
+          { key: "owner", header: "Managed in", render: (i: any) => <Badge>{OWNER_LABEL[i.managedBy] ?? OWNER_LABEL.earning}</Badge> },
+          {
+            key: "edit",
+            header: "",
+            render: (i: any) =>
+              (i.managedBy ?? "earning") === "earning" ? (
+                <button className={btn2} onClick={() => open(i)}>Edit</button>
+              ) : (
+                <Link href={OWNER_HREF[i.managedBy]} className="text-xs font-semibold text-primary">Open editor →</Link>
+              ),
+          },
         ]} />
     </div>
   );

@@ -1,5 +1,6 @@
 import { ReactNode, useState, useEffect, useRef } from "react";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
+import { activeNavHref } from "@/lib/navMatch";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isFullAdminRole, useAuth } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -131,8 +132,17 @@ export const MODERATOR_PAGES = new Set([
   // Read-only inspection and review flags; XP / coin writes are full-admin on the server.
   "/gamification",
 ]);
-const canSee = (role: string | null | undefined, href: string) =>
-  !role || isFullAdminRole(role as any) || MODERATOR_PAGES.has(href);
+/**
+ * Pages only a superadmin may use. The raw Rewards JSON editor bypasses the
+ * validated Earn forms; the Worker refuses its raw keys from anyone else
+ * (routes/admin.ts POST /rewards).
+ */
+export const SUPERADMIN_PAGES = new Set(["/rewards"]);
+const canSee = (role: string | null | undefined, href: string) => {
+  const path = href.split("?")[0];
+  if (SUPERADMIN_PAGES.has(path)) return !role || role === "superadmin";
+  return !role || isFullAdminRole(role as any) || MODERATOR_PAGES.has(path);
+};
 
 const sections: Record<string, string> = {
   main: "OVERVIEW",
@@ -178,6 +188,8 @@ function NavItem({ href, label, icon: Icon, active, onClick, badge }: any) {
 
 function Sidebar({ onClose }: { onClose?: () => void }) {
   const [loc] = useLocation();
+  const search = useSearch();
+  const activeHref = activeNavHref(nav.map((n) => n.href), loc, search);
   const { user, logout } = useAuth();
   // Live pending counts for sidebar badges (shop orders, prize claims).
   const { data: overview } = useQuery({
@@ -215,7 +227,7 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
         {nav.filter((item) => canSee(user?.role, item.href)).map((item) => {
           const showLabel = item.section !== lastSection;
           lastSection = item.section;
-          const active = loc.startsWith(item.href);
+          const active = item.href === activeHref;
           return (
             <div key={item.href}>
               {showLabel && (
@@ -370,9 +382,11 @@ function NotificationBell() {
 
 export function Layout({ children }: { children: ReactNode }) {
   const [loc] = useLocation();
+  const search = useSearch();
   const { user } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const currentPage = nav.find((n) => loc.startsWith(n.href));
+  const activeHref = activeNavHref(nav.map((n) => n.href), loc, search);
+  const currentPage = nav.find((n) => n.href === activeHref);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -423,8 +437,17 @@ export function Layout({ children }: { children: ReactNode }) {
         <main className="flex-1 overflow-auto p-5 lg:p-6">
           {currentPage && !canSee(user?.role, currentPage.href) ? (
             <div className="max-w-md mx-auto mt-16 text-center" role="alert">
-              <p className="font-semibold text-foreground mb-1">Not available for moderators</p>
-              <p className="text-sm text-muted-foreground">This page needs a full admin account.</p>
+              {SUPERADMIN_PAGES.has(currentPage.href.split("?")[0]) ? (
+                <>
+                  <p className="font-semibold text-foreground mb-1">Superadmin only</p>
+                  <p className="text-sm text-muted-foreground">This raw editor bypasses the validated forms. Use the Earn forms in Coin Economy instead.</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold text-foreground mb-1">Not available for moderators</p>
+                  <p className="text-sm text-muted-foreground">This page needs a full admin account.</p>
+                </>
+              )}
             </div>
           ) : (
             children

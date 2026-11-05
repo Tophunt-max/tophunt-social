@@ -1884,6 +1884,8 @@ export const rewardCatalog = sqliteTable("reward_catalog", {
   asset: text("asset", { mode: "json" }).notNull(),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   sort: integer("sort").notNull().default(0),
+  /** Which admin editor owns the row (migration 0089, lib/catalogItem.ts CatalogOwner). */
+  managedBy: text("managed_by").notNull().default("earning"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

@@ -90,6 +90,7 @@ import m_0085_achievement_diamonds_sql from "../../migrations/0085_achievement_d
 import m_0086_reward_events_sql from "../../migrations/0086_reward_events.sql";
 import m_0087_reward_history_index_sql from "../../migrations/0087_reward_history_index.sql";
 import m_0088_store_collections_bundles_sql from "../../migrations/0088_store_collections_bundles.sql";
+import m_0089_catalog_managed_by_sql from "../../migrations/0089_catalog_managed_by.sql";
 
 export interface Migration {
   name: string;
@@ -186,4 +187,5 @@ export const MIGRATIONS: Migration[] = [
   { name: "0086_reward_events.sql", sql: m_0086_reward_events_sql },
   { name: "0087_reward_history_index.sql", sql: m_0087_reward_history_index_sql },
   { name: "0088_store_collections_bundles.sql", sql: m_0088_store_collections_bundles_sql },
+  { name: "0089_catalog_managed_by.sql", sql: m_0089_catalog_managed_by_sql },
 ];

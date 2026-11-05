@@ -202,12 +202,14 @@ describe('PUT /admin/monetization/store/items/:id', () => {
     expect((await admin(env, 'PUT', path, { item: sticker(), listing: listing({ stockLimit: 2 }) })).status).toBe(400);
   });
 
-  it('the Gamification catalog editor accepts the same uploaded artwork', async () => {
+  it('the Gamification catalog editor accepts the same uploaded artwork, as a free Earning item', async () => {
     const env = await setup();
     const res = await admin(env, 'PUT', '/gamification/catalog/frame_upload', { type: 'frame', name: 'Uploaded', rarity: 'rare', asset: { imageUrl: ART, fxUrl: ART, fx: 'spin' } });
     expect(res.status).toBe(200);
-    const row = await env.DB.prepare(`SELECT asset FROM reward_catalog WHERE id = 'frame_upload'`).first<any>();
-    expect(JSON.parse(row.asset)).toMatchObject({ imageUrl: ART, fxUrl: ART, fx: 'spin', artKind: 'frame' });
+    const row = await env.DB.prepare(`SELECT asset, managed_by FROM reward_catalog WHERE id = 'frame_upload'`).first<any>();
+    // Written as tier 'xp' so the app never reads uploaded art on a free reward as Premium.
+    expect(JSON.parse(row.asset)).toMatchObject({ imageUrl: ART, fxUrl: ART, fx: 'spin', artKind: 'frame', tier: 'xp' });
+    expect(row.managed_by).toBe('earning');
     expect((await admin(env, 'PUT', '/gamification/catalog/frame_upload', { type: 'frame', name: 'Uploaded', asset: { imageUrl: 'https://evil.test/a.webp' } })).status).toBe(400);
   });
 });

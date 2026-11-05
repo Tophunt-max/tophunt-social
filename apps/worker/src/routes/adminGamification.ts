@@ -49,7 +49,7 @@ import {
 import { awardXp, reconcileXp, reverseXp } from "../lib/xpService";
 import { finalizeSeason, parseSeasonRewards, validateSeasonInput } from "../lib/seasons";
 import { rewardDayNumber } from "../lib/gamification";
-import { assertTypeChangeAllowed, CATALOG_CACHE_KEY, catalogUpsertStatement, itemOwnerCount, validateCatalogItemInput } from "../lib/catalogItem";
+import { assertCatalogOwner, assertTypeChangeAllowed, CATALOG_CACHE_KEY, catalogOwnerOf, catalogUpsertStatement, itemOwnerCount, validateCatalogItemInput } from "../lib/catalogItem";
 import { purgeShared } from "../lib/edgeCache";
 
 type Audit = (c: any, action: string, targetType: string, targetId: string | null, detail?: Record<string, unknown>) => Promise<void>;
@@ -220,23 +220,50 @@ export function registerGamificationRoutes(
   });
 
   // ----------------------------------------------------------------- catalog
+  /**
+   * Every catalogue row with its owner (`managedBy`, migration 0089): the
+   * milestone / achievement / season pickers may point at any item, but only
+   * `earning` rows are editable here (Shop and XP rows have their own editors).
+   */
   adminRoute.get("/gamification/catalog", async (c) => {
     const items = await loadCatalog(c.env);
-    const counts = await c.env.DB.prepare(`SELECT item_id, COUNT(*) AS n FROM user_inventory WHERE revoked_at IS NULL GROUP BY item_id`).all<any>();
+    const [counts, owners] = await Promise.all([
+      c.env.DB.prepare(`SELECT item_id, COUNT(*) AS n FROM user_inventory WHERE revoked_at IS NULL GROUP BY item_id`).all<any>(),
+      c.env.DB.prepare(`SELECT id, managed_by FROM reward_catalog`).all<any>(),
+    ]);
     const byId = new Map((counts.results ?? []).map((r) => [r.item_id, Number(r.n)]));
-    return c.json(items.map((i) => ({ ...i, owners: byId.get(i.id) ?? 0 })));
+    const ownerOf = new Map((owners.results ?? []).map((r) => [r.id, String(r.managed_by)]));
+    return c.json(items.map((i) => ({ ...i, owners: byId.get(i.id) ?? 0, managedBy: ownerOf.get(i.id) ?? "earning" })));
   });
 
+  /**
+   * Create or edit an Earning reward item (achievement, season, milestone,
+   * grant rewards). Shop items (sold, bundled, Premium) and XP level rewards
+   * are refused: each has its own editor, so a raw edit here can never drop a
+   * Shop item's uploaded artwork or tier. Items made here are free rewards, so
+   * their tier is written as 'xp' (the app would otherwise read uploaded art
+   * as Premium).
+   */
   adminRoute.put("/gamification/catalog/:id", async (c) => {
     requireFullAdmin(c);
     const id = c.req.param("id");
     if (!ID_RE.test(id)) throw httpsError("invalid-argument", "id must be 2-40 lowercase letters, digits, _ or -.");
     const b = await c.req.json<any>().catch(() => ({}));
+    if (b?.asset && typeof b.asset === "object" && (b.asset.tier === "premium" || b.asset.collection === "xp40")) {
+      throw httpsError(
+        "invalid-argument",
+        b.asset.tier === "premium"
+          ? "Premium items are Shop items. Create them under Shopping → Digital items."
+          : "XP level rewards are created under Gamification → XP level rewards.",
+      );
+    }
+    assertCatalogOwner(await catalogOwnerOf(c.env, id), "earning");
     // Same validation as the Shop's Digital items editor (lib/catalogItem.ts).
-    const v = validateCatalogItemInput(c.env, b);
+    const parsed = validateCatalogItemInput(c.env, b);
+    const v = { ...parsed, asset: { ...parsed.asset, tier: "xp" } };
     const before = (await loadCatalog(c.env)).find((i) => i.id === id) ?? null;
     await assertTypeChangeAllowed(c.env, id, before?.type, v.type);
-    await catalogUpsertStatement(c.env, id, v, now()).run();
+    await catalogUpsertStatement(c.env, id, v, now(), "earning").run();
     invalidateGamificationCatalog();
     await purgeShared(c, CATALOG_CACHE_KEY).catch(() => {});
     await logAudit(c, before ? "gamification.item.update" : "gamification.item.create", "reward_item", id, {
@@ -323,7 +350,7 @@ export function registerGamificationRoutes(
 
     const ts = now();
     const stmts = [
-      catalogUpsertStatement(c.env, id, v, ts),
+      catalogUpsertStatement(c.env, id, v, ts, "xp"),
       c.env.DB.prepare(
         `INSERT INTO xp_cosmetic_unlocks (item_id, collection, category, unlock_level, item_order, created_at)
          VALUES (?, 'xp40', ?, ?, ?, ?)

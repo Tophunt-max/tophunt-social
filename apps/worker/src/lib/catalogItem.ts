@@ -2,7 +2,8 @@
  * Validation for an admin catalog item write (`reward_catalog`), shared by
  * Gamification → Catalog (PUT /admin/gamification/catalog/:id) and the Shop's
  * Digital items editor (PUT /admin/monetization/store/items/:id), so the two
- * can never accept different shapes.
+ * can never accept different shapes. Which of them may write a given row is
+ * decided by its owner (CatalogOwner below, migration 0089).
  *
  * Artwork comes in two forms:
  *   - `asset.key`: artwork bundled in the app (`shop.frame_rose_petal`);
@@ -163,14 +164,49 @@ export async function assertTypeChangeAllowed(env: Env, id: string, beforeType: 
   }
 }
 
-/** The reward_catalog upsert, as a prepared statement so callers can batch it. */
-export function catalogUpsertStatement(env: Env, id: string, v: CatalogItemInput, ts: number) {
+/**
+ * Which admin editor owns a catalogue row (reward_catalog.managed_by, migration 0089):
+ *   'shop'    — Shopping → Digital items (sold, bundled or Shop-made items);
+ *   'earning' — Gamification → Catalog (achievement, season, milestone, grant rewards);
+ *   'xp'      — Gamification → XP level rewards (free level unlocks).
+ * Each admin write route accepts only its own side, so one row has one editor.
+ */
+export type CatalogOwner = "shop" | "earning" | "xp";
+
+/** Where an owner's items are edited, for refusal messages. */
+export const CATALOG_OWNER_EDITOR: Record<CatalogOwner, string> = {
+  shop: "Shopping → Digital items",
+  earning: "Gamification → Catalog",
+  xp: "Gamification → XP level rewards",
+};
+
+/** The row's owner, or null when the id is new. */
+export async function catalogOwnerOf(env: Env, id: string): Promise<CatalogOwner | null> {
+  const r = await env.DB.prepare(`SELECT managed_by FROM reward_catalog WHERE id = ?`).bind(id).first<{ managed_by: string }>();
+  if (!r) return null;
+  return r.managed_by === "shop" || r.managed_by === "xp" ? r.managed_by : "earning";
+}
+
+/**
+ * Refuse a write from the `side` editor to a row another editor owns (a new
+ * id has no owner yet). The Shop routes do not call this: they may take over
+ * an Earning item by listing it (the row moves to 'shop', so Gamification can
+ * no longer edit it) and refuse XP rows themselves.
+ */
+export function assertCatalogOwner(owner: CatalogOwner | null, side: CatalogOwner): void {
+  if (owner === null || owner === side) return;
+  throw httpsError("failed-precondition", `This item is managed under ${CATALOG_OWNER_EDITOR[owner]}. Edit it there.`);
+}
+
+/** The reward_catalog upsert, as a prepared statement so callers can batch it. `owner` is written on insert and update. */
+export function catalogUpsertStatement(env: Env, id: string, v: CatalogItemInput, ts: number, owner: CatalogOwner) {
   return env.DB.prepare(
-    `INSERT INTO reward_catalog (id, type, name, description, rarity, asset, active, sort, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO reward_catalog (id, type, name, description, rarity, asset, active, sort, managed_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET type = excluded.type, name = excluded.name, description = excluded.description,
-       rarity = excluded.rarity, asset = excluded.asset, active = excluded.active, sort = excluded.sort, updated_at = excluded.updated_at`,
-  ).bind(id, v.type, v.name, v.description, v.rarity, JSON.stringify(v.asset), v.active ? 1 : 0, v.sort, ts, ts);
+       rarity = excluded.rarity, asset = excluded.asset, active = excluded.active, sort = excluded.sort,
+       managed_by = excluded.managed_by, updated_at = excluded.updated_at`,
+  ).bind(id, v.type, v.name, v.description, v.rarity, JSON.stringify(v.asset), v.active ? 1 : 0, v.sort, owner, ts, ts);
 }
 
 /** The public catalog read (routes/read.ts /read/gamification/catalog) cache key. */

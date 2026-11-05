@@ -1,14 +1,17 @@
 import { useMemo, useState } from "react";
+import { Redirect, useSearch } from "wouter";
 import { PageHeader } from "@/lib/format";
+import { useTabParam } from "@/lib/useTabParam";
 import { OverviewTab } from "@/components/monetization/OverviewTab";
 import { AdsTab } from "@/components/monetization/AdsTab";
 import { AdPlatformTab } from "@/components/monetization/AdPlatformTab";
 import { AdPerformanceTab } from "@/components/monetization/AdPerformanceTab";
 import { SponsorshipsTab } from "@/components/monetization/SponsorshipsTab";
 import { GiftsTab } from "@/components/monetization/GiftsTab";
-import { StoreTab } from "@/components/monetization/StoreTab";
 import { field } from "@/components/monetization/shared";
 
+// The digital item catalogue lives only in Shopping → Digital items; old
+// `/monetization?tab=store` links are redirected there (MonetizationRoute).
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "adplatform", label: "Ad platform" },
@@ -16,9 +19,9 @@ const TABS = [
   { id: "ads", label: "Ads & rewards" },
   { id: "sponsorships", label: "Sponsorships" },
   { id: "gifts", label: "Gifts" },
-  { id: "store", label: "Digital store" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
+const TAB_IDS = TABS.map((t) => t.id);
 
 const RANGES = [
   { days: 1, label: "Today" },
@@ -27,11 +30,15 @@ const RANGES = [
   { days: 90, label: "90 days" },
 ];
 
-export default function Monetization() {
-  const [tab, setTab] = useState<Tab>(() => {
-    const t = new URLSearchParams(window.location.search).get("tab");
-    return (TABS.some((x) => x.id === t) ? t : "overview") as Tab;
-  });
+/** `/monetization?tab=store` (the old Digital store tab) opens Shopping → Digital items; anything else is the page. */
+export default function MonetizationRoute() {
+  const search = useSearch();
+  if (new URLSearchParams(search).get("tab") === "store") return <Redirect to="/shopping?tab=digital" replace />;
+  return <Monetization />;
+}
+
+function Monetization() {
+  const [tab, select] = useTabParam<Tab>(TAB_IDS, "overview");
   const [days, setDays] = useState(30);
   // Rounded to the minute so the query key is stable across renders.
   const range = useMemo(() => {
@@ -39,20 +46,13 @@ export default function Monetization() {
     return { from: to - days * 86_400_000, to };
   }, [days]);
 
-  const select = (t: Tab) => {
-    setTab(t);
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", t);
-    window.history.replaceState(null, "", url.toString());
-  };
-
   return (
     <div>
       <PageHeader
         title="Monetization"
-        subtitle="Ads, brand sponsorships, virtual gifts and the digital store. Estimates are labelled; only provider reports and invoices are revenue."
+        subtitle="Ads, brand sponsorships and virtual gifts. Digital items are managed in Shopping. Estimates are labelled; only provider reports and invoices are revenue."
         action={
-          tab !== "store" && tab !== "sponsorships" ? (
+          tab !== "sponsorships" ? (
             <select className={`${field} w-36`} value={days} onChange={(e) => setDays(Number(e.target.value))}>
               {RANGES.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
             </select>
@@ -76,7 +76,6 @@ export default function Monetization() {
       {tab === "ads" && <AdsTab range={range} />}
       {tab === "sponsorships" && <SponsorshipsTab />}
       {tab === "gifts" && <GiftsTab range={range} />}
-      {tab === "store" && <StoreTab />}
     </div>
   );
 }

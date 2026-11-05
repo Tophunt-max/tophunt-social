@@ -682,10 +682,27 @@ adminRoute.get("/rewards", async (c) => c.json((await getGamificationSettings(c.
 // (validated on POST /app-settings), not the gamification row.
 const REWARD_COIN_KEYS = ["dailyLoginReward", "dailyBaseReward", "dailyStreakBonus"] as const;
 
+/**
+ * Keys the validated Earn forms post (admin-panel components/coin/EarnCards.tsx:
+ * daily check-in, daily tasks, Hall of Fame). An admin may change only these;
+ * any other key comes from the raw JSON editor (pages/Rewards.tsx), which
+ * bypasses the forms and is superadmin only.
+ */
+const REWARD_FORM_KEYS = new Set([
+  "dailyLoginEnabled", "dailyLoginReward", "dailyBaseReward", "dailyStreakBonus",
+  "dailyRewardSchedule", "dayResetOffsetMinutes", "dailyTasks", "hallOfFameRewards",
+]);
+
 adminRoute.post("/rewards", async (c) => {
   requireFullAdmin(c);
   const db = getDb(c.env);
   const body = await c.req.json<any>();
+  if (c.get("adminRole") !== "superadmin") {
+    const raw = Object.keys(body ?? {}).filter((k) => !REWARD_FORM_KEYS.has(k));
+    if (raw.length) {
+      throw httpsError("permission-denied", `Only a superadmin can change ${raw.join(", ")} (raw reward settings). Use the Earn forms for the rest.`);
+    }
+  }
   for (const key of REWARD_COIN_KEYS) {
     if (body?.[key] === undefined || body[key] === null) continue;
     const n = Number(body[key]);
