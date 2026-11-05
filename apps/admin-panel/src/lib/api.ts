@@ -67,6 +67,8 @@ export interface EarningAnalytics {
 }
 export interface EarningAssetRow { key: string; file: string; group: string; url: string | null; changedBy: string | null; changedAt: number | null }
 export interface EarningAssetRules { minSide: number; maxSide: number; square: boolean; alpha: boolean }
+export interface ShopAssetRow { key: string; file: string; group: string; aspect: [number, number]; tint: boolean; url: string | null; changedBy: string | null; changedAt: number | null }
+export interface ShopAssetRules { minSide: number; maxSide: number; alpha: boolean }
 export interface EarningAssetHistoryRow { id: string; action: string; url: string | null; by: string | null; at: number }
 export interface EarningAuditRow {
   id: string;
@@ -422,6 +424,9 @@ const uploadShopCategory = (file: File, onProgress?: UploadProgressHandler) =>
 const uploadShopItemArt = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/shop-item-art", file, onProgress, "Artwork upload failed. Check your connection and try again.");
 
+/** Shop artwork override for one key, WebP or PNG up to 1 MB (Worker POST /admin/media/shop-asset?key=). */
+const uploadShopAsset = (key: string, file: File, onProgress?: UploadProgressHandler) =>
+  uploadBinary(`/admin/media/shop-asset?key=${encodeURIComponent(key)}`, file, onProgress, "Artwork upload failed. Check your connection and try again.");
 /** Rewards Center artwork override, WebP or PNG up to 1 MB (Worker POST /admin/media/earning-asset). */
 const uploadEarningAsset = (file: File, onProgress?: UploadProgressHandler) =>
   uploadBinary("/admin/media/earning-asset", file, onProgress, "Artwork upload failed. Check your connection and try again.");
@@ -1011,6 +1016,12 @@ export const api = {
     grants: (status = "claimable") => get<any[]>(`/admin/gamification/grants?status=${encodeURIComponent(status)}`),
   },
   // Special events (worker routes/adminEvents.ts).
+  shopAssets: {
+    list: () => get<{ maxBytes: number; types: string[]; rules: ShopAssetRules; assets: ShopAssetRow[] }>("/admin/shop/assets"),
+    history: (key: string) => get<EarningAssetHistoryRow[]>(`/admin/shop/assets/${encodeURIComponent(key)}/history`),
+    save: (key: string, url: string | null) => put<{ success: boolean; key: string; url: string | null }>(`/admin/shop/assets/${encodeURIComponent(key)}`, { url }),
+    upload: uploadShopAsset,
+  },
   earning: {
     events: () => get<{ statuses: string[]; events: any[] }>("/admin/earning/events"),
     saveEvent: (id: string, payload: any) => put<{ success: boolean; id: string }>(`/admin/earning/events/${encodeURIComponent(id)}`, payload),

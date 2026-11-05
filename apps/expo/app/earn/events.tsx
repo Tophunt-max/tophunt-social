@@ -115,7 +115,10 @@ export default function EventsScreen() {
               )
             ) : (
               <View style={{ gap: 12 }}>
-                <Text style={styles.joined}>✓ Joined · progress join karne ke baad se ginti hai</Text>
+                <View style={styles.row}>
+                  <Art name="dayCheck" size={18} />
+                  <Text style={[styles.joined, { flexShrink: 1 }]}>Joined · progress join karne ke baad se ginti hai</Text>
+                </View>
                 {e.tasks.map((t) => (
                   <View key={t.id} style={styles.task}>
                     <Art name={t.claimed ? 'missionComplete' : MISSION_ART[t.metric] ?? 'dailyMission'} size={38} />
