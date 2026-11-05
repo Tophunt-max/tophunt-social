@@ -1,3 +1,4 @@
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 /** Segmented status-filter tabs used by the admin pages. */
 export function SegTabs({
   tab,
@@ -18,7 +19,7 @@ export function SegTabs({
             tab === t.key ? "bg-card shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          {t.label}
+          <CurrencyText>{t.label}</CurrencyText>
         </button>
       ))}
     </div>

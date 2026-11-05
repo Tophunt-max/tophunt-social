@@ -4,6 +4,7 @@ import { api, describeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { fmtNumber } from "@/lib/format";
 import { Button, Card, Notice, Num, inr, money } from "@/components/monetization/shared";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /**
  * Economy guardrails (worker lib/economyLimits.ts, `monetization.economy`) and
@@ -31,7 +32,7 @@ export function EconomyHealthCard() {
   if (!data) return <Card title="Economy health (30 din)"><p className="text-sm text-muted-foreground">Loading…</p></Card>;
   const Row = ({ label, value }: { label: string; value: string }) => (
     <div className="flex justify-between text-sm py-1 border-b border-border last:border-0">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="text-muted-foreground"><CurrencyText>{label}</CurrencyText></span>
       <span className="font-semibold text-foreground">{value}</span>
     </div>
   );

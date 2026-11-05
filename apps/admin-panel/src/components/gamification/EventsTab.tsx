@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Button, Card, Notice, Num, Text, Toggle, field, fromLocalInput, toLocalInput } from "@/components/monetization/shared";
 import { safeArtUrl } from "@/lib/shopArt";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /**
  * Gamification → Events: Special events in the app's Rewards Center (worker
@@ -59,10 +60,12 @@ export function EventsTab() {
                     <span className="text-xs font-mono text-muted-foreground">{e.id}</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {fmtDateTime(e.startsAt)} → {fmtDateTime(e.endsAt)} · {e.tasks.length} task(s) · up to {fmtNumber(e.tasks.reduce((s: number, t: any) => s + t.coins, 0))} 💎 per user
-                    {e.totalBudget != null ? ` · budget ${fmtNumber(e.stats?.diamonds ?? 0)}/${fmtNumber(e.totalBudget)} 💎` : ""}
+                    <CurrencyText>
+                      {fmtDateTime(e.startsAt)} → {fmtDateTime(e.endsAt)} · {e.tasks.length} task(s) · up to {fmtNumber(e.tasks.reduce((s: number, t: any) => s + t.coins, 0))} 💎 per user
+                      {e.totalBudget != null ? ` · budget ${fmtNumber(e.stats?.diamonds ?? 0)}/${fmtNumber(e.totalBudget)} 💎` : ""}
+                    </CurrencyText>
                   </p>
-                  <p className="text-xs mt-1">{fmtNumber(e.stats?.participants ?? 0)} joined · {fmtNumber(e.stats?.claims ?? 0)} claims · {fmtNumber(e.stats?.diamonds ?? 0)} 💎 paid</p>
+                  <p className="text-xs mt-1"><CurrencyText>{fmtNumber(e.stats?.participants ?? 0)} joined · {fmtNumber(e.stats?.claims ?? 0)} claims · {fmtNumber(e.stats?.diamonds ?? 0)} 💎 paid</CurrencyText></p>
                 </div>
                 <div className="flex gap-2">
                   <Button variant="secondary" onClick={() => setPeople(e.id)}>Participants</Button>
@@ -152,7 +155,7 @@ function EventEditor({ draft, onClose, onDone }: { draft: any; onClose: () => vo
         <Toggle label="Require verified email or mobile" checked={!!d.requireVerified} onChange={(v) => set({ requireVerified: v })} hint="Strongly recommended for events with big rewards." />
         <section className="rounded-xl border border-border p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <p className="font-semibold text-sm">Tasks ({d.tasks.length}/10) · up to {fmtNumber(perUser)} 💎 per user</p>
+            <p className="font-semibold text-sm"><CurrencyText>Tasks ({d.tasks.length}/10) · up to {fmtNumber(perUser)} 💎 per user</CurrencyText></p>
             <Button variant="secondary" onClick={() => set({ tasks: [...d.tasks, { id: `task${d.tasks.length + 1}`, title: "", metric: "votes", target: 5, coins: 20 }] })} disabled={d.tasks.length >= 10}>+ Task</Button>
           </div>
           {d.tasks.map((t: any, i: number) => (
@@ -185,7 +188,7 @@ function Participants({ id, onClose }: { id: string; onClose: () => void }) {
     <Modal open onClose={onClose} title={`Participants · ${id}`} width="max-w-2xl">
       {q.isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : !(q.data ?? []).length ? <p className="text-sm text-muted-foreground">Nobody joined yet.</p> : (
         <table className="w-full text-sm">
-          <thead><tr className="text-left text-xs text-muted-foreground"><th>User</th><th>Joined</th><th>Claims</th><th>💎</th></tr></thead>
+          <thead><tr className="text-left text-xs text-muted-foreground"><th>User</th><th>Joined</th><th>Claims</th><th><CurrencyText>💎</CurrencyText></th></tr></thead>
           <tbody>{(q.data ?? []).map((r: any) => (
             <tr key={r.uid} className="border-t border-border"><td className="py-1.5">@{r.username ?? r.uid}</td><td>{fmtDateTime(r.joinedAt)}</td><td>{r.claims}</td><td>{fmtNumber(r.diamonds)}</td></tr>
           ))}</tbody>

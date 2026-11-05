@@ -5,6 +5,7 @@ import { Table } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader, fmtDateTime, fmtNumber } from "@/lib/format";
 import { Download, Search } from "lucide-react";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 export default function Transactions() {
   const [type, setType] = useState("");
@@ -92,9 +93,9 @@ export default function Transactions() {
               const fmt = (n: number) => `${n >= 0 ? "+" : ""}${fmtNumber(n)}`;
               return (
                 <span className="font-bold whitespace-nowrap">
-                  {c ? <span className={c >= 0 ? "text-green-600" : "text-red-600"}>{fmt(c)} 🪙</span> : null}
+                  {c ? <span className={c >= 0 ? "text-green-600" : "text-red-600"}><CurrencyText>{fmt(c)} 🪙</CurrencyText></span> : null}
                   {c && d ? " " : null}
-                  {d ? <span className={d >= 0 ? "text-cyan-700" : "text-red-600"}>{fmt(d)} 💎</span> : null}
+                  {d ? <span className={d >= 0 ? "text-cyan-700" : "text-red-600"}><CurrencyText>{fmt(d)} 💎</CurrencyText></span> : null}
                   {!c && !d ? "0" : null}
                 </span>
               );

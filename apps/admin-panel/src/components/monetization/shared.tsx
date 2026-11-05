@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 export const field =
   "w-full px-3 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring";
@@ -8,8 +9,8 @@ export function Card({ title, subtitle, action, children }: { title: string; sub
     <div className="bg-card border border-border rounded-2xl p-5 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-bold text-foreground">{title}</h3>
-          {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
+          <h3 className="font-bold text-foreground"><CurrencyText>{title}</CurrencyText></h3>
+          {subtitle && <p className="text-xs text-muted-foreground mt-0.5"><CurrencyText>{subtitle}</CurrencyText></p>}
         </div>
         {action}
       </div>
@@ -21,9 +22,9 @@ export function Card({ title, subtitle, action, children }: { title: string; sub
 export function Num({ label, value, onChange, hint, min, max }: { label: string; value: number | string; onChange: (v: number) => void; hint?: string; min?: number; max?: number }) {
   return (
     <label className="block">
-      <span className="text-xs text-muted-foreground mb-1 block">{label}</span>
+      <span className="text-xs text-muted-foreground mb-1 block"><CurrencyText>{label}</CurrencyText></span>
       <input type="number" className={field} value={value} min={min} max={max} onChange={(e) => onChange(Number(e.target.value))} />
-      {hint && <span className="text-[11px] text-muted-foreground mt-1 block">{hint}</span>}
+      {hint && <span className="text-[11px] text-muted-foreground mt-1 block"><CurrencyText>{hint}</CurrencyText></span>}
     </label>
   );
 }
@@ -31,9 +32,9 @@ export function Num({ label, value, onChange, hint, min, max }: { label: string;
 export function Text({ label, value, onChange, placeholder, hint }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; hint?: string }) {
   return (
     <label className="block">
-      <span className="text-xs text-muted-foreground mb-1 block">{label}</span>
+      <span className="text-xs text-muted-foreground mb-1 block"><CurrencyText>{label}</CurrencyText></span>
       <input className={field} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
-      {hint && <span className="text-[11px] text-muted-foreground mt-1 block">{hint}</span>}
+      {hint && <span className="text-[11px] text-muted-foreground mt-1 block"><CurrencyText>{hint}</CurrencyText></span>}
     </label>
   );
 }
@@ -43,8 +44,8 @@ export function Toggle({ label, checked, onChange, hint }: { label: string; chec
     <label className="flex items-start gap-2 text-sm cursor-pointer">
       <input type="checkbox" className="mt-0.5" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       <span>
-        {label}
-        {hint && <span className="block text-[11px] text-muted-foreground">{hint}</span>}
+        <CurrencyText>{label}</CurrencyText>
+        {hint && <span className="block text-[11px] text-muted-foreground"><CurrencyText>{hint}</CurrencyText></span>}
       </span>
     </label>
   );

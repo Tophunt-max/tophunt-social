@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import { CurrencyText } from './DiamondIcon';
 
 interface Column<T> {
   key: string;
@@ -41,7 +42,7 @@ export function Table<T>({ columns, data, loading, empty = 'No data', keyFn }: T
             <tr className="border-b border-border bg-secondary/40">
               {columns.map(col => (
                 <th key={col.key} className={`text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap ${col.className || ''}`}>
-                  {col.header}
+                  <CurrencyText>{col.header}</CurrencyText>
                 </th>
               ))}
             </tr>
@@ -78,7 +79,7 @@ export function Table<T>({ columns, data, loading, empty = 'No data', keyFn }: T
               <div key={col.key} className="flex items-start justify-between gap-3">
                 {col.header ? (
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground pt-0.5 flex-shrink-0">
-                    {col.header}
+                    <CurrencyText>{col.header}</CurrencyText>
                   </span>
                 ) : null}
                 <div className="text-sm text-right min-w-0 break-words ml-auto">

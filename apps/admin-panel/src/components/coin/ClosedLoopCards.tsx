@@ -4,6 +4,7 @@ import { api, describeError } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { fmtNumber } from "@/lib/format";
 import { Button, Card, Notice, Num, Text, Toggle, field, inr } from "@/components/monetization/shared";
+import { CurrencyText } from "@/components/ui/DiamondIcon";
 
 /**
  * Coin Economy cards for the closed-loop economy:
@@ -138,7 +139,7 @@ export function ShoppingSummaryCard() {
 function Row({ label, value, strong }: { label: string; value: React.ReactNode; strong?: boolean }) {
   return (
     <div className={`flex items-center justify-between py-1 ${strong ? "font-semibold" : ""}`}>
-      <span className="text-muted-foreground">{label}</span>
+      <span className="text-muted-foreground"><CurrencyText>{label}</CurrencyText></span>
       <span>{value}</span>
     </div>
   );

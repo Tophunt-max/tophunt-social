@@ -9,7 +9,7 @@ import { PageHeader, fmtDateTime, fmtNumber, exportCsv } from "@/lib/format";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { toast } from "@/lib/toast";
 import { SegTabs, UserCell, ActionBtn } from "@/components/finance/bits";
-import { DiamondIcon } from "@/components/ui/DiamondIcon";
+import { CurrencyText, DiamondIcon } from "@/components/ui/DiamondIcon";
 import { Check, X, Download, Save, Plus, Trash2, Users, Hourglass, ShieldAlert, Trophy, AlertTriangle, Undo2, Link2, Wallet } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 
@@ -271,7 +271,7 @@ export default function Referrals() {
                     {t.username || t.uid}
                   </span>
                   <span className="font-semibold whitespace-nowrap">
-                    {fmtNumber(t.rewarded)} · <span className="text-cyan-700">{fmtNumber(t.earned)} 💎</span>
+                    {fmtNumber(t.rewarded)} · <span className="text-cyan-700"><CurrencyText>{fmtNumber(t.earned)} 💎</CurrencyText></span>
                   </span>
                 </li>
               ))}

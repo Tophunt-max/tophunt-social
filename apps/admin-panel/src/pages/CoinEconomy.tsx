@@ -22,7 +22,7 @@ import {
   type PromoBudgetStatus,
 } from "@/lib/api";
 import { Table } from "@/components/ui/Table";
-import { DiamondIcon } from "@/components/ui/DiamondIcon";
+import { CurrencyText, DiamondIcon } from "@/components/ui/DiamondIcon";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/StatCard";
 import { SegTabs } from "@/components/finance/bits";
@@ -214,7 +214,7 @@ function EarnTab() {
           data={EARN_TYPES}
           keyFn={(t) => t.type}
           columns={[
-            { key: "s", header: "Source", render: (t) => <span className="font-medium text-foreground">{t.label}</span> },
+            { key: "s", header: "Source", render: (t) => <span className="font-medium text-foreground"><CurrencyText>{t.label}</CurrencyText></span> },
             { key: "l", header: "💎 Diamond", className: "text-right", render: (t) => fmtNumber(byType.get(t.type)?.diamondIn ?? 0) },
             { key: "c", header: "🪙 DP coin", className: "text-right", render: (t) => fmtNumber(byType.get(t.type)?.dpIn ?? 0) },
             { key: "n", header: "Entries", className: "text-right", render: (t) => fmtNumber(byType.get(t.type)?.count ?? 0) },
@@ -294,7 +294,7 @@ function HealthTab() {
             <li key={c.key} className="flex items-start gap-2 text-sm">
               {c.ok ? <CheckCircle2 size={16} className="mt-0.5 text-green-600 shrink-0" /> : <AlertTriangle size={16} className="mt-0.5 text-red-600 shrink-0" />}
               <span>
-                <span className="font-medium text-foreground">{c.label}</span>
+                <span className="font-medium text-foreground"><CurrencyText>{c.label}</CurrencyText></span>
                 <span className="block text-xs text-muted-foreground">{c.detail}</span>
               </span>
             </li>
@@ -449,7 +449,7 @@ function OverviewBody({ data }: { data: CoinEconomyData }) {
             <li key={c.key} className="flex items-start gap-2 text-sm">
               {c.ok ? <CheckCircle2 size={16} className="mt-0.5 text-green-600 shrink-0" /> : <AlertTriangle size={16} className="mt-0.5 text-red-600 shrink-0" />}
               <span>
-                <span className="font-medium text-foreground">{c.label}</span>
+                <span className="font-medium text-foreground"><CurrencyText>{c.label}</CurrencyText></span>
                 <span className="block text-xs text-muted-foreground">{c.detail}</span>
               </span>
             </li>
@@ -462,7 +462,7 @@ function OverviewBody({ data }: { data: CoinEconomyData }) {
           data={categories}
           keyFn={([k]) => k}
           columns={[
-            { key: "label", header: "Source", render: ([, c]) => <span className="font-medium text-foreground">{c.label}</span> },
+            { key: "label", header: "Source", render: ([, c]) => <span className="font-medium text-foreground"><CurrencyText>{c.label}</CurrencyText></span> },
             { key: "in", header: "Users ko mile", className: "text-right", render: ([, c]) => <span className="text-green-600">{fmtNumber(c.credits)}</span> },
             { key: "out", header: "Users se gaye", className: "text-right", render: ([, c]) => <span className="text-red-600">{fmtNumber(c.debits)}</span> },
             { key: "net", header: "Net", className: "text-right", render: ([, c]) => <span className="font-semibold">{signed(c.net)}</span> },
@@ -516,7 +516,7 @@ function Mini({ label, value, sub, tone }: { label: string; value: string; sub?:
   return (
     <div className="rounded-xl bg-secondary/60 p-3">
       <p className={`text-lg font-bold ${tone ?? "text-foreground"}`}>{value}</p>
-      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-xs text-muted-foreground"><CurrencyText>{label}</CurrencyText></p>
       {sub ? <p className="text-[11px] text-muted-foreground">{sub}</p> : null}
     </div>
   );
@@ -576,7 +576,7 @@ function Budgets() {
             render: (b) => (
               <button className="text-left" onClick={() => setDetail(b.id)}>
                 <span className="font-medium text-foreground underline-offset-2 hover:underline">{b.name}</span>
-                <span className="block text-xs text-muted-foreground">{KIND_LABEL[b.kind]} · {KIND_UNIT[b.kind]}</span>
+                <span className="block text-xs text-muted-foreground"><CurrencyText>{KIND_LABEL[b.kind]} · {KIND_UNIT[b.kind]}</CurrencyText></span>
               </button>
             ),
           },
@@ -713,13 +713,13 @@ function BudgetDialog({ budget, onClose, onDone }: { budget?: PromoBudget; onClo
         ) : null}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Total ({KIND_UNIT[form.kind]}, limit)</label>
+            <label className="text-xs text-muted-foreground mb-1 block"><CurrencyText>Total ({KIND_UNIT[form.kind]}, limit)</CurrencyText></label>
             <input type="number" className={field} value={form.totalCoins} onChange={(e) => set("totalCoins", e.target.value)} />
             {isEdit && committed > 0 ? <p className="mt-1 text-xs text-muted-foreground">Kam se kam {fmtNumber(committed)}</p> : null}
           </div>
           {form.kind === "free_rewards" ? (
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Per user max ({KIND_UNIT[form.kind]})</label>
+              <label className="text-xs text-muted-foreground mb-1 block"><CurrencyText>Per user max ({KIND_UNIT[form.kind]})</CurrencyText></label>
               <input type="number" className={field} placeholder="Koi limit nahi" value={form.perUserLimit} onChange={(e) => set("perUserLimit", e.target.value)} />
             </div>
           ) : <div />}
@@ -782,7 +782,7 @@ function BudgetDetail({ id, onClose }: { id: string; onClose: () => void }) {
           <div>
             <p className="text-sm font-semibold mb-1">Linked</p>
             {data.contests.map((c) => (
-              <p key={c.id} className="text-sm">Contest: {c.title ?? c.id} · fee 💎 {fmtNumber(c.totalEntryFee)} · prize 🪙 {fmtNumber(c.rewardCoins)} ({c.status})</p>
+              <p key={c.id} className="text-sm"><CurrencyText>Contest: {c.title ?? c.id} · fee 💎 {fmtNumber(c.totalEntryFee)} · prize 🪙 {fmtNumber(c.rewardCoins)} ({c.status})</CurrencyText></p>
             ))}
             {!data.contests.length ? <p className="text-sm text-muted-foreground">Kuch linked nahi.</p> : null}
           </div>
@@ -994,8 +994,10 @@ function ContestsPnl() {
               <span>
                 <span className="font-medium text-foreground">{c.title ?? c.id}</span>
                 <span className="block text-xs text-muted-foreground">
-                  fee 💎 {fmtNumber(c.totalEntryFee)} · prize {c.prizeType === "product" ? `product${c.prizeCostCoins ? ` (${fmtNumber(c.prizeCostCoins)} DP coin value)` : ""}` : `🪙 ${fmtNumber(c.rewardCoins)}`}
-                  {c.subsidyBudgetId ? " · promo" : ""} · {c.status}
+                  <CurrencyText>
+                    fee 💎 {fmtNumber(c.totalEntryFee)} · prize {c.prizeType === "product" ? `product${c.prizeCostCoins ? ` (${fmtNumber(c.prizeCostCoins)} DP coin value)` : ""}` : `🪙 ${fmtNumber(c.rewardCoins)}`}
+                    {c.subsidyBudgetId ? " · promo" : ""} · {c.status}
+                  </CurrencyText>
                 </span>
               </span>
             ),
@@ -1074,7 +1076,7 @@ function UserStatementView() {
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-card border border-border rounded-2xl p-5">
-      <p className="font-semibold text-foreground mb-3">{title}</p>
+      <p className="font-semibold text-foreground mb-3"><CurrencyText>{title}</CurrencyText></p>
       {children}
     </div>
   );
@@ -1083,7 +1085,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function Row({ label, value, strong }: { label: string; value: React.ReactNode; strong?: boolean }) {
   return (
     <div className={`flex items-center justify-between gap-3 py-1.5 text-sm ${strong ? "border-t border-border mt-1 pt-2 font-semibold" : ""}`}>
-      <span className={strong ? "text-foreground" : "text-muted-foreground"}>{label}</span>
+      <span className={strong ? "text-foreground" : "text-muted-foreground"}><CurrencyText>{label}</CurrencyText></span>
       <span className="text-foreground">{value}</span>
     </div>
   );
