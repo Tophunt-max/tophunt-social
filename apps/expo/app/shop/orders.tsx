@@ -72,7 +72,7 @@ export default function OrdersScreen() {
                       <Ionicons name="calendar" size={11} color={p.sub} />
                       <Text style={[styles.sub, { color: p.sub }]}>{new Date(item.createdAt).toLocaleDateString()}</Text>
                       <Text style={[styles.sub, { color: p.sub }]}>·</Text>
-                      <CoinIcon size={11} />
+                      <CoinIcon size={17} />
                       <Text style={[styles.coins, { color: p.text }]}>{item.totalCoins.toLocaleString()}</Text>
                     </View>
                   </View>

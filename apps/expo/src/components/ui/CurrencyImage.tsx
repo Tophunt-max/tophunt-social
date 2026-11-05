@@ -22,6 +22,14 @@ export const CURRENCY_IMAGES = {
 
 export type CurrencyImageKind = keyof typeof CURRENCY_IMAGES;
 
+/**
+ * Icon size for an amount set in `fontSize` text. The artwork is detailed
+ * (crown, laurels, facets), so it needs about 1.4x the text size to read at a
+ * glance next to the number; at 1x it looks like a dot.
+ */
+export const CURRENCY_ICON_SCALE = 1.4;
+export const currencyIconSize = (fontSize: number) => Math.round(fontSize * CURRENCY_ICON_SCALE);
+
 /** Opacity for a greyed-out icon (disabled / not affordable). The artwork is full colour, so it can't be tinted. */
 export const MUTED_OPACITY = 0.45;
 

@@ -23,6 +23,7 @@ import { useEarningAssets } from '@/src/services/appSettings';
 import { safeArtUrl } from '@/src/lib/rewardsCenter';
 import { ArrowIcon } from '@/src/components/ui/ArrowIcon';
 import { BRAND, BRAND_BUTTON, BRAND_GRAD } from '@/src/theme/tophuntTokens';
+import { currencyIconSize } from '@/src/components/ui/CurrencyImage';
 
 export interface RewardsPalette {
   isDark: boolean;
@@ -310,7 +311,7 @@ export function DiamondAmount({ amount, size = 14, color, prefix = '+' }: { amou
   const RC = useRC();
   return (
     <View style={styles.amt} accessible accessibilityLabel={`${prefix}${amount} Diamonds`}>
-      <Art name="diamond" size={size + 4} />
+      <Art name="diamond" size={currencyIconSize(size)} />
       <Text style={[styles.amtText, { fontSize: size, color: color ?? RC.text }]}>{prefix}{amount.toLocaleString()}</Text>
     </View>
   );
@@ -322,7 +323,7 @@ export function CoinAmount({ amount, size = 14, color, prefix = '+', label }: { 
   const text = label ?? `${prefix}${(amount ?? 0).toLocaleString()}`;
   return (
     <View style={styles.amt} accessible accessibilityLabel={label ?? `${text} DP coin`}>
-      <Art name="dpCoin" size={size + 4} />
+      <Art name="dpCoin" size={currencyIconSize(size)} />
       <Text style={[styles.amtText, { fontSize: size, color: color ?? RC.text }]}>{text}</Text>
     </View>
   );
@@ -333,7 +334,7 @@ export function XpAmount({ amount, size = 13, label }: { amount?: number; size?:
   const text = label ?? `+${(amount ?? 0).toLocaleString()} XP`;
   return (
     <View style={styles.amt} accessible accessibilityLabel={text}>
-      <Art name="xp" size={size + 4} />
+      <Art name="xp" size={currencyIconSize(size)} />
       <Text style={[styles.amtText, { fontSize: size, color: RC.text }]}>{text}</Text>
     </View>
   );

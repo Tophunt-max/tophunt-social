@@ -70,7 +70,7 @@ function PriceBlock({ item, p, muted, note }: { item: StoreItemView; p: TophuntP
   return (
     <View style={styles.left} accessible accessibilityLabel={`${item.priceCoins} DP coin${note ? `. ${note}` : ''}`}>
       <View style={styles.row}>
-        <CoinIcon size={20} muted={muted} />
+        <CoinIcon size={28} muted={muted} />
         <Text style={[styles.price, { color: muted ? p.sub : p.text }]} numberOfLines={1}>{item.priceCoins.toLocaleString()}</Text>
         {pct > 0 ? <Text style={[styles.was, { color: p.sub }]} numberOfLines={1}>{Number(item.compareAtCoins).toLocaleString()}</Text> : null}
       </View>

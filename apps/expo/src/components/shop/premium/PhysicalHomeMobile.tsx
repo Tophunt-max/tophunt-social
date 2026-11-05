@@ -65,7 +65,7 @@ export const PHYS_M = {
   /** Trust row: 4 white pills (icon + 2-line label). */
   trust: { cols: 4, gap: 6, h: 28, radius: 9, icon: 13, text: 7.5 },
   /** Featured Rewards: 4 white cards with the product photo and the pink price pill. */
-  feat: { cols: 4, gap: 6, h: 95, radius: 10, imgH: 38, name: 8, price: 7.5, priceH: 14, tag: 6.5, tagH: 11, coin: 8, heart: 9 },
+  feat: { cols: 4, gap: 6, h: 95, radius: 10, imgH: 38, name: 8, price: 7.5, priceH: 14, tag: 6.5, tagH: 11, coin: 11, heart: 9 },
   /** Categories: 6 white tiles with a pink outline icon. */
   cat: { cols: 6, gap: 5, h: 46, radius: 10, icon: 16, label: 6.5 },
   /** "Redeem & Get Real Rewards" banner: trophy left, gifts right. */

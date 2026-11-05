@@ -81,7 +81,7 @@ export function LevelProgressBar({
       {showLabels ? (
         <View style={styles.header}>
           <View style={styles.labelRow}>
-            <Animated.View style={star}><XpIcon size={15} /></Animated.View>
+            <Animated.View style={star}><XpIcon size={18} /></Animated.View>
             <Text style={styles.label}>
               {info.isMaxLevel ? `Level ${info.level} · Max` : `Level ${info.level} → ${info.level + 1}`}
             </Text>

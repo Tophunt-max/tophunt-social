@@ -317,7 +317,7 @@ export default function WalletScreen() {
                         styles.dayAmount, 
                         { color: isReady ? primaryColor : (isClaimed ? '#4CAF50' : textColor) }
                     ]}>+{slot.amount}</Text>
-                    <DiamondIcon size={11} />
+                    <DiamondIcon size={16} />
                 </View>
             </TouchableOpacity>
         </View>
@@ -353,7 +353,7 @@ export default function WalletScreen() {
                 {!item.claimed && (
                   <View style={styles.taskRewardBadge}>
                       <Text style={styles.taskRewardText}>+{item.reward}</Text>
-                      <DiamondIcon size={11} />
+                      <DiamondIcon size={14} />
                   </View>
                 )}
             </TouchableOpacity>
@@ -383,13 +383,13 @@ export default function WalletScreen() {
                 if (part.diamonds) rows.push(
                     <View key="d" style={styles.transAmountRow}>
                         <Text style={[styles.transAmount, { color: part.diamonds > 0 ? "#4CAF50" : "#FF4D67" }]}>{part.diamonds > 0 ? '+' : ''}{part.diamonds}</Text>
-                        <DiamondIcon size={14} />
+                        <DiamondIcon size={22} />
                     </View>,
                 );
                 if (part.dpcoin || !part.diamonds) rows.push(
                     <View key="c" style={styles.transAmountRow}>
                         <Text style={[styles.transAmount, { color: part.dpcoin > 0 ? "#4CAF50" : "#FF4D67" }]}>{part.dpcoin > 0 ? '+' : ''}{part.dpcoin}</Text>
-                        <CoinIcon size={14} />
+                        <CoinIcon size={22} />
                     </View>,
                 );
                 return rows;
@@ -454,7 +454,7 @@ export default function WalletScreen() {
                                 <View style={styles.balanceSplit}>
                                     <View style={{ flex: 1 }}>
                                         <View style={[styles.coinBadge, styles.balancePill]}>
-                                            <CoinIcon size={14} color="#FFF" />
+                                            <CoinIcon size={18} />
                                             <Text style={styles.coinBadgeText}>DP coin</Text>
                                         </View>
                                         <Text style={styles.balanceValue}>{bal.dpcoin}</Text>
@@ -462,7 +462,7 @@ export default function WalletScreen() {
                                     </View>
                                     <View style={{ flex: 1 }}>
                                         <View style={[styles.coinBadge, styles.balancePill]}>
-                                            <DiamondIcon size={14} color="#FFF" />
+                                            <DiamondIcon size={18} />
                                             <Text style={styles.coinBadgeText}>Diamond</Text>
                                         </View>
                                         <Text style={styles.balanceValue}>{bal.diamonds}</Text>
@@ -482,7 +482,7 @@ export default function WalletScreen() {
                             activeOpacity={0.9}
                             accessibilityRole="button"
                         >
-                            <DiamondIcon size={20} />
+                            <DiamondIcon size={22} />
                             <Text style={styles.earnText}>Diamond kamao</Text>
                         </TouchableOpacity>
                         <TouchableOpacity

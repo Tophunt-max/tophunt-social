@@ -110,7 +110,7 @@ export default function OrderScreen() {
                   <Text style={[styles.sub, { color: p.sub }]}>{i.variantLabel} · qty {i.qty}</Text>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                  <CoinIcon size={12} />
+                  <CoinIcon size={18} />
                   <Text style={[styles.name, { color: p.text }]}>{(i.unitCoins * i.qty).toLocaleString()}</Text>
                 </View>
               </View>
@@ -118,7 +118,7 @@ export default function OrderScreen() {
             <View style={[styles.totalRow, { borderColor: p.border }]}>
               <Text style={[styles.name, { color: p.text }]}>Total paid</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                <CoinIcon size={17} />
+                <CoinIcon size={24} />
                 <Text style={[styles.total, { color: p.text }]}>{o.totalCoins.toLocaleString()}</Text>
               </View>
             </View>

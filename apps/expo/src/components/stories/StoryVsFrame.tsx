@@ -274,7 +274,7 @@ export const StoryVsFrame: React.FC<Props> = ({ matchId, fallbackMediaUrl, conte
             </View>
           ) : frame.prize > 0 ? (
             <View style={styles.prizePill}>
-              <CoinIcon size={12} color="#FFD54F" />
+              <CoinIcon size={18} />
               <Text style={styles.prizeText}>{frame.prize}</Text>
             </View>
           ) : null}

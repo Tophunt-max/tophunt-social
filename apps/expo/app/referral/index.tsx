@@ -165,7 +165,7 @@ export default function ReferralScreen() {
               <>
                 <View style={styles.heroTitleRow}>
                   <Text style={styles.heroTitle}>Dost ko invite karo, dono ko {unit}!</Text>
-                  {unit === 'DP coin' ? <CoinIcon size={24} /> : <DiamondIcon size={24} />}
+                  {unit === 'DP coin' ? <CoinIcon size={30} /> : <DiamondIcon size={30} />}
                 </View>
                 <Text style={styles.heroSub}>
                   Aapko {program.referrerReward} {unit} · Dost ko {program.refereeReward} {unit}

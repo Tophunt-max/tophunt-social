@@ -135,7 +135,7 @@ function Price({ p, item, u, size, width }: { p: TophuntPalette; item: StoreItem
   }
   return (
     <View style={[styles.price, { gap: px(3, u) }]}>
-      <CoinArt size={Math.max(fs, px(size + 1, u))} />
+      <CoinArt size={Math.round(Math.max(fs * 1.4, px(size + 4, u)))} />
       <Text style={[styles.priceText, { fontSize: fs, color: p.text }]} numberOfLines={1}>{priceText(item.priceCoins, width)}</Text>
       <DiscountTag item={item} size={fs * 0.82} showWas={width >= 120} color={p.sub} />
     </View>
@@ -240,7 +240,7 @@ export const PhysicalCard = React.memo(function PhysicalCard({ p, product, u, wi
       </View>
       <Text style={[styles.cardName, { fontSize: fs, marginTop: px(4, u), paddingHorizontal: px(5, u), textAlign: 'left', color: p.text }]} numberOfLines={1}>{product.title}</Text>
       <View style={[styles.price, { gap: px(3, u), paddingHorizontal: px(5, u), marginTop: px(2, u) }]}>
-        <CoinArt size={Math.max(fs, px(12, u))} />
+        <CoinArt size={Math.round(Math.max(fs * 1.4, px(15, u)))} />
         <Text style={[styles.priceText, { fontSize: fs, color: p.text }]} numberOfLines={1}>{discountOf(product) ? product.priceCoins.toLocaleString() : priceText(product.priceCoins, width)}</Text>
         <DiscountTag item={product} size={font(9, u, 7)} color={p.sub} />
       </View>
@@ -299,7 +299,7 @@ export function DealsCard({ p, product, u, onGrab, onContest }: { p: TophuntPale
                 <Text style={[styles.dealTitle, { fontSize: font(13, u), color: p.text }]} numberOfLines={1}>Featured product</Text>
                 <Text style={[styles.dealSub, { fontSize: font(11, u), marginTop: px(2, u), color: p.sub }]} numberOfLines={2}>{product.title}</Text>
                 <View style={[styles.price, { gap: px(3, u), marginTop: px(3, u) }]}>
-                  <CoinArt size={Math.max(font(11, u), px(13, u))} />
+                  <CoinArt size={Math.round(Math.max(font(12, u) * 1.4, px(17, u)))} />
                   <Text style={[styles.priceText, { fontSize: font(12, u), color: p.text }]}>{product.priceCoins.toLocaleString()} DP</Text>
                   <DiscountTag item={product} size={font(10, u, 7.5)} color={p.sub} />
                 </View>
@@ -360,7 +360,7 @@ export function AdminDealsCard({
           {c.subtitle ? <Text style={[styles.dealSub, { fontSize: font(11, u), marginTop: px(2, u), color: p.sub }]} numberOfLines={prod ? 1 : 2}>{c.subtitle}</Text> : null}
           {prod ? (
             <View style={[styles.price, { gap: px(3, u), marginTop: px(3, u) }]}>
-              <CoinArt size={Math.max(font(11, u), px(13, u))} />
+              <CoinArt size={Math.round(Math.max(font(12, u) * 1.4, px(17, u)))} />
               <Text style={[styles.priceText, { fontSize: font(12, u), color: p.text }]}>{prod.priceCoins.toLocaleString()} DP</Text>
               <DiscountTag item={prod} size={font(10, u, 7.5)} showPercent={false} color={p.sub} />
             </View>

@@ -113,7 +113,7 @@ function PriceButton({ item, busy, affordable, onBuy, p, big = false }: { item: 
     return (
       <View style={[styles.btn, big && styles.btnBig, { backgroundColor: p.chip }]} accessible accessibilityRole="button" accessibilityState={{ disabled: true }} accessibilityLabel={label}>
         <Ionicons name="lock-closed" size={13} color={p.sub} />
-        <CoinIcon size={13} />
+        <CoinIcon size={18} />
         <Text style={[styles.btnText, { color: p.sub }]}>{item.priceCoins}</Text>
       </View>
     );
@@ -128,7 +128,7 @@ function PriceButton({ item, busy, affordable, onBuy, p, big = false }: { item: 
             <Ionicons name="flash" size={13} color="#FFF" />
             <Text style={[styles.btnText, { color: '#FFF' }]}>{big ? 'Unlock' : 'Buy'}</Text>
             <View style={styles.btnSep} />
-            <CoinIcon size={13} />
+            <CoinIcon size={18} />
             <Text style={[styles.btnText, { color: '#FFF' }]}>{item.priceCoins}</Text>
           </>
         )}

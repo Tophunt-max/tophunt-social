@@ -114,7 +114,7 @@ export default function ShopBundleScreen() {
           <Text style={[styles.barTitle, { color: p.text }]} accessibilityRole="header" numberOfLines={1}>{bundle?.name ?? 'Bundle'}</Text>
           {user ? (
             <View style={[styles.balPill, { backgroundColor: p.card, borderColor: p.border }]} accessible accessibilityLabel={live ? `${bal.diamonds} Diamond` : 'Diamond balance load ho raha hai'}>
-              <DiamondIcon size={15} />
+              <DiamondIcon size={20} />
               {live ? <Text style={[styles.balText, { color: p.text }]}>{bal.diamonds.toLocaleString()}</Text> : <Skeleton width={30} height={12} borderRadius={6} />}
             </View>
           ) : null}
@@ -180,7 +180,7 @@ function BundleDetail({
 
       <View style={[styles.priceCard, { backgroundColor: p.card, borderColor: p.border }]}>
         <View style={styles.priceRow} accessible accessibilityLabel={`Price ${bundle.priceDiamonds} Diamond${bundle.compareAtDiamonds ? `, pehle ${bundle.compareAtDiamonds}` : ''}${pct ? `, ${pct}% off` : ''}`}>
-          <DiamondIcon size={24} />
+          <DiamondIcon size={34} />
           <Text style={[styles.price, { color: p.text }]}>{bundle.priceDiamonds.toLocaleString()}</Text>
           {bundle.compareAtDiamonds ? <Text style={[styles.was, { color: p.sub }]}>{bundle.compareAtDiamonds.toLocaleString()}</Text> : null}
           {pct ? (
@@ -190,7 +190,7 @@ function BundleDetail({
         <View style={styles.balRow}>
           <Text style={[styles.balLabel, { color: p.sub }]}>Aapke Diamonds</Text>
           <View style={styles.balValue}>
-            <DiamondIcon size={14} />
+            <DiamondIcon size={19} />
             {live ? <Text style={[styles.balText, { color: p.text }]}>{diamonds.toLocaleString()}</Text> : <Skeleton width={36} height={12} borderRadius={6} />}
           </View>
         </View>
@@ -257,7 +257,7 @@ function BuyButton({
         ) : state === 'buy' ? (
           <>
             <Text style={styles.buyTextLight}>Buy for</Text>
-            <DiamondIcon size={18} color="#FFFFFF" />
+            <DiamondIcon size={22} />
             <Text style={styles.buyTextLight}>{price.toLocaleString()}</Text>
           </>
         ) : (

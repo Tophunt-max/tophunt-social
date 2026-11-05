@@ -78,7 +78,7 @@ export const OpenBattleCard = React.memo(function OpenBattleCard({
       </View>
       <Text style={[styles.title, { color: palette.text }]} numberOfLines={1}>{title}</Text>
       <View style={styles.metaRow}>
-        {fee > 0 ? <DiamondIcon size={11} color={palette.sub} /> : null}
+        {fee > 0 ? <DiamondIcon size={16} /> : null}
         <Text style={[styles.meta, { color: palette.sub }]}>{fee > 0 ? `Entry ${fee}` : 'Free entry'}</Text>
         <View style={{ flex: 1 }} />
         {prize.type === 'product' ? (
@@ -86,7 +86,7 @@ export const OpenBattleCard = React.memo(function OpenBattleCard({
         ) : prize.coins > 0 ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
             <Text style={styles.prize}>Win {prize.coins}</Text>
-            <CoinIcon size={11} color={GOLD} />
+            <CoinIcon size={16} />
           </View>
         ) : null}
       </View>
