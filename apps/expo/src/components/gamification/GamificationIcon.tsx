@@ -2,7 +2,9 @@ import React from 'react';
 import { View } from 'react-native';
 import { Ionicons } from '@/src/lib/icons';
 import { resolveAsset, type AssetDef, type AssetKey, type TierId, type VectorId } from '@/src/lib/gamificationAssets';
-import { Emblem, EmptyInventory, FrameRing, LockBadge, RewardGift, Trophy, XpStar } from './vectors';
+import { Emblem, EmptyInventory, FrameRing, LockBadge, RewardGift, Trophy } from './vectors';
+import { XpIcon } from '@/src/components/ui/XpIcon';
+import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
 
 /**
  * Render any manifest asset by key (or an already-resolved def). Unknown keys
@@ -38,7 +40,10 @@ export function GamificationIcon({
 function Vector({ id, size, color, tier, muted }: { id: VectorId; size: number; color: string; tier?: TierId; muted: boolean }) {
   switch (id) {
     case 'xpStar':
-      return <XpStar size={size} color={color} />;
+      // The app-wide XP artwork (full colour, so `color` / `muted` don't tint it).
+      return <XpIcon size={size} style={muted ? { opacity: 0.45 } : undefined} />;
+    case 'diamond':
+      return <DiamondIcon size={size} style={muted ? { opacity: 0.45 } : undefined} />;
     case 'emblem':
       return <Emblem tier={tier} size={size} muted={muted} />;
     case 'frameRing':

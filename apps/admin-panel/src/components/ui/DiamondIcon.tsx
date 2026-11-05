@@ -1,37 +1,41 @@
-/**
- * Diamond: the play-only balance (users.locked_coins). Pays contest entry fees,
- * comes from free earning and pays contest entry. DP coin
- * (dpcoin − locked_coins) is won in contests and spent in the shop.
- *
- * Same drawing as the app's src/components/ui/DiamondIcon.tsx and
- * public/diamond.svg. Takes the lucide icon props it is used with (size,
- * className), so it can stand in for a lucide icon, e.g. on a StatCard.
- */
-const OUTLINE = "M6 3 H18 L22 9 L12 21 L2 9 Z";
-const FACETS: [string, string, number][] = [
-  ["M6 3 L12 3 L9 9 Z", "#FFFFFF", 0.55],
-  ["M12 3 L18 3 L15 9 Z", "#FFFFFF", 0.35],
-  ["M2 9 L6 3 L9 9 Z", "#FFFFFF", 0.25],
-  ["M12 3 L15 9 L9 9 Z", "#FFFFFF", 0.15],
-  ["M18 3 L22 9 L15 9 Z", "#000000", 0.12],
-  ["M2 9 L9 9 L12 21 Z", "#FFFFFF", 0.2],
-  ["M15 9 L22 9 L12 21 Z", "#000000", 0.22],
-];
+import diamondUrl from "../../../../expo/assets/images/currency/diamond.webp?url";
+import dpCoinUrl from "../../../../expo/assets/images/currency/dp-coin.webp?url";
+import xpUrl from "../../../../expo/assets/images/currency/xp.webp?url";
 
+/**
+ * The app-wide currency artwork, the same WebPs the app draws
+ * (apps/expo/assets/images/currency, built by apps/expo/scripts/gen-currency-webp.mjs):
+ *
+ *   DiamondIcon  Diamond, the play-only balance (users.locked_coins): contest entry fees, earned free.
+ *   CoinIcon     DP coin (dpcoin − locked_coins): won in contests, spent in the shop.
+ *   XpIcon       XP.
+ *
+ * They take the lucide icon props they are used with (size, className), so they
+ * can stand in for a lucide icon, e.g. on a StatCard. The artwork is full colour,
+ * so `color` and text-colour classes don't tint it.
+ */
 export const DIAMOND_COLOR = "#22D3EE";
 
-export function DiamondIcon({ size = 16, color, className }: { size?: number; color?: string; className?: string }) {
-  // Without an explicit colour it follows `currentColor`, like a lucide icon.
-  const fill = color ?? (className ? "currentColor" : DIAMOND_COLOR);
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} role="img" aria-label="Diamond">
-      <path d={OUTLINE} fill={fill} />
-      {FACETS.map(([d, f, o]) => (
-        <path key={d} d={d} fill={f} fillOpacity={o} />
-      ))}
-      <path d={OUTLINE} fill="none" stroke={fill} strokeWidth={1.2} strokeLinejoin="round" />
-    </svg>
-  );
+type Props = { size?: number; color?: string; className?: string };
+
+function art(src: string, alt: string) {
+  return function CurrencyIcon({ size = 16, className }: Props) {
+    return (
+      <img
+        src={src}
+        width={size}
+        height={size}
+        alt={alt}
+        draggable={false}
+        className={className}
+        style={{ width: size, height: size, objectFit: "contain", flexShrink: 0, display: "inline-block" }}
+      />
+    );
+  };
 }
+
+export const DiamondIcon = art(diamondUrl, "Diamond");
+export const CoinIcon = art(dpCoinUrl, "DP coin");
+export const XpIcon = art(xpUrl, "XP");
 
 export default DiamondIcon;

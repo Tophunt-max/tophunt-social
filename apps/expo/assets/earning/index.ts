@@ -119,7 +119,7 @@ export const EARNING_ART = {
 
 /**
  * Currency slots. Not artwork files and not replaceable from the admin panel:
- * `Art` draws the app-wide icons for them (DiamondIcon, the XP star,
+ * `Art` draws the app-wide icons for them (DiamondIcon, XpIcon,
  * CoinIcon), the same ones the wallet, contests and shop use.
  */
 export const CURRENCY_ART = ['diamond', 'diamondGlow', 'xp', 'dpCoin'] as const;

@@ -4,9 +4,11 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useMonetizationConfig } from '@/src/services/monetization';
 import { useXpConversion } from '@/src/services/shop';
+import { XpIcon } from '@/src/components/ui/XpIcon';
+import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
 
 /**
- * The third coin in the wallet: ⚡ XP → 💎 Diamond. Shown only while the
+ * The third coin in the wallet: XP → Diamond. Shown only while the
  * conversion is switched on; taps through to the Earn screen.
  */
 export function XpStrip({ isDark }: { isDark: boolean }) {
@@ -24,10 +26,21 @@ export function XpStrip({ isDark }: { isDark: boolean }) {
       accessibilityRole="button"
       accessibilityLabel={`${convertibleXp} XP. ${xpPerDiamond} XP makes 1 Diamond.`}
     >
-      <Text style={styles.icon}>⚡</Text>
+      <XpIcon size={30} />
       <View style={{ flex: 1 }}>
         <Text style={[styles.title, { color: isDark ? '#fff' : '#111' }]}>{convertibleXp} XP</Text>
-        <Text style={styles.sub}>{xpPerDiamond} XP = 1 💎 Diamond{availableDiamonds > 0 ? ` · abhi ${availableDiamonds} 💎 bana sakte ho` : ''}</Text>
+        <View style={styles.subRow}>
+          <Text style={styles.sub}>{xpPerDiamond} XP = 1</Text>
+          <DiamondIcon size={13} />
+          <Text style={styles.sub}>Diamond</Text>
+          {availableDiamonds > 0 ? (
+            <>
+              <Text style={styles.sub}>· abhi {availableDiamonds}</Text>
+              <DiamondIcon size={13} />
+              <Text style={styles.sub}>bana sakte ho</Text>
+            </>
+          ) : null}
+        </View>
       </View>
       <Text style={styles.cta}>Convert</Text>
     </TouchableOpacity>
@@ -36,8 +49,8 @@ export function XpStrip({ isDark }: { isDark: boolean }) {
 
 const styles = StyleSheet.create({
   strip: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 20, marginBottom: 12, padding: 12, borderRadius: 14, borderWidth: 1 },
-  icon: { fontSize: 22 },
   title: { fontFamily: 'Urbanist-Bold', fontSize: 15 },
-  sub: { fontFamily: 'Urbanist-Medium', fontSize: 12, color: '#8A8F98', marginTop: 2 },
+  subRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3, marginTop: 2 },
+  sub: { fontFamily: 'Urbanist-Medium', fontSize: 12, color: '#8A8F98' },
   cta: { color: '#FF4D67', fontFamily: 'Urbanist-Bold', fontSize: 13 },
 });

@@ -9,7 +9,8 @@ import { PageHeader, fmtDateTime, fmtNumber, exportCsv } from "@/lib/format";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { toast } from "@/lib/toast";
 import { SegTabs, UserCell, ActionBtn } from "@/components/finance/bits";
-import { Check, X, Download, Save, Plus, Trash2, Users, Hourglass, Coins, ShieldAlert, Trophy, AlertTriangle, Undo2, Link2, Wallet } from "lucide-react";
+import { DiamondIcon } from "@/components/ui/DiamondIcon";
+import { Check, X, Download, Save, Plus, Trash2, Users, Hourglass, ShieldAlert, Trophy, AlertTriangle, Undo2, Link2, Wallet } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 
 /**
@@ -228,7 +229,7 @@ export default function Referrals() {
         <StatCard icon={Hourglass} label="Pending" value={fmtNumber(Number(by.pending || 0))} gradient="gradient-orange" />
         <StatCard icon={AlertTriangle} label="Needs review" value={fmtNumber(Number(by.review || 0))} gradient="gradient-blue" />
         <StatCard icon={ShieldAlert} label="Rejected / expired" value={fmtNumber(Number(by.rejected || 0) + Number(by.expired || 0))} gradient="gradient-red" />
-        <StatCard icon={Coins} label="💎 Diamond paid (incl. milestones)" value={fmtNumber(data?.stats?.coinsPaid ?? 0)} gradient="gradient-green" />
+        <StatCard icon={DiamondIcon as any} label="Diamond paid (incl. milestones)" value={fmtNumber(data?.stats?.coinsPaid ?? 0)} gradient="gradient-green" />
       </div>
       <div className="mb-6 rounded-2xl border border-border bg-card p-4 text-sm flex items-center gap-3">
         <Wallet size={16} className="text-emerald-600" />

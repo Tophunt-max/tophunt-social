@@ -57,18 +57,21 @@ export function SectionEmpty({
   palette,
   text,
   icon = 'star-outline',
+  art,
   actionText,
   onAction,
 }: {
   palette: ExplorePalette;
   text: string;
   icon?: string;
+  /** Drawn instead of `icon` (e.g. the Diamond / XP artwork). */
+  art?: React.ReactNode;
   actionText?: string;
   onAction?: () => void;
 }) {
   return (
     <View style={[styles.box, styles.dashed, { borderColor: palette.border }]}>
-      <Ionicons name={icon} size={24} color={palette.sub} />
+      {art ?? <Ionicons name={icon} size={24} color={palette.sub} />}
       <Text style={[styles.boxText, { color: palette.sub }]}>{text}</Text>
       {actionText && onAction ? (
         <TouchableOpacity onPress={onAction} accessibilityRole="button">

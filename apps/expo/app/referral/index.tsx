@@ -17,6 +17,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { BackButton } from '@/src/components/ui/BackButton';
 import { Ionicons } from '@/src/lib/icons';
+import { CoinIcon } from '@/src/components/ui/CoinIcon';
+import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
 import { Colors } from '@/constants/theme';
 import { emitToast } from '@/src/lib/toastBridge';
 import { AdSlot } from '@/src/ads/AdSlot';
@@ -161,16 +163,17 @@ export default function ReferralScreen() {
             <Ionicons name="gift" size={36} color="#fff" />
             {program?.enabled ? (
               <>
-                <Text style={styles.heroTitle}>
-                  Dost ko invite karo, dono ko {unit}! 💎
-                </Text>
+                <View style={styles.heroTitleRow}>
+                  <Text style={styles.heroTitle}>Dost ko invite karo, dono ko {unit}!</Text>
+                  {unit === 'DP coin' ? <CoinIcon size={24} /> : <DiamondIcon size={24} />}
+                </View>
                 <Text style={styles.heroSub}>
                   Aapko {program.referrerReward} {unit} · Dost ko {program.refereeReward} {unit}
                 </Text>
               </>
             ) : (
               <>
-                <Text style={styles.heroTitle}>Referral program abhi band hai</Text>
+                <Text style={[styles.heroTitle, { marginTop: 10 }]}>Referral program abhi band hai</Text>
                 <Text style={styles.heroSub}>Jaldi wapas aayega. Pending referrals ka reward phir bhi milega.</Text>
               </>
             )}
@@ -378,7 +381,8 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 20, fontFamily: 'Urbanist-Bold' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   hero: { backgroundColor: BRAND, borderRadius: 20, padding: 20, alignItems: 'center', marginBottom: 16 },
-  heroTitle: { color: '#fff', fontSize: 20, fontFamily: 'Urbanist-Bold', marginTop: 10, textAlign: 'center' },
+  heroTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  heroTitle: { color: '#fff', fontSize: 20, fontFamily: 'Urbanist-Bold', textAlign: 'center' },
   heroSub: { color: '#FFE4E8', fontSize: 14, fontFamily: 'Urbanist-SemiBold', marginTop: 6, textAlign: 'center' },
   card: { borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 16 },
   cardTitle: { fontSize: 16, fontFamily: 'Urbanist-Bold' },

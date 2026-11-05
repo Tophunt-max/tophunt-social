@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { AccessibilityInfo, StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, cancelAnimation, useAnimatedStyle, useReducedMotion, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { motionTimings, type XpGainItem } from '@/src/lib/xpAnimation';
-import { XpStar } from './vectors';
+import { XpIcon } from '@/src/components/ui/XpIcon';
 
 /**
  * The floating "+XP" indicator for ONE server-confirmed gain (useXpGainFeed).
@@ -45,7 +45,7 @@ export function XpGainFloat({ item, onDone }: { item: XpGainItem | null; onDone:
   return (
     <View pointerEvents="none" style={styles.anchor}>
       <Animated.View style={[styles.pill, style]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Animated.View style={star}><XpStar size={14} color="#E08E00" /></Animated.View>
+        <Animated.View style={star}><XpIcon size={16} /></Animated.View>
         <Text style={styles.text}>+{item.amount} XP</Text>
       </Animated.View>
     </View>

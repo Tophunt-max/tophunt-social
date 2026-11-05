@@ -12,6 +12,8 @@ import { SectionEmpty, SectionError } from '@/src/components/explore/ExploreBits
 import { formatXp, timeLeft } from '@/src/lib/progression';
 import { GamificationIcon } from '@/src/components/gamification/GamificationIcon';
 import { LevelBadge } from '@/src/components/gamification/LevelBadge';
+import { XpIcon } from '@/src/components/ui/XpIcon';
+import { DiamondIcon } from '@/src/components/ui/DiamondIcon';
 import type { AssetKey } from '@/src/lib/gamificationAssets';
 import { RankDelta } from '@/src/components/gamification/MotionBits';
 import { useMyXpRank, useXpLeaderboard, type XpPeriod, type XpRankRow } from '@/src/services/gamification';
@@ -27,7 +29,7 @@ const TABS: { key: XpPeriod; label: string; asset: AssetKey }[] = [
   { key: 'lifetime', label: 'All time', asset: 'xp.lifetime' },
 ];
 
-/** 💎 Top Earners: Diamonds earned from rewards (server lib/rewardHistory.ts). */
+/** Top Earners: Diamonds earned from rewards (server lib/rewardHistory.ts). */
 const DIAMOND_TABS: { key: DiamondPeriod; label: string; asset: AssetKey }[] = [
   { key: 'day', label: 'Today', asset: 'activity.daily_quest' },
   { key: 'week', label: 'Week', asset: 'xp.weekly' },
@@ -35,12 +37,14 @@ const DIAMOND_TABS: { key: DiamondPeriod; label: string; asset: AssetKey }[] = [
 ];
 
 const BOARDS: { key: Board; label: string }[] = [
-  { key: 'xp', label: '⚡ XP' },
-  { key: 'diamonds', label: '💎 Top Earners' },
+  { key: 'xp', label: 'XP' },
+  { key: 'diamonds', label: 'Top Earners' },
 ];
 
+const BOARD_ICON: Record<Board, React.ReactNode> = { xp: <XpIcon size={16} />, diamonds: <DiamondIcon size={16} /> };
+
 /**
- * Leaderboards: XP (today / week / month / season / all time) and 💎 Top
+ * Leaderboards: XP (today / week / month / season / all time) and Top
  * Earners (Diamonds earned from rewards today / this week / this month, with
  * reversed rewards netted out on the server). Ranking: period score, then
  * lifetime XP, then account age — the same deterministic order the server
@@ -67,7 +71,8 @@ export default function XpLeaderboardScreen() {
   const rows = useMemo(() => (q.data?.pages ?? []).flatMap((pg) => pg.rows), [q.data]);
   const first = q.data?.pages?.[0];
   const meInList = !!user && rows.some((r) => r.uid === user.uid);
-  const unit = isXp ? 'XP' : '💎';
+  /** Spoken / shown unit. Diamonds show the Diamond icon instead of the word. */
+  const unit = isXp ? 'XP' : 'Diamonds';
   const fmt = (n: number) => (isXp ? formatXp(n) : n.toLocaleString());
   const boardKey = `${board}:${period}`;
   // Ranks from the previous fetch of THIS board, so a refresh can show who moved.
@@ -97,6 +102,7 @@ export default function XpLeaderboardScreen() {
             accessibilityRole="tab"
             accessibilityState={{ selected: b.key === board }}
           >
+            {BOARD_ICON[b.key]}
             <Text style={[styles.tabText, { color: b.key === board ? '#FFF' : p.sub }]}>{b.label}</Text>
           </TouchableOpacity>
         ))}
@@ -130,7 +136,7 @@ export default function XpLeaderboardScreen() {
           refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => { q.refetch(); me.refetch(); }} tintColor={BRAND} />}
           onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()}
           onEndReachedThreshold={0.4}
-          ListEmptyComponent={<SectionEmpty palette={p} icon={isXp ? 'flash-outline' : 'diamond-outline'} text={isXp ? 'No XP earned yet in this period. Be the first!' : 'Is period me abhi tak kisi ne Diamond reward nahi kamaya. Pehle bano!'} />}
+          ListEmptyComponent={<SectionEmpty palette={p} art={isXp ? <XpIcon size={30} style={{ opacity: 0.7 }} /> : <DiamondIcon size={30} style={{ opacity: 0.7 }} />} text={isXp ? 'No XP earned yet in this period. Be the first!' : 'Is period me abhi tak kisi ne Diamond reward nahi kamaya. Pehle bano!'} />}
           ListFooterComponent={q.isFetchingNextPage ? <ActivityIndicator color={BRAND} style={{ marginVertical: 16 }} /> : null}
           renderItem={({ item }) => (
             <Row r={item} p={p} unit={unit} fmt={fmt} prevRank={prevRanks?.get(item.uid)} isMe={item.uid === user?.uid} onOpen={() => router.push(`/profile?userId=${encodeURIComponent(item.uid)}` as any)} />
@@ -143,7 +149,8 @@ export default function XpLeaderboardScreen() {
             <Text style={styles.meRank}>#{me.data.rank}</Text>
             <Text style={styles.meLabel}>Your rank</Text>
             <View style={{ flex: 1 }} />
-            <Text style={styles.meScore}>{fmt(me.data.score)} {unit}</Text>
+            <Text style={styles.meScore}>{fmt(me.data.score)}{isXp ? ' XP' : ''}</Text>
+            {isXp ? null : <DiamondIcon size={16} />}
           </LinearGradient>
         </View>
       ) : null}
@@ -185,7 +192,7 @@ const Row = React.memo(function Row({ r, p, isMe, onOpen, prevRank, unit, fmt }:
       </View>
       <View style={{ alignItems: 'flex-end' }}>
         <Text style={[styles.score, { color: BRAND }]}>{fmt(r.score)}</Text>
-        <Text style={[styles.unit, { color: p.sub }]}>{unit}</Text>
+        {unit === 'XP' ? <Text style={[styles.unit, { color: p.sub }]}>{unit}</Text> : <DiamondIcon size={13} />}
       </View>
     </TouchableOpacity>
   );
