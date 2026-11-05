@@ -13,7 +13,7 @@
  * Every default is the safe one: everything off, test mode, consent required.
  */
 import { httpsError } from "./http";
-import { DEALS_DEFAULTS, SLIDER_DEFAULTS, parseDeals, parseSlider, publicDeals, publicSlider, validateDealsPatch, validateSliderPatch, type ShopDealsConfig, type ShopSliderConfig } from "./shopHomeConfig";
+import { DEALS_DEFAULTS, PHYSICAL_DEFAULTS, SLIDER_DEFAULTS, parseDeals, parsePhysical, parseSlider, publicDeals, publicPhysical, publicSlider, validateDealsPatch, validatePhysicalPatch, validateSliderPatch, type ShopDealsConfig, type ShopPhysicalConfig, type ShopSliderConfig } from "./shopHomeConfig";
 import { AD_PLATFORM_DEFAULTS, AD_SLOT_KEYS, parseAdPlatform, publicAdPlatform, validateAdPlatformPatch, webRewardedUnitFrom, type AdPlatformConfig } from "./adPlatform";
 
 export const AD_PROVIDERS = ["none", "admob"] as const;
@@ -70,7 +70,7 @@ export interface MonetizationConfig {
    * only thing DP coin buys that costs real money, so the ₹ value of shop orders
    * per calendar month (UTC) is capped here. 0 = no limit.
    */
-  shop: { enabled: boolean; monthlyBudgetInr: number; fraud: ShopFraudConfig };
+  shop: { enabled: boolean; monthlyBudgetInr: number; fraud: ShopFraudConfig; physical: ShopPhysicalConfig };
   /** Ways to earn Diamonds that live here (others: Coin Economy → Earn). */
   earning: {
     xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number };
@@ -179,6 +179,7 @@ export const MONETIZATION_DEFAULTS: MonetizationConfig = {
   shop: {
     enabled: false,
     monthlyBudgetInr: 0,
+    physical: PHYSICAL_DEFAULTS,
     fraud: {
       requireVerifiedPhone: true,
       minAccountAgeDays: 3,
@@ -324,6 +325,7 @@ export function parseMonetizationConfig(cfg: any): MonetizationConfig {
     shop: {
       enabled: bool(m.shop?.enabled, false),
       monthlyBudgetInr: int(m.shop?.monthlyBudgetInr, 0, BOUNDS.monthlyBudgetInr),
+      physical: parsePhysical(m.shop?.physical),
       fraud: (() => {
         const f = m.shop?.fraud || {};
         const fd = d.shop.fraud;
@@ -429,6 +431,7 @@ export function publicMonetizationConfig(cfg: any, nowMs: number = Date.now()) {
   const featured = publicFeatured(m, nowMs);
   const slider = publicSlider(m.store.enabled, m.store.slider, nowMs);
   const deals = publicDeals({ store: m.store.enabled, shop: m.shop.enabled }, m.store.deals, nowMs);
+  const phys = publicPhysical(m.shop.enabled, m.shop.physical);
   const ready = m.ads.enabled && providerReady(m);
   return {
     ads: {
@@ -466,7 +469,7 @@ export function publicMonetizationConfig(cfg: any, nowMs: number = Date.now()) {
       ...(deals ? { deals } : {}),
     },
     // Fraud thresholds stay server-side; the app only needs to know the shop is open.
-    shop: { enabled: m.shop.enabled, requireVerifiedPhone: m.shop.fraud.requireVerifiedPhone },
+    shop: { enabled: m.shop.enabled, requireVerifiedPhone: m.shop.fraud.requireVerifiedPhone, ...(phys ? { physical: phys } : {}) },
     earning: m.earning,
     economy: m.economy,
   };
@@ -647,9 +650,10 @@ export function validateMonetizationPatch(patch: any, nowMs: number = Date.now()
 
   const sh = patch.shop;
   if (obj(sh, "shop")) {
-    only(sh, ["enabled", "monthlyBudgetInr", "fraud"], "shop");
+    only(sh, ["enabled", "monthlyBudgetInr", "fraud", "physical"], "shop");
     isBool(sh.enabled, "shop.enabled");
     isInt(sh.monthlyBudgetInr, "shop.monthlyBudgetInr", BOUNDS.monthlyBudgetInr);
+    validatePhysicalPatch(sh.physical);
     if (obj(sh.fraud, "shop.fraud")) {
       const f = sh.fraud;
       only(f, ["requireVerifiedPhone", "minAccountAgeDays", "maxOrdersPer30Days", "maxCoinsPer30Days", "maxAccountsPerAddress", "reviewFirstOrder", "reviewAboveCoins"], "shop.fraud");

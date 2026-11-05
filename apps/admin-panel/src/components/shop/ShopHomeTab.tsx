@@ -91,8 +91,8 @@ export function ShopHomeTab() {
 
 // ------------------------------------------------------------------ shared editors
 
-/** Upload to /admin/media/shop-banner with progress, preview and remove. */
-export function ImageField({ label, hint, value, onChange, aspect }: { label: string; hint: string; value: string; onChange: (v: string) => void; aspect: string }) {
+/** Upload to /admin/media/shop-banner (or another shop image endpoint via uploadFn) with progress, preview and remove. */
+export function ImageField({ label, hint, value, onChange, aspect, uploadFn }: { label: string; hint: string; value: string; onChange: (v: string) => void; aspect: string; uploadFn?: (file: File, onProgress?: (pct: number) => void) => Promise<{ publicUrl: string }> }) {
   const ref = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -101,7 +101,7 @@ export function ImageField({ label, hint, value, onChange, aspect }: { label: st
     setError(null);
     setProgress(0);
     try {
-      const { publicUrl } = await api.uploadShopBanner(file, setProgress);
+      const { publicUrl } = await (uploadFn ?? api.uploadShopBanner)(file, setProgress);
       onChange(publicUrl);
       toast.success("Image uploaded. Save to publish it.");
     } catch (e) {

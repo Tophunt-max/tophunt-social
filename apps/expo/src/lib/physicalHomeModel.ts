@@ -80,9 +80,11 @@ export function physicalCategoryIcon(category: string): PhysCatIcon {
 
 export interface PhysicalCategory {
   key: string;
-  /** Prettified category name ("t-shirts" → "T-Shirts"). */
+  /** Prettified category name ("t-shirts" → "T-Shirts"), or the admin's label. */
   label: string;
   icon: PhysCatIcon;
+  /** Admin-uploaded tile image; null → the outline icon is drawn. */
+  imageUrl: string | null;
   /** Live products in it. */
   count: number;
 }
@@ -96,7 +98,7 @@ export function prettyCategory(category: string): string {
     .join(' ');
 }
 
-/** Categories row: the categories of live products, store order, at most `max`. */
+/** Categories row derived from live products (fallback when the admin manages none). */
 export function physicalCategories<T extends PhysicalProduct>(products: T[], max = PHYS_CATEGORY_MAX): PhysicalCategory[] {
   const seen = new Map<string, PhysicalCategory>();
   for (const p of products) {
@@ -104,7 +106,59 @@ export function physicalCategories<T extends PhysicalProduct>(products: T[], max
     if (!key) continue;
     const hit = seen.get(key);
     if (hit) hit.count += 1;
-    else seen.set(key, { key, label: prettyCategory(key), icon: physicalCategoryIcon(key), count: 1 });
+    else seen.set(key, { key, label: prettyCategory(key), icon: physicalCategoryIcon(key), imageUrl: null, count: 1 });
   }
   return [...seen.values()].slice(0, Math.max(0, max));
+}
+
+/** Admin-managed category tile (appConfig.monetization.shop.physical.categories). */
+export interface AdminCategory {
+  key: string;
+  label: string;
+  imageUrl: string | null;
+  sort: number;
+}
+
+/**
+ * The Categories row: the admin's tiles (their label, image and order) when
+ * they manage some, each with its live product count — a tile with nothing on
+ * sale is left out. Without admin tiles, the derived icon categories above.
+ */
+export function resolveCategories<T extends PhysicalProduct>(admin: AdminCategory[] | null | undefined, products: T[], max = PHYS_CATEGORY_MAX): PhysicalCategory[] {
+  if (!admin?.length) return physicalCategories(products, max);
+  const counts = new Map<string, number>();
+  for (const p of products) {
+    const key = String(p?.category ?? '').trim();
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...admin]
+    .sort((a, b) => a.sort - b.sort)
+    .map((c) => ({ key: c.key, label: c.label, icon: physicalCategoryIcon(c.key), imageUrl: c.imageUrl ?? null, count: counts.get(c.key) ?? 0 }))
+    .filter((c) => c.count > 0)
+    .slice(0, Math.max(0, max));
+}
+
+const inStock = (p: PhysicalLike) => p.variants.some((v) => v.inStock);
+
+/** Products for a list of ids, in the list's order, in stock only (Exclusive Collection, Trending Products). */
+function resolveIds<T extends PhysicalLike>(products: T[], ids: string[] | null | undefined, max: number): T[] {
+  if (!ids?.length) return [];
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const out: T[] = [];
+  for (const id of ids) {
+    const p = byId.get(id);
+    if (p && inStock(p) && !out.includes(p)) out.push(p);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/** Exclusive Collection shelf: the admin's picked products, their order, at most `max`. */
+export function exclusiveProducts<T extends PhysicalLike>(products: T[], ids: string[] | null | undefined, max = PHYS_FEATURED_MAX): T[] {
+  return resolveIds(products, ids, max);
+}
+
+/** Trending Products shelf: the server's most-ordered ids, that order, at most `max`. */
+export function trendingProducts<T extends PhysicalLike>(products: T[], ids: string[] | null | undefined, max = PHYS_FEATURED_MAX): T[] {
+  return resolveIds(products, ids, max);
 }

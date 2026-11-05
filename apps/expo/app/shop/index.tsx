@@ -86,7 +86,7 @@ import {
   type ShopTab,
 } from '@/src/lib/shopModel';
 import { digitalShelves, isDefaultDigitalFilter, specialCards, type ShelfType, type SpecialCard } from '@/src/lib/digitalHomeModel';
-import { featuredProducts, physicalCategories } from '@/src/lib/physicalHomeModel';
+import { exclusiveProducts, featuredProducts, resolveCategories, trendingProducts } from '@/src/lib/physicalHomeModel';
 import { useInventory } from '@/src/services/gamification';
 import { useGiftCatalog, useGiftHistory, useMonetizationConfig, useShopCollections, useStore, useWishlist, type StoreItemView } from '@/src/services/monetization';
 import { useCart, useSavedProducts, useShopProducts } from '@/src/services/shop';
@@ -210,7 +210,7 @@ export default function ShopScreen() {
   const digital = useMemo(() => store.data ?? [], [store.data]);
   const feature = useMemo(() => featuredView(cfg.store.featured, digital, now), [cfg.store.featured, digital, now]);
   // Admin slider first (product targets are kept while products load), else the featured drop / fallback.
-  const productsOrNull = useMemo(() => (cfg.shop.enabled ? products.data ?? null : []), [cfg.shop.enabled, products.data]);
+  const productsOrNull = useMemo(() => (cfg.shop.enabled ? products.data?.products ?? null : []), [cfg.shop.enabled, products.data]);
   const hero = useMemo(
     () => heroSlides(digital, feature, { slider: cfg.store.slider, products: productsOrNull, shopEnabled: cfg.shop.enabled, now }),
     [digital, feature, cfg.store.slider, productsOrNull, cfg.shop.enabled, now],
@@ -243,10 +243,12 @@ export default function ShopScreen() {
   const shelves = useMemo(() => digitalShelves(digital), [digital]);
   const specials = useMemo(() => specialCards(digital, { enabled: cfg.gifts.enabled, list: gifts.data ?? null }), [digital, cfg.gifts.enabled, gifts.data]);
 
-  const allProducts = useMemo(() => products.data ?? [], [products.data]);
-  // Phone Physical tab home (design mock): the featured shelf, the categories row and the saved hearts.
+  const allProducts = useMemo(() => products.data?.products ?? [], [products.data]);
+  // Phone Physical tab home (design mock): the featured / trending / exclusive shelves, the categories row and the saved hearts.
   const physFeatured = useMemo(() => featuredProducts(allProducts), [allProducts]);
-  const physCats = useMemo(() => physicalCategories(allProducts), [allProducts]);
+  const physTrending = useMemo(() => trendingProducts(allProducts, products.data?.trending), [allProducts, products.data?.trending]);
+  const physExclusive = useMemo(() => exclusiveProducts(allProducts, cfg.shop.physical?.exclusive), [allProducts, cfg.shop.physical?.exclusive]);
+  const physCats = useMemo(() => resolveCategories(cfg.shop.physical?.categories, allProducts), [cfg.shop.physical?.categories, allProducts]);
   const savedIds = useSavedProducts((s) => s.ids);
   const toggleSaved = useSavedProducts((s) => s.toggle);
   const productCats = useMemo(() => [...new Set(allProducts.map((x) => x.category))], [allProducts]);
@@ -474,11 +476,15 @@ export default function ShopScreen() {
           inner={dColW}
           now={now}
           featured={physFeatured}
+          trending={physTrending}
+          exclusive={physExclusive}
           cats={physCats}
           savedIds={savedIds}
           onToggleSaved={toggleSaved}
           onOpenProduct={openProduct}
           onAllFeatured={onBrowsePhysical}
+          onAllTrending={onBrowsePhysical}
+          onAllExclusive={onBrowsePhysical}
           onAllCategories={onBrowsePhysical}
           onCategory={onPhysicalCategory}
           onExplore={onBrowsePhysical}

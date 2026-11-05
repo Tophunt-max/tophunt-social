@@ -28,7 +28,7 @@ export default function CartScreen() {
   const products = useShopProducts(!!user && cfg.shop.enabled);
   const { data: me, refetch: refetchMe } = useProfile(user?.uid || '');
   const { lines: raw, setQty, remove, clear } = useCart();
-  const cart = useMemo(() => repriceCart(raw, products.data), [raw, products.data]);
+  const cart = useMemo(() => repriceCart(raw, products.data?.products), [raw, products.data]);
   const place = usePlaceOrder();
   const { confirm, dialog } = useConfirm();
   const [step, setStep] = useState<'cart' | 'address'>('cart');

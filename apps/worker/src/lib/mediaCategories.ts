@@ -140,6 +140,8 @@ export const EXPLORE_BANNER_PREFIX = "explore-banners";
 export const SHOP_BANNER_PREFIX = "shop-banners";
 /** Artwork for digital shop items (frames, themes, badges, titles, stickers, ...), uploaded by admins. */
 export const SHOP_ITEM_ART_PREFIX = "shop-items";
+/** Category tile images of the Physical tab (appConfig.monetization.shop.physical.categories), uploaded by admins. */
+export const SHOP_CATEGORY_PREFIX = "shop-categories";
 /** Rewards Center artwork overrides (appConfig.earningAssets, lib/earningAssets.ts), uploaded by admins. */
 export const EARNING_ASSET_PREFIX = "earning-assets";
 export const BLOG_IMPORT_PREFIX = "blog/imported";
@@ -359,6 +361,18 @@ export const MEDIA_CATEGORIES: readonly MediaCategory[] = [
     legacyVideo: false,
     proxyOnly: false,
     description: "Shop home hero slider and deal card images, set from the admin panel.",
+  },
+  {
+    prefix: SHOP_CATEGORY_PREFIX,
+    writer: "admin",
+    kinds: ["image"],
+    // New key per upload; appConfig.monetization.shop.physical.categories names the exact object.
+    cache: "immutable",
+    retentionDays: null,
+    dateSharded: true,
+    legacyVideo: false,
+    proxyOnly: false,
+    description: "Category tile images of the Physical shop tab, set from the admin panel.",
   },
   {
     prefix: SHOP_ITEM_ART_PREFIX,

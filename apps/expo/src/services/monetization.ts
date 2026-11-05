@@ -51,7 +51,12 @@ export interface MonetizationPublicConfig {
    * publicFeatured / lib/shopHomeConfig.ts); missing = the app's automatic blocks.
    */
   store: { enabled: boolean; featured?: PublicFeaturedDrop; slider?: PublicSlider; deals?: PublicDeals };
-  shop: { enabled: boolean };
+  shop: {
+    enabled: boolean;
+    requireVerifiedPhone?: boolean;
+    /** Admin-managed Physical tab blocks (worker lib/shopHomeConfig.ts): the Categories row and the Exclusive Collection. Missing = the app's derived blocks. */
+    physical?: { categories: { key: string; label: string; imageUrl: string | null; sort: number }[]; exclusive: string[] };
+  };
   earning: {
     xpConversion: { enabled: boolean; xpPerDiamond: number; maxDiamondsPerDay: number };
     /** Diamonds for taking part in / finishing second in a settled battle (worker contestSettlement.ts). */
