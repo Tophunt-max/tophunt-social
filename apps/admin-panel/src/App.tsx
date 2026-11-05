@@ -76,6 +76,7 @@ const Referrals = lazyWithReload(() => import("@/pages/Referrals"));
 const EarningDashboard = lazyWithReload(() => import("@/pages/EarningDashboard"));
 const EarningEvents = lazyWithReload(() => import("@/pages/EarningEvents"));
 const EarningAssets = lazyWithReload(() => import("@/pages/EarningAssets"));
+const ShopAssets = lazyWithReload(() => import("@/pages/ShopAssets"));
 const EarningAudit = lazyWithReload(() => import("@/pages/EarningAudit"));
 const ExplorePage = lazyWithReload(() => import("@/pages/Explore"));
 const AppControl = lazyWithReload(() => import("@/pages/AppControl"));
@@ -148,6 +149,7 @@ function ProtectedApp() {
           <Route path="/earning-dashboard" component={EarningDashboard} />
           <Route path="/earning-events" component={EarningEvents} />
           <Route path="/earning-assets" component={EarningAssets} />
+          <Route path="/shop-assets" component={ShopAssets} />
           <Route path="/earning-audit" component={EarningAudit} />
           <Route path="/explore" component={ExplorePage} />
           <Route path="/app-control" component={AppControl} />

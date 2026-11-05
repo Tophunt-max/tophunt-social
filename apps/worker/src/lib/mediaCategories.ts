@@ -144,6 +144,7 @@ export const SHOP_ITEM_ART_PREFIX = "shop-items";
 export const SHOP_CATEGORY_PREFIX = "shop-categories";
 /** Rewards Center artwork overrides (appConfig.earningAssets, lib/earningAssets.ts), uploaded by admins. */
 export const EARNING_ASSET_PREFIX = "earning-assets";
+export const SHOP_ASSET_PREFIX = "shop-assets";
 export const BLOG_IMPORT_PREFIX = "blog/imported";
 /** Encoded video (HLS + poster), one folder per video. See lib/qencode.ts. */
 export const VIDEO_PREFIX = "videos";
@@ -398,6 +399,18 @@ export const MEDIA_CATEGORIES: readonly MediaCategory[] = [
     legacyVideo: false,
     proxyOnly: false,
     description: "Rewards Center artwork (WebP / PNG) that replaces a built-in SVG, set from the admin panel.",
+  },
+  {
+    prefix: SHOP_ASSET_PREFIX,
+    writer: "admin",
+    kinds: ["image"],
+    // New key per upload; appConfig.shopAssets names the exact object.
+    cache: "immutable",
+    retentionDays: null,
+    dateSharded: true,
+    legacyVideo: false,
+    proxyOnly: false,
+    description: "Shop artwork (WebP / PNG) that replaces a bundled Shop icon, set from the admin panel.",
   },
 
   // --- Server-written -----------------------------------------------------

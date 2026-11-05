@@ -95,6 +95,7 @@ const nav = [
   { href: "/earning-audit", label: "Audit & Alerts", icon: ClipboardList, section: "earning" },
   // Closed loop: Earning (Diamond) → contests → DP coin → Shopping.
   { href: "/shopping", label: "Shopping", icon: ShoppingBag, section: "finance", badgeKey: "pendingShopOrders" },
+  { href: "/shop-assets", label: "Shop Assets", icon: ImagePlus, section: "finance" },
   // Coin hub: coin values, earning, ledger, budgets and reports in one place.
   { href: "/coin-economy", label: "Coin Economy", icon: Scale, section: "finance" },
   { href: "/monetization", label: "Monetization", icon: CircleDollarSign, section: "finance" },

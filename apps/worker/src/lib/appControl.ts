@@ -29,6 +29,7 @@ import { publicExploreConfig, validateExplorePatch } from "./exploreConfig";
 import { publicMonetizationConfig, validateMonetizationPatch } from "./monetizationConfig";
 import { httpsError } from "./http";
 import { sanitizeEarningAssets } from "./earningAssets";
+import { sanitizeShopAssets } from "./shopAssets";
 import { legacyAuthSettings, methodAllowed, resolveAuthMethods } from "./authMethods";
 import { onboardingEnabled, ONBOARDING_MAX_SLIDES } from "./onboardingConfig";
 
@@ -244,6 +245,8 @@ export function publicAppConfig(cfg: any, nowMs: number = Date.now()) {
     headerLogoUrl: typeof cfg.headerLogoUrl === "string" ? cfg.headerLogoUrl : "",
     // Rewards Center artwork uploads that replace built-in SVGs (lib/earningAssets.ts).
     earningAssets: sanitizeEarningAssets(cfg.earningAssets),
+    // Shop artwork uploads that replace bundled Shop icons (lib/shopAssets.ts).
+    shopAssets: sanitizeShopAssets(cfg.shopAssets),
     onboardingEnabled: onboardingEnabled(cfg),
     onboarding: Array.isArray(cfg.onboarding)
       ? cfg.onboarding.slice(0, ONBOARDING_MAX_SLIDES).map((s: any) => ({

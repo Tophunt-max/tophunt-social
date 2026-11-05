@@ -9,6 +9,8 @@ import { useAuth } from "@/src/hooks/useAuth";
 export interface AppConfig {
   /** Rewards Center artwork uploads by key (server lib/earningAssets.ts); a missing key keeps the built-in SVG. */
   earningAssets?: Record<string, string>;
+  /** Shop artwork uploads by key (server lib/shopAssets.ts); a missing key keeps the bundled WebP. */
+  shopAssets?: Record<string, string>;
   appName: string;
   appVersion: string;
   maintenanceMode: boolean;
@@ -173,6 +175,20 @@ export function useEarningAssets(): Record<string, string> | undefined {
     queryFn: fetchAppConfig,
     enabled: false,
     select: (c: AppConfig) => c?.earningAssets,
+  });
+  return data;
+}
+
+/**
+ * Admin-uploaded Shop artwork (Shop → Shop Assets). Same passive observer of
+ * the shared app-config entry as useEarningAssets: it never fetches or polls.
+ */
+export function useShopAssets(): Record<string, string> | undefined {
+  const { data } = useQuery({
+    queryKey: APP_CONFIG_QUERY_KEY,
+    queryFn: fetchAppConfig,
+    enabled: false,
+    select: (c: AppConfig) => c?.shopAssets,
   });
   return data;
 }
